@@ -1,0 +1,26 @@
+# Secrets — never commit. Contains Twilio, Groq, Gemini and ngrok credentials.
+.env
+.env.*
+!.env.example
+
+# Local environments and caches
+.venv/
+.tmp/
+.cache/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+dist/
+
+# Runtime data living on the D: volumes
+docker/postgres-data/
+docker/redis-data/
+docker/backend-logs/
+docker/media/
+
+# Vendored binaries (ffmpeg is ~200MB, well over GitHub's file limit)
+tools/
+
+# Recorded demo output; regenerate with scripts/record_demo.py
+demo/*.webm

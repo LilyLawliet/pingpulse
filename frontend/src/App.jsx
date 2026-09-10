@@ -1,0 +1,283 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { LogOut, Radio } from 'lucide-react'
+import useMonitorSocket from './useMonitorSocket.js'
+import { api, auth } from './api.js'
+import SignIn from './components/SignIn.jsx'
+import ConversationList from './components/ConversationList.jsx'
+import ConversationThread from './components/ConversationThread.jsx'
+import PipelineBoard from './components/PipelineBoard.jsx'
+import MetricStrip from './components/MetricStrip.jsx'
+import OrgSelector from './components/OrgSelector.jsx'
+import PulseLine from './components/PulseLine.jsx'
+
+export default function App() {
+  const [signedIn, setSignedIn] = useState(Boolean(auth.token))
+
+  if (!signedIn) return <SignIn onSignedIn={() => setSignedIn(true)} />
+  return <Dashboard onSignedOut={() => setSignedIn(false)} />
+}
+
+function Dashboard({ onSignedOut }) {
+  const { connected, events } = useMonitorSocket()
+
+  const [organizations, setOrganizations] = useState([])
+  const [selectedOrg, setSelectedOrg] = useState(null)
+  const [contacts, setContacts] = useState([])
+  const [selectedContact, setSelectedContact] = useState(null)
+  const [threads, setThreads] = useState({})
+  const [composing, setComposing] = useState(new Set())
+  const [stats, setStats] = useState(null)
+
+  const seenEvents = useRef(0)
+
+  const loadOrganizations = useCallback(async () => {
+    try {
+      const memberships = await api.listOrganizations()
+      setOrganizations(memberships.map((m) => m.organization))
+      const active = memberships.find((m) => m.is_active)
+      setSelectedOrg(active ? active.organization.id : memberships[0]?.organization.id ?? null)
+    } catch (err) {
+      if (err.status === 401) onSignedOut()
+      setOrganizations([])
+    }
+  }, [onSignedOut])
+
+  const loadContacts = useCallback(async () => {
+    try {
+      // Scoped server-side to the active organization — no id is sent.
+      const rows = await api.listContacts()
+      setContacts(rows)
+      // Keep the open conversation, but only if it still exists — replayed
+      // history can point at a contact that has since been deleted, which
+      // would otherwise leave the thread pane stuck on "coming in".
+      setSelectedContact((current) =>
+        rows.some((row) => row.id === current) ? current : rows[0]?.id ?? null
+      )
+    } catch (err) {
+      if (err.status === 401) onSignedOut()
+      setContacts([])
+    }
+  }, [selectedOrg, onSignedOut])
+
+  const loadStats = useCallback(async () => {
+    try {
+      setStats(await api.stats())
+    } catch {
+      setStats(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadOrganizations()
+    loadStats()
+  }, [loadOrganizations, loadStats])
+
+  useEffect(() => {
+    loadContacts()
+  }, [loadContacts])
+
+  /**
+   * Merge rows into a thread by message id, keeping chronological order.
+   * Live events and the REST fetch both carry the row's real primary key, so
+   * the same message arriving twice collapses into one bubble.
+   */
+  const mergeMessages = useCallback((contactId, incoming) => {
+    setThreads((prev) => {
+      const byId = new Map()
+      for (const message of [...(prev[contactId] || []), ...incoming]) {
+        byId.set(message.id, { ...(byId.get(message.id) || {}), ...message })
+      }
+      const merged = [...byId.values()].sort(
+        (a, b) => new Date(a.created_at) - new Date(b.created_at)
+      )
+      return { ...prev, [contactId]: merged }
+    })
+  }, [])
+
+  // Pull a thread the first time its conversation is opened.
+  useEffect(() => {
+    if (!selectedContact || threads[selectedContact]) return
+    let cancelled = false
+    api
+      .contactMessages(selectedContact)
+      .then((messages) => {
+        if (!cancelled) mergeMessages(selectedContact, messages)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [selectedContact, threads, mergeMessages])
+
+  const appendMessage = useCallback(
+    (contactId, message) => mergeMessages(contactId, [message]),
+    [mergeMessages]
+  )
+
+  // Live traffic drives the whole screen: new bubbles, typing state, stages.
+  useEffect(() => {
+    const fresh = events.slice(seenEvents.current)
+    if (fresh.length === 0) return
+    seenEvents.current = events.length
+
+    for (const event of fresh) {
+      const data = event.data || {}
+      const contactId = data.contact_id
+
+      if (event.type === 'inbound_message' && contactId) {
+        appendMessage(contactId, {
+          id: data.message_id || `in-${event.id}`,
+          sender: 'user',
+          content: data.content,
+          media_urls: data.media_urls || [],
+          created_at: event.timestamp,
+        })
+        setSelectedContact(contactId)
+        if (data.new_contact) loadContacts()
+      }
+
+      if (event.type === 'ai_thinking' && contactId) {
+        setComposing((prev) => new Set(prev).add(contactId))
+      }
+
+      if (event.type === 'outbound_message' && contactId) {
+        setComposing((prev) => {
+          const next = new Set(prev)
+          next.delete(contactId)
+          return next
+        })
+        appendMessage(contactId, {
+          id: data.message_id || `out-${event.id}`,
+          sender: 'agent',
+          content: data.content,
+          twilio_sid: data.twilio_sid,
+          media_urls: data.media_urls || [],
+          created_at: event.timestamp,
+        })
+        loadStats()
+      }
+
+      if (event.type === 'stage_change' && contactId) {
+        setContacts((prev) =>
+          prev.map((c) => (c.id === contactId ? { ...c, pipeline_stage: data.to } : c))
+        )
+      }
+
+      // Emitted after the write is committed — the only point at which a
+      // re-read is guaranteed to include this conversation.
+      if (event.type === 'sync') {
+        loadContacts()
+        loadStats()
+      }
+    }
+  }, [events, appendMessage, loadContacts, loadStats])
+
+  const previews = useMemo(() => {
+    const map = {}
+    for (const [contactId, messages] of Object.entries(threads)) {
+      const last = messages[messages.length - 1]
+      if (last) map[contactId] = last.content
+    }
+    return map
+  }, [threads])
+
+  const activeContact = contacts.find((c) => c.id === selectedContact) || null
+
+  return (
+    <div className="relative flex h-full flex-col gap-3 p-3">
+      <header className="flex flex-wrap items-center gap-4 rounded-xl border border-edge bg-panel px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-lg bg-accent/12 ring-1 ring-inset ring-accent/25">
+            <Radio size={17} className="text-accent" />
+          </span>
+          <div>
+            <h1 className="text-[15px] font-bold leading-none tracking-tight text-ink">PingPulse</h1>
+            <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-faint">
+              WhatsApp sales agent
+            </p>
+          </div>
+        </div>
+
+        <div className="hidden items-center gap-3 border-l border-edge pl-4 md:flex">
+          <PulseLine beat={events.length} />
+        </div>
+
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          <OrgSelector
+            organizations={organizations}
+            selectedId={selectedOrg}
+            onSelect={async (id) => {
+              if (!id || id === selectedOrg) return
+              await api.switchOrganization(id)
+              setSelectedOrg(id)
+              setSelectedContact(null)
+              setThreads({})
+              await loadOrganizations()
+              await loadContacts()
+              await loadStats()
+            }}
+            onSaved={async (saved) => {
+              await loadOrganizations()
+              if (saved?.id) {
+                setSelectedContact(null)
+                setThreads({})
+                await loadContacts()
+              }
+            }}
+          />
+
+          <span
+            className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold ${
+              connected
+                ? 'border-accent/25 bg-accent/10 text-accent'
+                : 'border-warn/25 bg-warn/10 text-warn'
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                connected ? 'animate-breathe bg-accent' : 'bg-warn'
+              }`}
+            />
+            {connected ? 'Live' : 'Reconnecting'}
+          </span>
+
+          <button
+            onClick={() => {
+              auth.clear()
+              onSignedOut()
+            }}
+            title="Sign out"
+            className="rounded-lg border border-edge p-1.5 text-faint transition-colors hover:border-edge-hi hover:text-ink"
+          >
+            <LogOut size={13} />
+          </button>
+        </div>
+      </header>
+
+      <MetricStrip stats={stats} contacts={contacts} />
+
+      <main className="flex min-h-0 flex-1 gap-3">
+        <ConversationList
+          contacts={contacts}
+          selectedId={selectedContact}
+          onSelect={setSelectedContact}
+          previews={previews}
+          composing={composing}
+        />
+        <ConversationThread
+          contact={activeContact}
+          messages={threads[selectedContact] || []}
+          composing={composing.has(selectedContact)}
+          // A conversation can be selected by a live event a moment before the
+          // contact list catches up — that is arriving, not idle.
+          arriving={Boolean(selectedContact) && !activeContact}
+        />
+        <PipelineBoard
+          contacts={contacts}
+          selectedId={selectedContact}
+          onSelect={setSelectedContact}
+        />
+      </main>
+    </div>
+  )
+}

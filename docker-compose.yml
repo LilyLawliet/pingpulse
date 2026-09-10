@@ -1,0 +1,159 @@
+name: pingpulse
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: pingpulse-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pingpulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pingpulse}
+      POSTGRES_DB: ${POSTGRES_DB:-pingpulse}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      # Bind mount pinned to Drive D: - no database bytes land on C:.
+      - D:/pingpulse/docker/postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pingpulse} -d ${POSTGRES_DB:-pingpulse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - pingpulse-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: pingpulse-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - D:/pingpulse/docker/redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - pingpulse-net
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: pingpulse-backend:latest
+    container_name: pingpulse-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Inside the compose network the database is reachable by service name.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-pingpulse}:${POSTGRES_PASSWORD:-pingpulse}@db:5432/${POSTGRES_DB:-pingpulse}
+      AUTO_MIGRATE_ON_STARTUP: "true"
+      MEDIA_DIR: /app/media
+      REDIS_URL: redis://redis:6379/0
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - D:/pingpulse/docker/backend-logs:/app/logs
+      # Attachments live on D: too — inbound customer photos and anything we
+      # host for WhatsApp to fetch.
+      - D:/pingpulse/docker/media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      - pingpulse-net
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: pingpulse-backend:latest
+    container_name: pingpulse-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-pingpulse}:${POSTGRES_PASSWORD:-pingpulse}@db:5432/${POSTGRES_DB:-pingpulse}
+      REDIS_URL: redis://redis:6379/0
+      MEDIA_DIR: /app/media
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      # The worker must never run migrations; the API owns the schema.
+      AUTO_MIGRATE_ON_STARTUP: "false"
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--pool=solo"]
+    volumes:
+      - D:/pingpulse/docker/media:/app/media
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+    networks:
+      - pingpulse-net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: pingpulse-frontend:latest
+    container_name: pingpulse-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/nginx-health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      - pingpulse-net
+
+  # Public HTTPS front door for the Twilio webhook. Uses an ngrok reserved
+  # domain so the URL survives restarts and is pasted into the Twilio Console
+  # exactly once. Enabled by COMPOSE_PROFILES=tunnel in .env; clear that
+  # variable to run the stack without exposing it.
+  tunnel:
+    image: ngrok/ngrok:latest
+    container_name: pingpulse-tunnel
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: ["http", "backend:8000", "--url", "${NGROK_DOMAIN}", "--log", "stdout"]
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    ports:
+      # ngrok's local inspector: http://localhost:4040 shows every request
+      # Twilio makes, with full payloads and replay.
+      - "4040:4040"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - pingpulse-net
+
+networks:
+  pingpulse-net:
+    name: pingpulse-net
+    driver: bridge
