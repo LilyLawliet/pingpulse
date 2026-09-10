@@ -281,6 +281,9 @@ async def add_channel(
         select(ChannelConfig).where(
             ChannelConfig.channel == payload.channel,
             ChannelConfig.phone_number == number,
+            # A number this organization already holds is not a clash: it is
+            # the row about to be replaced below.
+            ChannelConfig.organization_id != tenant.id,
         )
     )
     if clash.scalar_one_or_none() is not None:
@@ -288,6 +291,34 @@ async def add_channel(
             status_code=status.HTTP_409_CONFLICT,
             detail="That number is already connected to an organization",
         )
+
+    # One WhatsApp method at a time. Twilio and a paired handset are two ways
+    # to reach the same customers, and having both connected means every
+    # outbound message has to guess which number the conversation belongs to.
+    # Connecting one therefore disconnects the other — unpairing the handset
+    # and clearing anything still queued for it, so nothing is left half-alive.
+    existing = (
+        await db.execute(
+            select(ChannelConfig).where(
+                ChannelConfig.organization_id == tenant.id,
+                ChannelConfig.channel == payload.channel,
+            )
+        )
+    ).scalars().all()
+
+    for previous in existing:
+        if whatsapp.provider_of(previous) == whatsapp.QR_SESSION:
+            await _unpair(previous.id)
+        await outbox.discard(previous.id)
+        logger.info(
+            "replacing %s channel %s with a new %s connection",
+            whatsapp.provider_of(previous),
+            previous.phone_number,
+            (payload.whatsapp_provider or "TWILIO").upper(),
+        )
+        await db.delete(previous)
+
+    await db.flush()
 
     config = ChannelConfig(
         organization_id=tenant.id,

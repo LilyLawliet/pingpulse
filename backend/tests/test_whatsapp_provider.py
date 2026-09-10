@@ -342,3 +342,70 @@ async def test_a_failed_send_is_not_recorded_as_delivered(client, db_session, mo
             "a failed send must leave twilio_sid null so the dashboard can show "
             "it as undelivered rather than as sent"
         )
+
+
+# ------------------------------------------------- one method at a time
+@pytest.mark.asyncio
+async def test_connecting_a_number_replaces_the_previous_one(org_a, monkeypatch):
+    """A business runs on one WhatsApp method, never two at once.
+
+    With both a Twilio number and a paired handset connected, every outbound
+    message has to guess which number the conversation belongs to. Connecting
+    one therefore disconnects the other.
+    """
+    from app.api import organizations
+
+    unpaired = []
+
+    async def record_unpair(channel_id):
+        unpaired.append(str(channel_id))
+
+    monkeypatch.setattr(organizations, "_unpair", record_unpair)
+
+    first = await org_a.post(
+        "/api/v1/organizations/active/channels",
+        json={"phone_number": "+14155550001", "whatsapp_provider": "QR_SESSION"},
+    )
+    assert first.status_code == 201
+    first_id = first.json()["id"]
+
+    second = await org_a.post(
+        "/api/v1/organizations/active/channels",
+        json={"phone_number": "+14155550002", "whatsapp_provider": "TWILIO"},
+    )
+    assert second.status_code == 201
+
+    listed = (await org_a.get("/api/v1/organizations/active/channels")).json()
+    assert len(listed) == 1, "two WhatsApp methods must never be connected at once"
+    assert listed[0]["phone_number"] == "+14155550002"
+    assert listed[0]["whatsapp_provider"] == "TWILIO"
+    assert unpaired == [first_id], "the replaced handset must be unpaired, not abandoned"
+
+
+@pytest.mark.asyncio
+async def test_reconnecting_the_same_number_is_not_a_clash(org_a, monkeypatch):
+    """Re-pairing your own number must not collide with the row it replaces."""
+    from app.api import organizations
+
+    async def noop(_channel_id):
+        return None
+
+    monkeypatch.setattr(organizations, "_unpair", noop)
+
+    payload = {"phone_number": "+14155550003", "whatsapp_provider": "QR_SESSION"}
+    assert (await org_a.post("/api/v1/organizations/active/channels", json=payload)).status_code == 201
+    again = await org_a.post("/api/v1/organizations/active/channels", json=payload)
+
+    assert again.status_code == 201, again.text
+    listed = (await org_a.get("/api/v1/organizations/active/channels")).json()
+    assert len(listed) == 1
+
+
+@pytest.mark.asyncio
+async def test_another_tenants_number_is_still_a_clash(org_a, org_b):
+    """Inbound routing needs a number to identify exactly one organization."""
+    payload = {"phone_number": "+14155550004", "whatsapp_provider": "TWILIO"}
+    assert (await org_a.post("/api/v1/organizations/active/channels", json=payload)).status_code == 201
+
+    taken = await org_b.post("/api/v1/organizations/active/channels", json=payload)
+    assert taken.status_code == 409

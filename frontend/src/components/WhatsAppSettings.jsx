@@ -32,6 +32,16 @@ export default function WhatsAppSettings({ onChanged }) {
   const [copied, setCopied] = useState(false)
   const [pairing, setPairing] = useState(null) // { channelId, status, qr }
 
+  // A business runs on one WhatsApp method, so there is at most one channel.
+  const connected = channels?.[0] || null
+
+  // Offer the method they are not already on, so the panel is about switching
+  // rather than re-picking what is already true.
+  useEffect(() => {
+    if (!connected) return
+    setProvider(connected.whatsapp_provider === 'QR_SESSION' ? 'TWILIO' : 'QR_SESSION')
+  }, [connected?.id, connected?.whatsapp_provider])
+
   // Whatever this build talks to, so the URL shown is the one to paste.
   const webhookUrl = `${backendOrigin || window.location.origin}/api/v1/whatsapp/webhook`
 
@@ -276,6 +286,23 @@ export default function WhatsAppSettings({ onChanged }) {
       {/* -------------------------- strategy ------------------------------- */}
       <div className="space-y-3 rounded-lg border border-edge bg-bg/50 p-3.5">
         <span className="eyebrow block">Connection strategy</span>
+        {/* One method at a time, enforced by the API. Saying so here means the
+            existing connection disappearing is expected rather than alarming. */}
+        {connected ? (
+          <p className="flex items-start gap-1.5 text-2xs leading-relaxed text-dim">
+            <TriangleAlert size={12} className="mt-0.5 shrink-0 text-warn" />
+            <span>
+              You are connected over{' '}
+              <strong className="text-ink">
+                {connected.whatsapp_provider === 'QR_SESSION'
+                  ? 'WhatsApp Web'
+                  : 'the Twilio API'}
+              </strong>
+              . Connecting a number here replaces it — a business runs on one
+              WhatsApp method at a time.
+            </span>
+          </p>
+        ) : null}
         <div className="grid grid-cols-2 gap-2">
           {[
             {
@@ -290,7 +317,11 @@ export default function WhatsAppSettings({ onChanged }) {
               title: 'WhatsApp Web QR',
               blurb: 'Link a phone by scanning a QR code.',
             },
-          ].map(({ id, icon: Icon, title, blurb }) => (
+          ]
+            // The method already connected is not offered again; switching
+            // means picking the other one.
+            .filter(({ id }) => !connected || connected.whatsapp_provider !== id)
+            .map(({ id, icon: Icon, title, blurb }) => (
             <button
               key={id}
               type="button"
@@ -361,7 +392,8 @@ export default function WhatsAppSettings({ onChanged }) {
           disabled={busy || !form.phone_number.trim()}
           className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
         >
-          <Plug size={13} /> {busy ? 'Connecting…' : 'Connect number'}
+          <Plug size={13} />{' '}
+          {busy ? 'Connecting…' : connected ? 'Replace connection' : 'Connect number'}
         </button>
       </div>
 
