@@ -39,7 +39,7 @@ def provider_of(channel) -> str:
 
 
 async def _send_via_qr_session(
-    channel, to_number: str, body: str, media_urls: list[str] | None
+    channel, to_number: str, body: str, media_urls: list[str] | None, to_jid: str | None = None
 ) -> tuple[bool, str]:
     """Hand the message to the WhatsApp Web bridge.
 
@@ -51,6 +51,10 @@ async def _send_via_qr_session(
     payload = {
         "sessionId": session_id,
         "to": (to_number or "").replace("whatsapp:", "").strip(),
+        # The exact chat JID, when we know it. WhatsApp addresses many chats by
+        # LID rather than phone number, and a JID rebuilt from digits addresses
+        # nobody — the send succeeds and the message is never delivered.
+        "toJid": to_jid or None,
         "body": body,
         "mediaUrls": media_service.sendable(media_urls or []),
     }
@@ -86,6 +90,7 @@ async def send_message(
     to_number: str,
     body: str,
     media_urls: list[str] | None = None,
+    to_jid: str | None = None,
 ) -> tuple[bool, str]:
     """Send one WhatsApp message on whichever transport this tenant uses.
 
@@ -96,7 +101,7 @@ async def send_message(
     provider = provider_of(channel)
 
     if provider == QR_SESSION:
-        return await _send_via_qr_session(channel, to_number, body, media_urls)
+        return await _send_via_qr_session(channel, to_number, body, media_urls, to_jid)
 
     return await twilio_service.send_whatsapp(
         to_number, body, media_urls=media_urls, sender=Sender.for_channel(channel)

@@ -157,6 +157,7 @@ async def send_manual_message(
         payload.content,
         message_id=message.id,
         organization_id=tenant.id,
+        to_jid=(contact.contact_metadata or {}).get("wa_jid"),
     )
     message.delivery_status = delivery.status
     message.twilio_sid = delivery.reference

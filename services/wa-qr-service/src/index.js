@@ -198,10 +198,28 @@ async function startSession(sessionId) {
         ''
       if (!text.trim()) continue
 
+      // WhatsApp increasingly addresses chats by LID — a privacy identifier
+      // like 153231615328393@lid — instead of the sender's phone number. Two
+      // things follow, and both used to be wrong here.
+      //
+      // Replying: the JID has to go back exactly as it came. Stripping @lid
+      // and rebuilding <digits>@s.whatsapp.net produces an address for a phone
+      // number that does not exist. Baileys does not refuse it, so the send
+      // reported success and the reply went nowhere — visible in the dashboard
+      // as delivered, never on anyone's phone.
+      //
+      // Identity: a LID is useless to whoever is running the shop, so where
+      // WhatsApp does hand over a real number it is preferred for the contact
+      // record. The JID travels alongside so the reply still lands.
+      const alternative =
+        message.key.senderPn || message.key.remoteJidAlt || message.key.participantPn || ''
+      const identity = (alternative || remote).split('@')[0].split(':')[0]
+
       await callApi('/api/v1/whatsapp/qr-inbound', {
         id: message.key.id,
         sessionId,
-        from: remote.split('@')[0],
+        from: identity,
+        fromJid: remote,
         to: socket.user?.id?.split(':')[0]?.split('@')[0] || '',
         body: text,
         pushName: message.pushName || '',
@@ -285,7 +303,7 @@ async function awaitReady(sessionId) {
 }
 
 app.post('/send', async (request, response) => {
-  const { sessionId, to, body, mediaUrls } = request.body || {}
+  const { sessionId, to, toJid, body, mediaUrls } = request.body || {}
   const socket = await awaitReady(sessionId)
 
   if (!socket) {
@@ -294,7 +312,10 @@ app.post('/send', async (request, response) => {
   }
 
   try {
-    const jid = `${String(to).replace(/[^0-9]/g, '')}@s.whatsapp.net`
+    // Prefer the exact JID the conversation is on. Rebuilding one from digits
+    // only works for plain phone-number chats, and silently addresses nobody
+    // for a @lid chat.
+    const jid = toJid || `${String(to).replace(/[^0-9]/g, '')}@s.whatsapp.net`
     let sent
 
     if (mediaUrls?.length) {

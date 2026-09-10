@@ -458,6 +458,7 @@ async def process_inbound_message(
         outbound_media,
         message_id=outbound.id,
         organization_id=organization.id,
+        to_jid=(contact.contact_metadata or {}).get("wa_jid"),
     )
     outbound.delivery_status = delivery.status
     outbound.twilio_sid = delivery.reference
@@ -699,6 +700,9 @@ async def qr_session_inbound(request: Request, db: AsyncSession = Depends(get_db
         "Body": body.get("body") or "",
         "ProfileName": body.get("pushName") or "",
         "NumMedia": str(len(body.get("mediaUrls") or [])),
+        # The exact chat JID. Carried through the raw payload because it has no
+        # equivalent in Twilio's field set, which this shape otherwise mirrors.
+        "WaJid": body.get("fromJid") or "",
     }
     for index, url in enumerate(body.get("mediaUrls") or []):
         raw[f"MediaUrl{index}"] = url

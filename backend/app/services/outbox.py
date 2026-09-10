@@ -174,6 +174,7 @@ async def deliver(
     *,
     message_id=None,
     organization_id=None,
+    to_jid: str | None = None,
 ) -> Delivery:
     """Send one message, parking it for a retry if the transport is missing.
 
@@ -181,7 +182,9 @@ async def deliver(
     it from queued to delivered. Pass it whenever there is a row; without one
     the message is still sent and retried, it just cannot be reconciled.
     """
-    sent, reference = await whatsapp.send_message(channel, to_number, body, media_urls)
+    sent, reference = await whatsapp.send_message(
+        channel, to_number, body, media_urls, to_jid=to_jid
+    )
     if sent:
         return Delivery(SENT, reference, "delivered")
 
@@ -196,6 +199,9 @@ async def deliver(
         "message_id": str(message_id) if message_id else None,
         "organization_id": str(organization_id) if organization_id else None,
         "to": to_number,
+        # Kept with the job: a retry an hour later still has to reach the same
+        # chat, and the JID is the only thing that reliably identifies it.
+        "to_jid": to_jid,
         "body": body,
         "media_urls": list(media_urls or []),
         "attempts": 1,
@@ -285,7 +291,11 @@ async def drain_channel(db, channel) -> dict:
                     continue
 
                 ok, reference = await whatsapp.send_message(
-                    channel, job["to"], job["body"], job.get("media_urls")
+                    channel,
+                    job["to"],
+                    job["body"],
+                    job.get("media_urls"),
+                    to_jid=job.get("to_jid"),
                 )
 
                 if ok:

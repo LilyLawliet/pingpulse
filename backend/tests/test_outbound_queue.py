@@ -420,7 +420,9 @@ async def test_an_operators_own_message_goes_out_on_the_tenants_provider(
 
     routed = []
 
-    async def capture(channel, to_number, body, media_urls=None):
+    # Mirrors the real signature, including to_jid — a stub that accepts less
+    # than the caller passes turns a threading mistake into a passing test.
+    async def capture(channel, to_number, body, media_urls=None, to_jid=None):
         routed.append(outbox.whatsapp.provider_of(channel))
         return True, "WA-manual"
 
@@ -434,3 +436,106 @@ async def test_an_operators_own_message_goes_out_on_the_tenants_provider(
     assert response.status_code == 201
     assert routed == ["QR_SESSION"], "the operator's message ignored the tenant's provider"
     assert response.json()["delivery_status"] == outbox.SENT
+
+
+# ------------------------------------------------------- addressing the chat
+@pytest.mark.asyncio
+async def test_the_chat_jid_is_carried_to_the_bridge(monkeypatch):
+    """WhatsApp addresses many chats by LID, not by phone number.
+
+    A JID rebuilt from digits — 153231615328393@s.whatsapp.net — is a valid
+    address for a phone number nobody has. Baileys does not refuse it, so the
+    send reported success, the dashboard showed the reply as delivered, and it
+    reached no one. The chat's own JID has to go back untouched.
+    """
+    from app.config import settings
+    from app.services import whatsapp
+
+    monkeypatch.setattr(settings, "wa_qr_shared_secret", "secret")
+    seen = {}
+
+    class Recorder:
+        def __init__(self, *_, **__):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            seen.update(json or {})
+
+            class Response:
+                @staticmethod
+                def raise_for_status():
+                    return None
+
+                @staticmethod
+                def json():
+                    return {"ok": True, "id": "WA-lid"}
+
+            return Response()
+
+    monkeypatch.setattr(whatsapp.httpx, "AsyncClient", Recorder)
+
+    channel = ChannelConfig(
+        organization_id=None,
+        channel="whatsapp",
+        provider="whatsapp-web",
+        phone_number="+923097209908",
+        whatsapp_provider="QR_SESSION",
+    )
+    channel.id = "chan-lid"
+
+    sent, _ = await whatsapp.send_message(
+        channel, "153231615328393", "we have those in black",
+        to_jid="153231615328393@lid",
+    )
+
+    assert sent is True
+    assert seen["toJid"] == "153231615328393@lid", (
+        "without the original JID the bridge rebuilds a phone-number address "
+        "that reaches nobody"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_queued_message_remembers_the_chat_it_belongs_to(fake_redis, monkeypatch):
+    """A retry an hour later still has to reach the same chat."""
+    channel = ChannelConfig(
+        organization_id=None,
+        channel="whatsapp",
+        provider="whatsapp-web",
+        phone_number="+923097209908",
+        whatsapp_provider="QR_SESSION",
+    )
+    channel.id = "chan-lid-2"
+
+    async def dead(*_a, **_k):
+        return False, "qr-session-refused: session not connected"
+
+    monkeypatch.setattr(outbox.whatsapp, "send_message", dead)
+    await outbox.deliver(
+        channel, "153231615328393", "still here?",
+        message_id="m-lid", to_jid="153231615328393@lid",
+    )
+
+    parked = json.loads(fake_redis[outbox.queue_key("chan-lid-2")][0])
+    assert parked["to_jid"] == "153231615328393@lid"
+
+    delivered_to = {}
+
+    async def alive(_channel, to_number, body, media_urls=None, to_jid=None):
+        delivered_to["jid"] = to_jid
+        return True, "WA-9"
+
+    monkeypatch.setattr(outbox.whatsapp, "send_message", alive)
+    # A bare drain against the same fake Redis, without a database session.
+    async with outbox._connection() as client:
+        raw = json.loads(await client.lindex(outbox.queue_key("chan-lid-2"), 0))
+    await outbox.whatsapp.send_message(
+        channel, raw["to"], raw["body"], raw.get("media_urls"), to_jid=raw.get("to_jid")
+    )
+    assert delivered_to["jid"] == "153231615328393@lid"

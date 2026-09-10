@@ -154,6 +154,7 @@ async def _run_followup(contact_id: str, organization_id: str, token: str, attem
                 body,
                 message_id=nudge.id,
                 organization_id=contact.organization_id,
+                to_jid=(contact.contact_metadata or {}).get("wa_jid"),
             )
             nudge.delivery_status = delivery.status
             nudge.twilio_sid = delivery.reference
