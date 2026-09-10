@@ -148,13 +148,7 @@ async def resolve_organization(
 
 async def _channel_for(db: AsyncSession, organization_id) -> ChannelConfig | None:
     """The organization's active WhatsApp channel, if it has one."""
-    result = await db.execute(
-        select(ChannelConfig).where(
-            ChannelConfig.organization_id == organization_id,
-            ChannelConfig.is_active.is_(True),
-        )
-    )
-    return result.scalars().first()
+    return await whatsapp.active_channel(db, organization_id)
 
 
 async def _resolve_contact(

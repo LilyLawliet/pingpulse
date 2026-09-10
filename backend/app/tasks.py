@@ -99,8 +99,8 @@ def schedule_followups(contact, delays: tuple[float, ...] | None = None) -> str 
 
 async def _run_followup(contact_id: str, organization_id: str, token: str, attempt: int) -> str:
     """The actual work, awaited inside the worker's own event loop."""
-    from app.models import ChannelConfig, CRMContact, Message
-    from app.services import outbox
+    from app.models import CRMContact, Message
+    from app.services import outbox, whatsapp
 
     # A worker process has no FastAPI lifespan, so it owns its engine.
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -131,14 +131,7 @@ async def _run_followup(contact_id: str, organization_id: str, token: str, attem
             body = FIRST_NUDGE if attempt == 1 else SECOND_NUDGE
 
             # A nudge must come from the same number the conversation is on.
-            channel = (
-                await session.execute(
-                    select(ChannelConfig).where(
-                        ChannelConfig.organization_id == contact.organization_id,
-                        ChannelConfig.is_active.is_(True),
-                    )
-                )
-            ).scalars().first()
+            channel = await whatsapp.active_channel(session, contact.organization_id)
 
             # Routed by the channel's provider and parked for a retry if the
             # transport is down, exactly as a live reply is. Calling Twilio

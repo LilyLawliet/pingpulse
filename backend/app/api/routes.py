@@ -20,7 +20,7 @@ from app.deps import WRITE_ROLES, Tenant, current_org
 from app.models import ChannelConfig, CRMContact, LLMLog, Message
 from app.schemas import LLMLogOut, MessageOut, OutboundMessageRequest
 from app.schemas_tenancy import CRMContactOut
-from app.services import outbox, ws_manager
+from app.services import outbox, whatsapp, ws_manager
 from app.services.ws_manager import manager
 
 router = APIRouter(prefix="/api/v1", tags=["dashboard"])
@@ -135,14 +135,7 @@ async def send_manual_message(
         raise HTTPException(status_code=404, detail="Contact not found")
 
     # An operator's message goes out on the same number the agent uses.
-    channel = (
-        await db.execute(
-            select(ChannelConfig).where(
-                ChannelConfig.organization_id == tenant.id,
-                ChannelConfig.is_active.is_(True),
-            )
-        )
-    ).scalars().first()
+    channel = await whatsapp.active_channel(db, tenant.id)
 
     # Routed by the channel's provider, exactly as the agent's own replies are.
     # Calling Twilio directly here was a real bug: on a tenant paired over

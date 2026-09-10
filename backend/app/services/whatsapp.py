@@ -93,3 +93,34 @@ async def send_message(
     return await twilio_service.send_whatsapp(
         to_number, body, media_urls=media_urls, sender=Sender.for_channel(channel)
     )
+
+async def active_channel(db, organization_id):
+    """The channel a message to this tenant should go out on.
+
+    A tenant can have more than one connected number — a Twilio account and a
+    paired handset, say, while they move between the two. Picking "the first
+    active row" then depends on whatever order the database felt like, so an
+    operator's reply could leave on a different number from the conversation it
+    was answering.
+
+    The order is therefore explicit: a live paired session first, then oldest
+    first. It is still a heuristic — the exact answer is the channel the
+    conversation arrived on, and messages do not record that yet — but it is
+    stable, and it favours the transport that is demonstrably connected.
+    """
+    from sqlalchemy import case, select
+
+    from app.models import ChannelConfig
+
+    result = await db.execute(
+        select(ChannelConfig)
+        .where(
+            ChannelConfig.organization_id == organization_id,
+            ChannelConfig.is_active.is_(True),
+        )
+        .order_by(
+            case((ChannelConfig.session_status == "AUTHENTICATED", 0), else_=1),
+            ChannelConfig.created_at,
+        )
+    )
+    return result.scalars().first()
