@@ -1,22 +1,24 @@
-"""Build the desktop app and prepare a release clients will auto-update to.
+"""Ship a desktop release. One command, start to finish.
 
-The updater works by polling one small JSON file. This builds the signed
-bundle, reads the signature Tauri produced, and writes that manifest next to
-the installer so the whole set can be uploaded to a GitHub Release together.
+    python scripts/make_release.py --version 1.2.4 --notes "What changed"
 
-    python scripts/make_release.py --version 1.1.0 --notes "Twilio settings"
+That sets the version, builds, signs, uploads to the VM, and then fetches the
+result back the way a client would to prove it actually works. Nothing else to
+run, and no GitHub release involved — the repository is private, and release
+assets on a private repository are not publicly downloadable, so the updater
+only ever saw a 404 there. Clients poll /updates/latest.json on our own domain.
 
-Then publish (needs the GitHub CLI, authenticated):
+The verification at the end is not ceremony. This has failed silently twice —
+once with a manifest pointing at a URL that 404d, once with the app polling a
+different endpoint from the one being published to — and both times it looked
+like a clean release from this side while every client quietly stayed put. An
+updater that fails silently is worth checking from the outside.
 
-    gh release create v1.1.0 --title "PingPulse 1.1.0" --notes-file notes.md \\
-        builds/desktop/latest.json \\
-        builds/desktop/PingPulse_1.1.0_x64-setup.exe \\
-        builds/desktop/PingPulse_1.1.0_x64-setup.exe.sig
+Two versions must agree or clients download the same file forever: the one in
+tauri.conf.json and the one in latest.json. Both come from --version, which is
+the point of the script.
 
-Three things must agree or clients get an update loop, downloading the same
-version forever: the version in tauri.conf.json, the git tag, and the version
-in latest.json. This script sets all three from one argument, which is the
-point of it.
+    --stage-only    build and sign without putting it in front of anyone
 
 Everything is written under Drive D:.
 """
@@ -39,6 +41,14 @@ OUT = ROOT / "builds" / "desktop"
 KEY = ROOT / ".secrets" / "updater.key"
 
 BACKEND_URL = os.environ.get("PINGPULSE_URL", "https://pingpulse.duckdns.org")
+PUBLIC_UPDATES_URL = f"{BACKEND_URL.rstrip('/')}/updates"
+
+# The VM the installers are served from.
+VM_NAME = os.environ.get("PINGPULSE_VM", "pingpulse-prod")
+VM_ZONE = os.environ.get("PINGPULSE_ZONE", "me-central1-b")
+GCP_PROJECT = os.environ.get("PINGPULSE_PROJECT", "pingpulse-508212")
+REMOTE_UPDATES = "/opt/pingpulse/data/updates"
+GCLOUD = os.environ.get("GCLOUD", r"D:\google-cloud-sdk\bin\gcloud.cmd")
 
 
 def run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -121,10 +131,91 @@ def write_manifest(version: str, installer: pathlib.Path, signature: str, notes:
     print(f"  installer {OUT / installer.name}")
 
 
+def publish(version: str, installer: pathlib.Path) -> None:
+    """Put the manifest and installer where the clients look.
+
+    Clients poll PUBLIC_UPDATES_URL, served from the VM's data volume rather
+    than a GitHub release: the repository is private, and release assets on a
+    private repository are not publicly downloadable, so the updater only ever
+    saw a 404.
+
+    The installer is copied before the manifest, deliberately. The manifest is
+    what advertises the new version, so writing it first would point every
+    client at a download that is not there yet.
+    """
+    print("  uploading to the VM ...")
+    run([
+        GCLOUD, "compute", "scp",
+        str(installer), str(OUT / "latest.json"),
+        f"{VM_NAME}:/tmp/", f"--zone={VM_ZONE}", f"--project={GCP_PROJECT}", "--quiet",
+    ])
+
+    remote = (
+        f"sudo cp /tmp/{installer.name} {REMOTE_UPDATES}/ && "
+        f"sudo cp /tmp/latest.json {REMOTE_UPDATES}/ && "
+        f"sudo chmod 644 {REMOTE_UPDATES}/{installer.name} {REMOTE_UPDATES}/latest.json"
+    )
+    run([
+        GCLOUD, "compute", "ssh", VM_NAME, f"--zone={VM_ZONE}",
+        f"--project={GCP_PROJECT}", "--quiet", "--command", remote,
+    ])
+    print("  uploaded")
+
+
+def confirm(version: str, installer: pathlib.Path) -> bool:
+    """Fetch what a client would fetch, and check it before trusting it.
+
+    Publishing without this has gone wrong twice: once with a manifest pointing
+    at a URL that 404d, once with the app polling a different endpoint from the
+    one being published to. Both looked like a clean release from here, and
+    both failed silently on the client — which is the worst way for an updater
+    to break, because nothing ever reports it.
+    """
+    import hashlib
+    import urllib.request
+
+    print("  verifying as a client would ...")
+    try:
+        served = json.loads(
+            urllib.request.urlopen(f"{PUBLIC_UPDATES_URL}/latest.json", timeout=60).read()
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"  FAILED to fetch the manifest: {exc}")
+        return False
+
+    if served.get("version") != version:
+        print(f"  manifest says {served.get('version')}, expected {version}")
+        return False
+
+    url = served["platforms"]["windows-x86_64"]["url"]
+    try:
+        downloaded = urllib.request.urlopen(url, timeout=300).read()
+    except Exception as exc:  # noqa: BLE001
+        print(f"  FAILED to download the installer at {url}: {exc}")
+        return False
+
+    if hashlib.sha256(downloaded).hexdigest() != hashlib.sha256(installer.read_bytes()).hexdigest():
+        print("  the installer being served is not the one that was signed")
+        return False
+
+    signature = (installer.parent / f"{installer.name}.sig").read_text(encoding="utf-8").strip()
+    if served["platforms"]["windows-x86_64"]["signature"] != signature:
+        print("  the signature being served does not match the one just produced")
+        return False
+
+    print(f"  verified — clients are being offered {version}")
+    return True
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build and stage a desktop release.")
+    parser = argparse.ArgumentParser(description="Build, sign and publish a desktop release.")
     parser.add_argument("--version", required=True, help="e.g. 1.1.0")
     parser.add_argument("--notes", default="Improvements and fixes.", help="Shown to clients")
+    parser.add_argument(
+        "--stage-only",
+        action="store_true",
+        help="Build and sign, but do not put it in front of clients yet",
+    )
     args = parser.parse_args()
 
     if args.version.startswith("v"):
@@ -135,19 +226,27 @@ def main() -> int:
     installer, signature = build(args.version)
     write_manifest(args.version, installer, signature, args.notes)
 
-    print(f"""
-  Publish it:
+    if args.stage_only:
+        print()
+        print("  Staged, not published. Clients are still on the previous version.")
+        print("  Publish when ready:")
+        print(f"      python scripts/make_release.py --version {args.version}")
+        print()
+        return 0
 
-      cd D:\\pingpulse
-      git add -A && git commit -m "release {args.version}" && git push
-      gh release create v{args.version} \\
-          --title "PingPulse {args.version}" --notes "{args.notes}" \\
-          builds/desktop/latest.json \\
-          builds/desktop/{installer.name} \\
-          builds/desktop/{installer.name}.sig
+    publish(args.version, installer)
+    if not confirm(args.version, installer):
+        print()
+        print("  PUBLISH FAILED VERIFICATION — check before saying it shipped.")
+        return 1
 
-  Existing clients pick it up the next time they open the app.
-""")
+    print()
+    print(f"  PingPulse {args.version} is live.")
+    print()
+    print("  Existing clients update themselves on their next launch; nobody runs")
+    print("  an installer. A brand-new machine gets builds/desktop/PingPulse_Setup.exe")
+    print("  once, and never again.")
+    print()
     return 0
 
 

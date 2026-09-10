@@ -33,3 +33,11 @@ demo/
 # anyone can push code to every client machine.
 .secrets/
 *.key
+
+# Built installers. Three megabytes per release, and git keeps every one of
+# them forever — the releases live on the update server, which is where
+# clients actually fetch them from. latest.json stays tracked: it is small,
+# and it is the record of what is currently being offered.
+builds/desktop/*.exe
+builds/desktop/*.msi
+builds/desktop/*.sig

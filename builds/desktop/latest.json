@@ -1,11 +1,11 @@
 {
-  "version": "1.2.2",
-  "notes": "Auto-updates now come from your own server. Replies queue and retry instead of being lost; three delivery states; one WhatsApp method at a time.",
-  "pub_date": "2026-09-10T21:18:53+00:00",
+  "version": "1.2.3",
+  "notes": "Update check now logs to disk, so a failed update leaves a trace.",
+  "pub_date": "2026-09-10T21:56:09+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMitVeDFjSUdCRFZUNENnQzdpY2lDY1h2WW1rdk1yK2Z3T0tRcS9uYU56M2Q2YVdFNkpaeXVVcEdxcUE4cUdPWkhOSDlsckt0ZW5TZDJRRmdWWWxEcEFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDc1MTMzCWZpbGU6UGluZ1B1bHNlXzEuMi4yX3g2NC1zZXR1cC5leGUKNXE5OTlDVVBnVmE1citmQ0JBUWdDL1g1TllYdlBiSmtWRXdMZ3VkUmpGWGVWbW9rcnVTQzRIT3lmUWxheDdkM25HdlVab1pxMm9PMmVQU0g2ei8zREE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.2.2_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjE0alZ3TVI0MkxDMUZJTDBhdDdqbzI1QlZXSnFtMHBsdEJ3SGVUQm5mRVUwZjA0K09lKzJNR09nY1o2c0hZeHJDUWJUKzV6UzRBelhYSXo3UXIxQWcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDc3MzY5CWZpbGU6UGluZ1B1bHNlXzEuMi4zX3g2NC1zZXR1cC5leGUKTXBrZVpFYk1vV2s0SXA0VHdMcDQvalh6cHBSM0FwZDExMnloeHdieWtlc1d4YWVBTzE4TVBBaVpwOE9QMldqdnN3QUsreXhYTm5XM29Ock1MNGhQRGc9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.2.3_x64-setup.exe"
     }
   }
 }

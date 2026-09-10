@@ -44,13 +44,19 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // Logging in release builds too, not just debug. Every message
+            // this file writes is about the updater, and the updater fails
+            // silently by design — so without this a client whose app has
+            // quietly stopped updating leaves no evidence of why, which is
+            // exactly the situation the log is for.
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .target(tauri_plugin_log::Target::new(
+                        tauri_plugin_log::TargetKind::LogDir { file_name: None },
+                    ))
+                    .build(),
+            )?;
 
             // Spawned rather than awaited: the window opens immediately and
             // the check happens behind it.
