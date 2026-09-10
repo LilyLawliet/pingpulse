@@ -80,7 +80,8 @@ mkdir -p .tmp
 tar -czf "$ARCHIVE" \
   --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' \
   backend/app backend/alembic backend/alembic.ini backend/requirements.txt backend/tests \
-  frontend/src frontend/index.html frontend/package.json frontend/package-lock.json \n  frontend/dist \
+  frontend/src frontend/index.html frontend/package.json frontend/package-lock.json \
+  frontend/dist \
   frontend/vite.config.js frontend/tailwind.config.js frontend/postcss.config.js \
   docker/nginx.conf Dockerfile.backend Dockerfile.frontend \
   deploy/gcp-vm scripts services/wa-qr-service

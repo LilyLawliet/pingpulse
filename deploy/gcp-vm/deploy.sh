@@ -140,10 +140,22 @@ fi
 # previous page mid-deploy can still fetch the assets it was promised.
 if [[ -f ../../frontend/dist/index.html ]]; then
   log "Publishing the browser dashboard"
-  mkdir -p "${DATA_DIR}/web"
-  cp -r ../../frontend/dist/. "${DATA_DIR}/web/"
-  chmod -R a+rX "${DATA_DIR}/web"
-  ok "dashboard at https://${DOMAIN}/app/"
+  # Deliberately not fatal. The API is what customers depend on; the browser
+  # dashboard is a convenience, and a directory this user cannot write to
+  # should cost a warning rather than abort a backend deploy after the
+  # migrations have already run. sudo covers the case where the directory was
+  # created by something else, which is exactly how it first went wrong.
+  if mkdir -p "${DATA_DIR}/web" 2>/dev/null      && cp -r ../../frontend/dist/. "${DATA_DIR}/web/" 2>/dev/null; then
+    chmod -R a+rX "${DATA_DIR}/web" 2>/dev/null || true
+    ok "dashboard at https://${DOMAIN}/app/"
+  elif sudo -n true 2>/dev/null        && sudo mkdir -p "${DATA_DIR}/web"        && sudo cp -r ../../frontend/dist/. "${DATA_DIR}/web/"; then
+    sudo chmod -R a+rX "${DATA_DIR}/web"
+    sudo chown -R "$(id -u):$(id -g)" "${DATA_DIR}/web" 2>/dev/null || true
+    ok "dashboard at https://${DOMAIN}/app/ (published with sudo)"
+  else
+    printf '    [1;33m!![0m could not write %s — /app keeps the bundle it already has
+' "${DATA_DIR}/web"
+  fi
 else
   printf '    [1;33m!![0m no frontend/dist — /app keeps the bundle it already has
 '
