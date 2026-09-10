@@ -1,0 +1,99 @@
+# PingPulse public front door — API only.
+#
+# Caddy obtains and renews a Let's Encrypt certificate for {$DOMAIN} on its
+# own, with no certbot cron job and no renewal to forget. That certificate is
+# what makes the Twilio webhook URL permanent — the reason ngrok existed.
+#
+# ---------------------------------------------------------------------------
+# This server does NOT serve the dashboard
+# ---------------------------------------------------------------------------
+# The React dashboard ships inside the Tauri desktop app and runs on the
+# operator's own machine. Nothing here serves it, so opening the domain in a
+# browser exposes no interface, no login form and no customer data — only a
+# status line saying the engine is alive.
+#
+# Exactly four things stay reachable from the internet, and each has a reason:
+#
+#   /api/*    Twilio posts inbound WhatsApp messages to
+#             /api/v1/whatsapp/webhook, and the desktop app calls the rest.
+#             Everything under here except the webhook requires a bearer token.
+#   /ws/*     the desktop app's live monitor socket.
+#   /media/*  Twilio fetches outbound product images from here. If this is
+#             closed, customers receive messages with broken attachments.
+#   /health   uptime monitoring.
+#
+# Anything else — including FastAPI's /docs and /openapi.json, which would
+# otherwise publish the whole API surface to anyone who looked — falls through
+# to a 404. Reach the docs over an SSH tunnel instead:
+#     gcloud compute ssh pingpulse-prod --zone=me-central1-b -- -L 8000:localhost:8000
+#
+# ---------------------------------------------------------------------------
+# ACME / Let's Encrypt — do not "fix" the redirect
+# ---------------------------------------------------------------------------
+# There is deliberately NO explicit http:// block and NO hand-written
+# redir to HTTPS. Caddy adds the HTTP->HTTPS redirect itself, and during a
+# certificate order it inserts its HTTP-01 challenge handler on port 80 *ahead*
+# of that redirect, so /.well-known/acme-challenge/... is answered rather than
+# redirected.
+#
+# The genuine ways to break issuance are:
+#   1. Adding an explicit `http://{$DOMAIN}` block or a blanket `redir` here.
+#      Do not add one.
+#   2. Blocking inbound port 80. Port 80 must stay open permanently, because
+#      renewals use the same challenge every 60 days.
+
+{
+	email {$ACME_EMAIL}
+	# Uncomment to test against Let's Encrypt's staging CA, which has far more
+	# generous rate limits. Certificates will not be publicly trusted.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$DOMAIN} {
+	encode gzip
+
+	# --- the only paths that reach the application ------------------------
+	# Twilio computes its webhook signature over the full external URL, so the
+	# upstream has to see the real host and scheme rather than the container's.
+	@api path /api/* /ws/* /media/* /health
+	handle @api {
+		reverse_proxy backend:8000 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			# X-Forwarded-For and X-Forwarded-Proto are set by Caddy already;
+			# setting them by hand replaces the chain instead of appending.
+
+			# Long enough that a live dashboard socket is not cut mid-session.
+			transport http {
+				read_timeout 3600s
+				write_timeout 3600s
+			}
+		}
+	}
+
+	# --- the root, for anyone who visits in a browser ---------------------
+	handle / {
+		header Content-Type application/json
+		respond `{"status":"PingPulse API Engine Active"}` 200
+	}
+
+	# --- everything else does not exist -----------------------------------
+	handle {
+		respond 404
+	}
+
+	header {
+		Strict-Transport-Security "max-age=86400"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+}

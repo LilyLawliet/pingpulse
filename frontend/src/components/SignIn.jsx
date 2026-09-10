@@ -1,53 +1,38 @@
 import { useState } from 'react'
-import { Radio } from 'lucide-react'
+import { KeyRound, Radio } from 'lucide-react'
 import { api, auth } from '../api.js'
 
 /**
- * Sign in, or create an account together with its first business — a new
- * account with no organization has nowhere to put anything, so the two are
- * asked for together.
+ * Connect with an access token.
+ *
+ * There is no email, no password and no sign-up: a client is issued a token
+ * out of band and pastes it here once. The app stores it and sends it as a
+ * bearer token from then on, so this screen is only seen on first run or after
+ * a token is revoked.
  */
 export default function SignIn({ onSignedIn }) {
-  const [mode, setMode] = useState('login')
-  const [form, setForm] = useState({
-    email: '',
-    password: '',
-    full_name: '',
-    organization_name: '',
-  })
+  const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
-
-  const creating = mode === 'signup'
-  const field = (key) => ({
-    value: form[key],
-    onChange: (event) => setForm((f) => ({ ...f, [key]: event.target.value })),
-  })
 
   const submit = async (event) => {
     event.preventDefault()
     setBusy(true)
     setError(null)
     try {
-      const result = creating
-        ? await api.signUp({
-            email: form.email,
-            password: form.password,
-            full_name: form.full_name || null,
-            organization_name: form.organization_name || 'My business',
-          })
-        : await api.logIn({ email: form.email, password: form.password })
-      auth.set(result.access_token)
+      // Trim first: a token copied out of an email or a chat window very often
+      // arrives with a trailing space or newline attached.
+      const cleaned = token.trim()
+      const session = await api.logIn(cleaned)
+      // Store what the server accepted rather than what was pasted.
+      auth.set(session.token || cleaned)
       onSignedIn()
     } catch (err) {
-      setError(err.message || 'That did not work. Try again.')
+      setError(err.message || 'That token was not accepted.')
     } finally {
       setBusy(false)
     }
   }
-
-  const inputClass =
-    'w-full rounded-lg border border-edge bg-bg px-3 py-2 text-[13px] text-ink placeholder:text-faint focus:border-accent/60'
 
   return (
     <div className="grid h-full place-items-center p-6">
@@ -64,73 +49,48 @@ export default function SignIn({ onSignedIn }) {
           </div>
         </div>
 
-        <h2 className="text-lg font-semibold text-ink">
-          {creating ? 'Create your account' : 'Welcome back'}
-        </h2>
+        <h2 className="text-lg font-semibold text-ink">Enter your access token</h2>
         <p className="mb-5 mt-1 text-xs text-dim">
-          {creating
-            ? 'You can add more businesses once you are in.'
-            : 'Sign in to see your conversations.'}
+          Paste the token we sent you. You only need to do this once.
         </p>
 
         {error && (
           <p className="mb-4 rounded-lg bg-crit/10 px-3 py-2 text-xs text-crit">{error}</p>
         )}
 
-        <div className="space-y-3">
-          <label className="block">
-            <span className="eyebrow mb-1.5 block">Email</span>
-            <input required type="email" autoComplete="email" {...field('email')} className={inputClass} />
-          </label>
-
-          <label className="block">
-            <span className="eyebrow mb-1.5 block">Password</span>
+        <label className="block">
+          <span className="eyebrow mb-1.5 block">Access token</span>
+          <div className="relative">
+            <KeyRound
+              size={14}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint"
+            />
             <input
               required
-              type="password"
-              minLength={8}
-              autoComplete={creating ? 'new-password' : 'current-password'}
-              {...field('password')}
-              className={inputClass}
+              autoFocus
+              spellCheck={false}
+              autoComplete="off"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              placeholder="pp_live_…"
+              className="w-full rounded-lg border border-edge bg-bg py-2 pl-9 pr-3 font-mono text-[12px] text-ink placeholder:text-faint focus:border-accent/60"
             />
-          </label>
-
-          {creating && (
-            <>
-              <label className="block">
-                <span className="eyebrow mb-1.5 block">Your name</span>
-                <input {...field('full_name')} className={inputClass} placeholder="Optional" />
-              </label>
-              <label className="block">
-                <span className="eyebrow mb-1.5 block">Business name</span>
-                <input
-                  {...field('organization_name')}
-                  className={inputClass}
-                  placeholder="Irsa's shoe shop"
-                />
-              </label>
-            </>
-          )}
-        </div>
+          </div>
+        </label>
 
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || !token.trim()}
           className="mt-5 w-full rounded-lg bg-accent px-4 py-2.5 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
         >
-          {busy ? 'Just a moment…' : creating ? 'Create account' : 'Sign in'}
+          {busy ? 'Connecting…' : 'Connect'}
         </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            setMode(creating ? 'login' : 'signup')
-            setError(null)
-          }}
-          className="mt-3 w-full text-center text-xs text-dim transition-colors hover:text-ink"
-        >
-          {creating ? 'I already have an account' : 'Create an account instead'}
-        </button>
+        <p className="mt-4 text-center text-[11px] leading-relaxed text-faint">
+          Do not have a token, or yours has stopped working?
+          <br />
+          Contact your PingPulse representative.
+        </p>
       </form>
     </div>
   )

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Building2, Plus, Save, X } from 'lucide-react'
 import { api } from '../api.js'
+import WhatsAppSettings from './WhatsAppSettings.jsx'
 
 const EMPTY = {
   name: '',
@@ -206,6 +207,14 @@ export default function OrgSelector({ organizations, selectedId, onSelect, onSav
                   placeholder="Greet by name, answer the question, always quote a price, and offer to reserve a pair."
                 />
               </label>
+
+              {/* A channel binds to an organization, so it can only be set up
+                  once the business itself exists. */}
+              {editingId && (
+                <div className="border-t border-edge pt-4">
+                  <WhatsAppSettings />
+                </div>
+              )}
             </div>
 
             <footer className="flex items-center gap-3 border-t border-edge px-5 py-4">

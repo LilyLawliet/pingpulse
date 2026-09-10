@@ -1,17 +1,22 @@
 import { useEffect, useRef } from 'react'
 import { Bot, Check, CheckCheck, Sparkles } from 'lucide-react'
 import { STAGE_LABEL, STAGE_STYLE, clockOf, initialsOf, prettyPhone } from '../format.js'
+import { mediaUrl } from '../backend.js'
 
-/** Our own stored media is loaded from this origin.
+/** Our own stored media is loaded from wherever the backend is.
  *
- * The absolute URL is what WhatsApp fetches; a browser sent to that host hits
- * the tunnel's interstitial and the image silently fails, so anything under
- * /media/ is rewritten to a same-origin path the dashboard can actually load.
+ * The absolute URL stored against a message is the one WhatsApp fetches. A
+ * browser sent to that host can hit an interstitial and fail silently, so
+ * anything under /media/ is reduced to a path first. `mediaUrl` then puts the
+ * backend's origin back on when we are not same-origin with it — which is the
+ * case in the desktop app, where a bare "/media/..." would resolve against the
+ * shell instead of the server.
  */
 function displayable(url) {
   const marker = '/media/'
   const at = url.indexOf(marker)
-  return at !== -1 && !url.includes('cdn.') ? url.slice(at) : url
+  const path = at !== -1 && !url.includes('cdn.') ? url.slice(at) : url
+  return mediaUrl(path)
 }
 
 function Bubble({ message }) {

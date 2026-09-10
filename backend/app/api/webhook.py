@@ -31,7 +31,12 @@ from app.services import (
     vision,
     ws_manager,
 )
-from app.services.twilio_service import Sender, twilio_service
+from app.services.twilio_service import (
+    Sender,
+    signature_url,
+    twilio_service,
+    validate_twilio_signature,
+)
 from app.services.ws_manager import manager
 
 logger = logging.getLogger(__name__)
@@ -565,6 +570,37 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
     form = await request.form()
     raw = {key: str(value) for key, value in form.items()}
     logger.info("inbound webhook payload: %s", raw)
+
+    # ---- prove the request really came from Twilio -----------------------
+    # This endpoint is public: it has to be, because Twilio calls it. Without
+    # this check anyone who finds the URL can post a fabricated message, which
+    # spends the tenant's LLM quota and sends a real WhatsApp reply to any
+    # number they name — on the tenant's own Twilio bill.
+    #
+    # The signature is verified against the auth token of the account that
+    # *sent* it, which for a client who brought their own Twilio is their
+    # token, not ours. Resolving the tenant first is therefore part of
+    # authenticating, not just routing.
+    if settings.twilio_validate_signature:
+        signature = request.headers.get("X-Twilio-Signature", "")
+        destination = raw.get("To", "")
+        _, channel = await resolve_organization(db, destination)
+        sender = Sender.for_channel(channel)
+
+        url = signature_url(
+            settings.public_base_url, request.url.path, request.url.query
+        )
+        if not validate_twilio_signature(
+            sender.auth_token, url, raw, signature
+        ):
+            logger.warning(
+                "rejected unsigned or mis-signed webhook for %s from %s",
+                destination or "(no destination)",
+                request.client.host if request.client else "unknown",
+            )
+            # 403 rather than the usual 200: this is not a transient failure
+            # and there is nothing for Twilio to usefully retry.
+            return Response(status_code=403)
 
     try:
         payload = TwilioWebhookPayload.model_validate({**raw, "raw": raw})

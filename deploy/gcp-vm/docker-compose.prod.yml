@@ -1,0 +1,221 @@
+# PingPulse — single-VM production stack for Google Compute Engine.
+#
+# Differences from the development compose at the repository root, and why:
+#
+#   * Bind mounts point at ${DATA_DIR} on the VM's persistent disk instead of
+#     Drive D:. Everything stateful lives in one directory so a single backup
+#     or disk snapshot captures the whole system.
+#   * Only Caddy publishes ports. Postgres, Redis and the API are reachable
+#     from inside the compose network and from localhost only, so nothing but
+#     443 is exposed to the internet.
+#   * Caddy replaces the ngrok tunnel and terminates real TLS, which is what
+#     Twilio requires and what makes the webhook URL permanent.
+#   * There is NO frontend service. The dashboard ships inside the Tauri
+#     desktop app and runs on the operator's machine, so the server is an
+#     API only — a browser hitting the domain gets a status line, never a
+#     login form or customer data.
+#   * Migrations do NOT run on container start. `deploy.sh` runs them as an
+#     explicit, gated step so a failed migration stops the deploy instead of
+#     leaving a half-started API.
+#   * Every service has memory limits and log rotation. Unbounded container
+#     logs filling the boot disk is the most common way a small VM dies.
+#
+# Memory limits are sized for a 4 GB e2-medium and deliberately sum to about
+# 3.2 GB, leaving roughly 800 MB for the kernel and the Docker daemon. Limits
+# are ceilings rather than reservations, but budgeting the whole of RAM would
+# leave nothing for the host under simultaneous pressure. Raise them on a
+# larger machine type — Postgres benefits first.
+#
+# Bring the stack up with ./deploy.sh, never with a bare `docker compose up`,
+# so migrations are applied.
+
+name: pingpulse
+
+x-logging: &logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    # pgvector's image is Postgres plus the `vector` extension. This is a fresh
+    # database, so adopting it now costs nothing and means the extension is
+    # already present when the vector-search migration happens later.
+    # NOTE: development runs postgres:15. See README "Version skew".
+    image: pgvector/pgvector:pg16
+    container_name: pingpulse-db
+    restart: unless-stopped
+    logging: *logging
+    # Docker gives a container only 64 MB of /dev/shm by default. Postgres
+    # allocates its parallel-query and dynamic shared memory segments there, so
+    # a parallel scan, a large index build, or an HNSW build over pgvector
+    # embeddings fails with "could not resize shared memory segment". 256 MB is
+    # comfortable for this workload and costs nothing until it is used.
+    shm_size: '256mb'
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ${DATA_DIR:-/opt/pingpulse/data}/postgres:/var/lib/postgresql/data
+      - ${DATA_DIR:-/opt/pingpulse/data}/backups:/backups
+    # Deliberately no `ports:` — the database is not reachable from outside
+    # the compose network. Reach it for maintenance with `docker compose exec`.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    networks:
+      - pingpulse-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: pingpulse-redis
+    restart: unless-stopped
+    logging: *logging
+    # appendonly: a queued follow-up survives a restart.
+    # noeviction: Redis is a task broker here, not a cache. Silently dropping
+    # a queued task under memory pressure would lose a customer follow-up, so
+    # it must refuse writes instead of evicting.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - "256mb"
+      - --maxmemory-policy
+      - "noeviction"
+    volumes:
+      - ${DATA_DIR:-/opt/pingpulse/data}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    networks:
+      - pingpulse-net
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.backend
+    image: pingpulse-backend:latest
+    container_name: pingpulse-backend
+    restart: unless-stopped
+    logging: *logging
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      MEDIA_DIR: /app/media
+      # deploy.sh owns migrations. See the header note.
+      AUTO_MIGRATE_ON_STARTUP: "false"
+      APP_ENV: production
+    ports:
+      # Bound to loopback: reachable over SSH for debugging, never from the
+      # internet. Public traffic arrives through Caddy.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ${DATA_DIR:-/opt/pingpulse/data}/media:/app/media
+      - ${DATA_DIR:-/opt/pingpulse/data}/logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1200m
+    networks:
+      - pingpulse-net
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.backend
+    image: pingpulse-backend:latest
+    container_name: pingpulse-worker
+    restart: unless-stopped
+    logging: *logging
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      MEDIA_DIR: /app/media
+      # The worker must never run migrations; the API owns the schema.
+      AUTO_MIGRATE_ON_STARTUP: "false"
+      APP_ENV: production
+    command: ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info", "--pool=solo"]
+    volumes:
+      - ${DATA_DIR:-/opt/pingpulse/data}/media:/app/media
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    networks:
+      - pingpulse-net
+
+  caddy:
+    # The public front door. Obtains and renews a Let's Encrypt certificate
+    # automatically for ${DOMAIN}, which is what gives Twilio a permanent
+    # HTTPS webhook URL and retires ngrok.
+    image: caddy:2-alpine
+    container_name: pingpulse-caddy
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${DATA_DIR:-/opt/pingpulse/data}/caddy/data:/data
+      - ${DATA_DIR:-/opt/pingpulse/data}/caddy/config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 192m
+    networks:
+      - pingpulse-net
+
+networks:
+  pingpulse-net:
+    name: pingpulse-net
+    driver: bridge

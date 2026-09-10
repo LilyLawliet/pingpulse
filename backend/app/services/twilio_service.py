@@ -192,3 +192,44 @@ class TwilioService:
 
 
 twilio_service = TwilioService()
+
+
+# --------------------------------------------------------------------------
+# Inbound authenticity
+# --------------------------------------------------------------------------
+def signature_url(public_base_url: str, path: str, query: str = "") -> str:
+    """The URL Twilio signed.
+
+    Twilio computes its signature over the *public* URL it called. Behind a
+    reverse proxy the application sees an internal one, so the signature is
+    checked against PUBLIC_BASE_URL plus the path rather than whatever the
+    request object reports. Deriving it from proxy headers instead is the
+    usual reason signature validation rejects every genuine message.
+    """
+    base = (public_base_url or "").rstrip("/")
+    url = f"{base}{path}" if base else path
+    return f"{url}?{query}" if query else url
+
+
+def validate_twilio_signature(
+    auth_token: str, url: str, params: dict[str, str], signature: str
+) -> bool:
+    """Is this request really from the Twilio account holding `auth_token`?
+
+    The token is the shared secret, so this must be the *tenant's* token when
+    the tenant brought their own Twilio account. Validating a BYOK client's
+    traffic against the platform token would reject every message they send.
+
+    Any failure is a rejection: a malformed signature is not a reason to let a
+    request through.
+    """
+    if not auth_token or not signature:
+        return False
+
+    try:
+        from twilio.request_validator import RequestValidator
+
+        return bool(RequestValidator(auth_token).validate(url, params, signature))
+    except Exception as exc:  # noqa: BLE001 - never fail open
+        logger.warning("signature validation error: %s", exc)
+        return False

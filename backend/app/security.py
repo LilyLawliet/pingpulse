@@ -1,65 +1,34 @@
-"""Password hashing and bearer tokens.
+"""Token generation.
 
-PBKDF2-HMAC-SHA256 from the standard library — no native build step, and
-strong enough for this. Hashes are self-describing so the cost factor can be
-raised later without invalidating existing users.
+There is no password hashing here any more, and no JWT signing. Authentication
+is a database lookup against `access_tokens`: a client is issued an opaque
+random token and it is checked on every request.
+
+That is a deliberate trade. A signed JWT verifies without touching the
+database, but it stays valid until it expires — you cannot take one back. A
+token that is looked up costs one indexed primary-key read and can be revoked
+instantly, which matters far more when the credential is handed to a client and
+may need pulling at short notice.
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import secrets
-from datetime import datetime, timedelta, timezone
 
-import jwt
+# Identifies our tokens at a glance in a log or a support ticket, and follows
+# the convention scanners look for when hunting leaked credentials in repos.
+TOKEN_PREFIX = "pp_live_"
 
-from app.config import settings
-
-_ALGORITHM = "pbkdf2_sha256"
-_ITERATIONS = 240_000
-_JWT_ALG = "HS256"
-
-
-def hash_password(password: str) -> str:
-    if not password or len(password) < 8:
-        raise ValueError("password must be at least 8 characters")
-    salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac(
-        "sha256", password.encode(), salt.encode(), _ITERATIONS
-    ).hex()
-    return f"{_ALGORITHM}${_ITERATIONS}${salt}${digest}"
+# 32 bytes of urlsafe base64 is ~43 characters, so a full token is ~51 —
+# comfortably inside the 128-character column.
+TOKEN_ENTROPY_BYTES = 32
 
 
-def verify_password(password: str, stored: str) -> bool:
-    """Constant-time check that tolerates a malformed or legacy hash."""
-    try:
-        algorithm, iterations, salt, digest = stored.split("$", 3)
-        if algorithm != _ALGORITHM:
-            return False
-        candidate = hashlib.pbkdf2_hmac(
-            "sha256", password.encode(), salt.encode(), int(iterations)
-        ).hex()
-    except (ValueError, AttributeError):
-        return False
-    return hmac.compare_digest(candidate, digest)
+def generate_token(prefix: str = TOKEN_PREFIX) -> str:
+    """A new access token, from the OS cryptographic random source."""
+    return f"{prefix}{secrets.token_urlsafe(TOKEN_ENTROPY_BYTES)}"
 
 
-def create_access_token(user_id: str, expires_minutes: int | None = None) -> str:
-    minutes = expires_minutes or settings.access_token_minutes
-    payload = {
-        "sub": str(user_id),
-        "iat": datetime.now(timezone.utc),
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=minutes),
-    }
-    return jwt.encode(payload, settings.secret_key, algorithm=_JWT_ALG)
-
-
-def decode_access_token(token: str) -> str | None:
-    """Return the user id, or None for anything expired, forged or malformed."""
-    try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[_JWT_ALG])
-    except jwt.PyJWTError:
-        return None
-    subject = payload.get("sub")
-    return str(subject) if subject else None
+def tokens_equal(left: str, right: str) -> bool:
+    """Constant-time comparison, for anywhere a token is compared by hand."""
+    return secrets.compare_digest(left or "", right or "")

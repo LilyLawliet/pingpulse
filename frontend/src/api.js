@@ -1,5 +1,34 @@
-const BASE = import.meta.env.VITE_API_BASE || '/api/v1'
+import { apiBase } from './backend'
+
+// Resolved in backend.js: relative in the browser, absolute in the
+// desktop shell, overridable at build time with VITE_API_BASE_URL.
+const BASE = apiBase
 const TOKEN_KEY = 'pingpulse.token'
+const DEVICE_KEY = 'pingpulse.device'
+
+/**
+ * A stable id for this installation.
+ *
+ * Generated once and kept locally, so the same machine keeps its licence seat
+ * across restarts while a token pasted on a different machine asks for a new
+ * one. A licence covers one team, not unlimited copies.
+ */
+function deviceId() {
+  try {
+    let id = localStorage.getItem(DEVICE_KEY)
+    if (!id) {
+      id = (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`)
+        .replace(/-/g, '')
+        .slice(0, 32)
+      localStorage.setItem(DEVICE_KEY, id)
+    }
+    return id
+  } catch {
+    // Private mode or blocked storage: no id, so no seat is claimed. The
+    // request still works — seats stop sharing, they do not gate access.
+    return ''
+  }
+}
 
 /** The bearer token lives in localStorage so a refresh keeps you signed in. */
 export const auth = {
@@ -33,6 +62,8 @@ export class ApiError extends Error {
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
   if (auth.token) headers.Authorization = `Bearer ${auth.token}`
+  const device = deviceId()
+  if (device) headers['X-PingPulse-Device'] = device
 
   const response = await fetch(`${BASE}${path}`, { ...options, headers })
 
@@ -53,8 +84,12 @@ async function request(path, options = {}) {
 
 export const api = {
   // ------------------------------ identity ------------------------------
-  signUp: (body) => request('/auth/signup', { method: 'POST', body: JSON.stringify(body) }),
-  logIn: (body) => request('/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+  // There is no sign-up and no password. A client is issued an access
+  // token out of band and exchanges it for a session here.
+  logIn: (token) => request('/auth/login', { method: 'POST', body: JSON.stringify({ token }) }),
+  verifyToken: (token) =>
+    request('/auth/verify-token', { method: 'POST', body: JSON.stringify({ token }) }),
+  session: () => request('/auth/session'),
   me: () => request('/auth/me'),
 
   // --------------------------- organizations ----------------------------
@@ -68,6 +103,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ organization_id: organizationId }),
     }),
+
+  // ------------------------- WhatsApp connection ------------------------
+  listChannels: () => request('/organizations/active/channels'),
+  addChannel: (body) =>
+    request('/organizations/active/channels', { method: 'POST', body: JSON.stringify(body) }),
+  removeChannel: (id) =>
+    request(`/organizations/active/channels/${id}`, { method: 'DELETE' }),
 
   // -------------------------------- CRM ---------------------------------
   listContacts: () => request('/crm/contacts'),

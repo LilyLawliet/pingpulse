@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-// In dev Vite proxies /ws to the backend; in the Nginx image the same path is
-// proxied to the backend container, so a relative URL works in both.
-const socketUrl = () => {
-  const override = import.meta.env.VITE_WS_URL
-  if (override) return override
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/ws/monitor`
-}
+import { socketUrl } from './backend'
+import { auth } from './api.js'
+
+// socketUrl lives in backend.js because the desktop shell and the browser need
+// different answers: the browser can use a relative host, the shell cannot.
 
 const MAX_EVENTS = 300
 
@@ -27,7 +24,7 @@ export default function useMonitorSocket() {
     if (closedByUs.current) return
     let socket
     try {
-      socket = new WebSocket(socketUrl())
+      socket = new WebSocket(socketUrl(auth.token))
     } catch {
       timerRef.current = setTimeout(connect, 3000)
       return

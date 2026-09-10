@@ -27,3 +27,9 @@ demo/*.webm
 demo/*.mp4
 demo/raw
 demo/
+
+# Updater signing key. Losing it means no client can ever receive an update
+# again — they would all need a fresh manual install. Committing it means
+# anyone can push code to every client machine.
+.secrets/
+*.key

@@ -13,23 +13,24 @@ PipelineStage = Literal["LEAD", "QUALIFIED", "DEMO_BOOKED", "CLOSED"]
 
 
 # ------------------------------- Identity ---------------------------------
-class SignUpRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=200)
-    full_name: str | None = None
-    # Creating the first organization during sign-up avoids a dead-end account.
-    organization_name: str | None = Field(default=None, max_length=255)
+class TokenLoginRequest(BaseModel):
+    """The only credential the system accepts."""
+
+    token: str = Field(min_length=8, max_length=128)
 
 
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
+class TokenSessionOut(BaseModel):
+    """What a valid token resolves to.
 
+    The token is echoed back so the desktop app can store exactly what the
+    server accepted rather than whatever the user pasted, whitespace included.
+    """
 
-class TokenResponse(BaseModel):
-    access_token: str
+    token: str
     token_type: str = "bearer"
-    user_id: uuid.UUID
+    client_name: str
+    expires_at: datetime
+    user_id: uuid.UUID | None = None
     active_organization_id: uuid.UUID | None = None
 
 

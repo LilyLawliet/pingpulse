@@ -1,0 +1,130 @@
+# Deploy the backend to the production VM on every push to main.
+#
+# Replaces running push.sh by hand. The sequence is the same one deploy.sh
+# already enforces on the server — test, package, upload, migrate, health-check
+# — but the tests run first here so a broken commit never reaches the VM.
+#
+# ---------------------------------------------------------------------------
+# One-time setup
+# ---------------------------------------------------------------------------
+# Add these repository secrets (Settings -> Secrets and variables -> Actions):
+#
+#   GCP_SA_KEY   JSON key for a service account with roles/compute.instanceAdmin.v1
+#                and roles/iam.serviceAccountUser. Create it with:
+#
+#     gcloud iam service-accounts create pingpulse-deploy --project=pingpulse-508212
+#     gcloud projects add-iam-policy-binding pingpulse-508212 \
+#       --member="serviceAccount:pingpulse-deploy@pingpulse-508212.iam.gserviceaccount.com" \
+#       --role="roles/compute.instanceAdmin.v1"
+#     gcloud projects add-iam-policy-binding pingpulse-508212 \
+#       --member="serviceAccount:pingpulse-deploy@pingpulse-508212.iam.gserviceaccount.com" \
+#       --role="roles/iam.serviceAccountUser"
+#     gcloud iam service-accounts keys create key.json \
+#       --iam-account=pingpulse-deploy@pingpulse-508212.iam.gserviceaccount.com
+#
+#   Paste the contents of key.json into the secret, then DELETE the local file.
+#
+# Workload Identity Federation is the better option — no long-lived key at all —
+# and is worth moving to once this is working. A leaked JSON key is full access
+# to the project; a WIF token expires in minutes.
+
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+    # Desktop-only changes do not need a server deploy.
+    paths:
+      - 'backend/**'
+      - 'deploy/**'
+      - 'scripts/**'
+      - 'Dockerfile.backend'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+
+concurrency:
+  # Two deploys running at once would fight over the same containers.
+  group: deploy-backend
+  cancel-in-progress: false
+
+env:
+  VM_NAME: pingpulse-prod
+  VM_ZONE: me-central1-b
+  GCP_PROJECT: pingpulse-508212
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run the suite
+        # The gate. A failure here stops the deploy job from ever starting.
+        run: python -m pytest backend/tests -q
+        working-directory: .
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Package the source
+        run: |
+          tar -czf push.tgz \
+            --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' \
+            backend/app backend/alembic backend/alembic.ini \
+            backend/requirements.txt backend/tests \
+            frontend/src frontend/index.html frontend/package.json \
+            frontend/package-lock.json frontend/vite.config.js \
+            frontend/tailwind.config.js frontend/postcss.config.js \
+            docker/nginx.conf Dockerfile.backend Dockerfile.frontend \
+            deploy/gcp-vm scripts
+          ls -lh push.tgz
+
+      - name: Upload to the VM
+        run: |
+          gcloud compute scp push.tgz ${VM_NAME}:push.tgz \
+            --zone="${VM_ZONE}" --project="${GCP_PROJECT}" --quiet
+
+      - name: Deploy
+        # deploy.sh backs up the database, runs migrations, and fails the whole
+        # step if a migration fails — so a bad schema change stops here rather
+        # than leaving a half-started API answering customers.
+        run: |
+          gcloud compute ssh ${VM_NAME} --zone="${VM_ZONE}" \
+            --project="${GCP_PROJECT}" --quiet --command \
+            "cd /opt/pingpulse/app && tar -xzf ~/push.tgz && rm -f ~/push.tgz \
+             && chmod +x deploy/gcp-vm/*.sh && cd deploy/gcp-vm \
+             && sg docker -c './deploy.sh'"
+
+      - name: Verify from outside
+        run: |
+          for attempt in $(seq 1 10); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+              https://pingpulse.duckdns.org/health || echo 000)
+            if [ "$status" = "200" ]; then
+              echo "health -> 200"
+              curl -s https://pingpulse.duckdns.org/health | head -c 400
+              exit 0
+            fi
+            echo "attempt $attempt: $status"
+            sleep 6
+          done
+          echo "health check never returned 200" >&2
+          exit 1

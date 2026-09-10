@@ -3,7 +3,9 @@
 import json
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from app.main import app
 from app.services.ws_manager import ConnectionManager
@@ -96,10 +98,36 @@ async def test_broadcast_payload_is_json_serialisable():
     json.loads(socket.sent[-1])
 
 
-def test_ws_monitor_endpoint_accepts_a_real_connection():
-    """End-to-end handshake through the ASGI app at /ws/monitor."""
+def test_ws_monitor_rejects_a_connection_with_no_token():
+    """The live feed carries real customer messages, so it is not public.
+
+    It used to accept any connection, which meant anyone who knew the URL could
+    read conversations as they happened.
+    """
+    with TestClient(app) as raw:
+        with pytest.raises(WebSocketDisconnect):
+            with raw.websocket_connect("/ws/monitor") as socket:
+                socket.receive_text()
+
+
+def test_ws_monitor_endpoint_accepts_a_real_connection(monkeypatch):
+    """End-to-end handshake through the ASGI app at /ws/monitor.
+
+    The endpoint validates against the database, so the lookup is stubbed here
+    rather than standing a schema up — the token rules themselves are covered
+    by the access-token tests.
+    """
+    from app import main as main_module
+
+    async def allow(_db, raw):
+        if raw != "pp_live_valid":
+            raise HTTPException(status_code=401, detail="nope")
+        return object()
+
+    monkeypatch.setattr(main_module, "resolve_token", allow)
+
     with TestClient(app) as client:
-        with client.websocket_connect("/ws/monitor") as websocket:
+        with client.websocket_connect("/ws/monitor?token=pp_live_valid") as websocket:
             websocket.send_text("ping")
             # The app-wide manager replays recent events to a new client, so
             # drain those before the pong we are actually asserting on.

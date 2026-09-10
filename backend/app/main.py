@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +23,7 @@ from app.api.routes import router as dashboard_router
 from app.api.webhook import router as webhook_router
 from app.config import settings
 from app.database import SessionLocal, engine
+from app.deps import resolve_token
 from app.schemas import ComponentHealth, HealthResponse
 from app.services.llm_service import probe_gemini, probe_groq
 from app.services.twilio_service import twilio_service
@@ -194,7 +195,30 @@ async def health():
 # ----------------------------- WebSocket ---------------------------------
 @app.websocket("/ws/monitor")
 async def monitor_socket(websocket: WebSocket):
-    """Live dashboard feed: inbound, thinking, generation, outbound, stage events."""
+    """Live dashboard feed: inbound, thinking, generation, outbound, stage events.
+
+    Authenticated with the same tokens as the REST API. This socket streams
+    real customer messages as they arrive, so leaving it open — as it was —
+    meant anyone who knew the URL could read live conversations.
+
+    The token arrives as a query parameter because browsers cannot set headers
+    on a websocket handshake. It is validated before the connection is
+    accepted, and a bad token is closed with 1008 (policy violation) rather
+    than accepted and then dropped.
+    """
+    raw = (websocket.query_params.get("token") or "").strip()
+    if not raw:
+        # Refused without touching the database — there is nothing to look up.
+        await websocket.close(code=1008, reason="An access token is required")
+        return
+
+    async with SessionLocal() as db:
+        try:
+            await resolve_token(db, raw)
+        except HTTPException:
+            await websocket.close(code=1008, reason="Invalid or expired access token")
+            return
+
     await manager.connect(websocket)
     try:
         while True:

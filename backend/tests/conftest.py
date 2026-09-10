@@ -17,9 +17,32 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
 from app.config import settings  # noqa: E402
 from app.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402
+from app.models import (  # noqa: E402
+    AccessToken,
+    Organization,
+    OrganizationMember,
+    User,
+)
+from app.security import generate_token  # noqa: E402
+
+
+def _session_for(client):
+    """The AsyncSession the app is wired to for this test.
+
+    `client` is an httpx client bound to the ASGI app, and the db override is
+    the only handle on the session the request handlers will see — a fixture
+    that opened its own session would write to a different transaction.
+    """
+    return _ACTIVE_SESSION[0]
+
+
+# Set by the `client` fixture so `make_tenant` can reach the same session.
+_ACTIVE_SESSION: list = [None]
 
 # The suite must not need a live PostgreSQL, so the startup migration is off.
 settings.auto_migrate_on_startup = False
@@ -52,6 +75,7 @@ async def client(db_session):
     async def override_get_db():
         yield db_session
 
+    _ACTIVE_SESSION[0] = db_session
     app.dependency_overrides[get_db] = override_get_db
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
@@ -101,22 +125,53 @@ class Tenant:
 
 
 async def make_tenant(client, email: str, organization_name: str) -> Tenant:
-    response = await client.post(
-        "/api/v1/auth/signup",
-        json={
-            "email": email,
-            "password": "correct-horse-battery",
-            "full_name": email.split("@")[0],
-            "organization_name": organization_name,
-        },
+    """Create an organization, an owner and a working access token.
+
+    Built directly against the database rather than through the API, because
+    there is no sign-up endpoint any more: tokens are issued out of band by
+    `scripts/create_token.py`. This mirrors what that script does.
+    """
+    session = _session_for(client)
+
+    user = User(
+        email=email,
+        full_name=email.split("@")[0],
+        password_hash="!token-only",
     )
-    assert response.status_code == 201, response.text
-    body = response.json()
+    session.add(user)
+    await session.flush()
+
+    organization = Organization(
+        name=organization_name,
+        sales_prompt="You are a helpful sales agent.",
+    )
+    session.add(organization)
+    await session.flush()
+
+    session.add(
+        OrganizationMember(
+            organization_id=organization.id, user_id=user.id, role="OWNER"
+        )
+    )
+    user.active_organization_id = organization.id
+
+    token = generate_token()
+    session.add(
+        AccessToken(
+            token=token,
+            client_name=organization_name,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+            is_active=True,
+            user_id=user.id,
+        )
+    )
+    await session.flush()
+
     return Tenant(
         client=client,
-        token=body["access_token"],
-        user_id=body["user_id"],
-        organization_id=body["active_organization_id"],
+        token=token,
+        user_id=str(user.id),
+        organization_id=str(organization.id),
         email=email,
     )
 
