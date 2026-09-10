@@ -140,8 +140,13 @@ $COMPOSE up -d --remove-orphans
 ok "containers started"
 
 # ------------------------------------------------------------------ verify
-# /health checks the database, both LLM providers, Twilio and the websocket
-# layer — a real deployment gate rather than a liveness ping.
+# Plain /health is the liveness check the container probe uses: is this
+# process serving, and is the database reachable. ?deep=1 additionally calls
+# Groq, Gemini and Twilio over the internet — exactly what you want once at
+# the end of a deploy, and exactly what you do not want every fifteen
+# seconds for the rest of the month.
+# A failed provider here is a warning, not a stop: the database is the only
+# thing the service cannot run without.
 log "Waiting for the API to report healthy"
 printf '    '
 HEALTHY=0
@@ -153,7 +158,8 @@ for attempt in $(seq 1 45); do
 done
 [[ $HEALTHY -eq 1 ]] || { printf '\n'; $COMPOSE logs --tail 40 backend; fail "API did not become healthy"; }
 
-HEALTH_JSON="$(curl -fsS http://127.0.0.1:8000/health)"
+log "Checking the providers this deploy depends on"
+HEALTH_JSON="$(curl -fsS --max-time 30 'http://127.0.0.1:8000/health?deep=1')"
 echo "$HEALTH_JSON" | jq -r '.components | to_entries[] | "    \(.key): \(.value.status)  \(.value.detail)"' 2>/dev/null \
   || echo "    $HEALTH_JSON"
 
@@ -167,8 +173,9 @@ $COMPOSE ps --format 'table {{.Name}}\t{{.Status}}'
 
 cat <<NEXT
 
-  Dashboard      https://${DOMAIN}
+  API            https://${DOMAIN}          (no dashboard is served here)
   Health         https://${DOMAIN}/health
+  Deep health    https://${DOMAIN}/health?deep=1
   Twilio webhook https://${DOMAIN}/api/v1/whatsapp/webhook
 
   Logs           docker compose -f docker-compose.prod.yml logs -f backend

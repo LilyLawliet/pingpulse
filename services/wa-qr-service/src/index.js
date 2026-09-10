@@ -36,6 +36,11 @@ const PORT = Number(process.env.PORT || 3100)
 const API_URL = process.env.PINGPULSE_API_URL || 'http://backend:8000'
 const SHARED_SECRET = process.env.WA_QR_SHARED_SECRET || ''
 const SESSIONS_DIR = process.env.SESSIONS_DIR || '/data/wa_sessions'
+// How long /send waits for a session that is still coming back before giving
+// up and letting the API queue the message. A restore after a deploy takes a
+// few seconds, so waiting briefly here turns most restarts into a short pause
+// rather than a queued retry.
+const SEND_WAIT_MS = Number(process.env.SEND_WAIT_MS || 12000)
 
 const log = pino({ level: process.env.LOG_LEVEL || 'info' })
 
@@ -43,6 +48,15 @@ mkdirSync(SESSIONS_DIR, { recursive: true })
 
 /** Live sessions, keyed by channel id. */
 const sessions = new Map()
+/**
+ * Which sessions have an open connection right now.
+ *
+ * A socket exists in `sessions` from the moment it is created, but it cannot
+ * carry a message until WhatsApp reports the connection open. Sending in
+ * between throws, which the API would read as a failure worth queueing when
+ * waiting a moment would have done.
+ */
+const ready = new Set()
 /** Sockets watching a pairing, keyed by channel id. */
 const watchers = new Map()
 /**
@@ -144,6 +158,7 @@ async function startSession(sessionId) {
     if (connection === 'open') {
       const phoneNumber = socket.user?.id?.split(':')[0]?.split('@')[0] || null
       log.info({ sessionId, phoneNumber }, 'session authenticated')
+      ready.add(sessionId)
       latest.delete(sessionId)
       reportStatus(sessionId, 'AUTHENTICATED', { phoneNumber })
     }
@@ -151,6 +166,7 @@ async function startSession(sessionId) {
     if (connection === 'close') {
       const status = lastDisconnect?.error?.output?.statusCode
       sessions.delete(sessionId)
+      ready.delete(sessionId)
 
       // Logged out from the phone: the credentials are dead and a re-scan is
       // the only way back. Anything else is a dropped connection worth retrying.
@@ -238,11 +254,42 @@ app.post('/pair', async (request, response) => {
   }
 })
 
+/**
+ * Wait for a session to be usable, starting it if it is not already running.
+ *
+ * Returns the socket, or null if it did not come up in time. The caller then
+ * reports "session not connected", which the API treats as retryable and
+ * parks the message rather than losing it.
+ */
+async function awaitReady(sessionId) {
+  if (ready.has(sessionId)) return sessions.get(sessionId)
+
+  // A paired session that is not running yet — the usual case just after a
+  // restart — is brought up here rather than waiting for someone to open the
+  // pairing screen.
+  if (!sessions.has(sessionId)) {
+    try {
+      await startSession(sessionId)
+    } catch (error) {
+      log.error({ sessionId, error: error.message }, 'could not start session for a send')
+      return null
+    }
+  }
+
+  const deadline = Date.now() + SEND_WAIT_MS
+  while (Date.now() < deadline) {
+    if (ready.has(sessionId)) return sessions.get(sessionId)
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return null
+}
+
 app.post('/send', async (request, response) => {
   const { sessionId, to, body, mediaUrls } = request.body || {}
-  const socket = sessions.get(sessionId)
+  const socket = await awaitReady(sessionId)
 
   if (!socket) {
+    log.warn({ sessionId }, 'send arrived while the session was not connected')
     return response.json({ ok: false, error: 'session not connected' })
   }
 
@@ -278,6 +325,7 @@ app.post('/logout', async (request, response) => {
       /* already gone */
     }
     sessions.delete(sessionId)
+    ready.delete(sessionId)
   }
   reportStatus(sessionId, 'DISCONNECTED', { reason: 'logged_out' })
   response.json({ ok: true })

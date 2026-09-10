@@ -100,7 +100,7 @@ def schedule_followups(contact, delays: tuple[float, ...] | None = None) -> str 
 async def _run_followup(contact_id: str, organization_id: str, token: str, attempt: int) -> str:
     """The actual work, awaited inside the worker's own event loop."""
     from app.models import ChannelConfig, CRMContact, Message
-    from app.services.twilio_service import Sender, twilio_service
+    from app.services import outbox
 
     # A worker process has no FastAPI lifespan, so it owns its engine.
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -140,20 +140,31 @@ async def _run_followup(contact_id: str, organization_id: str, token: str, attem
                 )
             ).scalars().first()
 
-            sent, sid_or_error = await twilio_service.send_whatsapp(
-                contact.phone_number, body, sender=Sender.for_channel(channel)
+            # Routed by the channel's provider and parked for a retry if the
+            # transport is down, exactly as a live reply is. Calling Twilio
+            # directly here silently sent nothing for a tenant paired over
+            # WhatsApp Web.
+            nudge = Message(
+                organization_id=contact.organization_id,
+                contact_id=contact.id,
+                sender="agent",
+                content=body,
+                media_urls=[],
+                delivery_status=outbox.QUEUED,
             )
+            session.add(nudge)
+            await session.flush()
 
-            session.add(
-                Message(
-                    organization_id=contact.organization_id,
-                    contact_id=contact.id,
-                    sender="agent",
-                    content=body,
-                    twilio_sid=sid_or_error if sent else None,
-                    media_urls=[],
-                )
+            delivery = await outbox.deliver(
+                channel,
+                contact.phone_number,
+                body,
+                message_id=nudge.id,
+                organization_id=contact.organization_id,
             )
+            nudge.delivery_status = delivery.status
+            nudge.twilio_sid = delivery.reference
+            sent = delivery.sent
             metadata["last_followup_at"] = datetime.now(timezone.utc).isoformat()
             metadata["followup_attempts"] = attempt
             if attempt >= 2:
@@ -162,7 +173,9 @@ async def _run_followup(contact_id: str, organization_id: str, token: str, attem
             contact.contact_metadata = metadata
 
             await session.commit()
-            return "sent" if sent else f"send failed: {sid_or_error}"
+            if delivery.queued:
+                return "queued for retry"
+            return "sent" if sent else f"send failed: {delivery.detail}"
     finally:
         await engine.dispose()
 

@@ -367,6 +367,14 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     twilio_sid: Mapped[str | None] = mapped_column(String(100))
 
+    # SENT | QUEUED | FAILED, for messages we sent. A null sid used to be the
+    # only signal, and it could not tell "the transport was down and we will
+    # try again" apart from "this will never arrive" — so the dashboard showed
+    # both the same way. Inbound messages are SENT by definition: they arrived.
+    delivery_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="SENT", server_default="SENT"
+    )
+
     # Attachments in either direction: images the customer sent (downloaded to
     # the media volume on D:) and product images the agent sent back.
     media_urls: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)

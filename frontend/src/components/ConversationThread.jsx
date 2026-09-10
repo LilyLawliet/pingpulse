@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Bot, CheckCheck, Sparkles, TriangleAlert } from 'lucide-react'
+import { Bot, CheckCheck, Clock, Sparkles, TriangleAlert } from 'lucide-react'
 import { STAGE_LABEL, STAGE_STYLE, clockOf, initialsOf, prettyPhone } from '../format.js'
 import { mediaUrl } from '../backend.js'
 
@@ -17,6 +17,41 @@ function displayable(url) {
   const at = url.indexOf(marker)
   const path = at !== -1 && !url.includes('cdn.') ? url.slice(at) : url
   return mediaUrl(path)
+}
+
+/** What happened to a reply we sent.
+ *
+ * Three outcomes, three marks. A single grey tick is WhatsApp's "sent, not
+ * read yet", so it is exactly the wrong thing to show for a reply that never
+ * left the building — and a reply waiting on a retry is not the same as one
+ * that was lost, which is why "queued" says so rather than borrowing either
+ * of the other two.
+ */
+function DeliveryMark({ message }) {
+  // Older rows predate the status column; a stored sid still means delivered.
+  const status = message.delivery_status || (message.twilio_sid ? 'SENT' : 'FAILED')
+
+  if (status === 'SENT') return <CheckCheck size={11} className="text-accent" />
+
+  if (status === 'QUEUED') {
+    return (
+      <span
+        className="flex items-center gap-1 text-warn"
+        title="WhatsApp was briefly unreachable. This is queued and will be sent automatically."
+      >
+        <Clock size={11} /> queued
+      </span>
+    )
+  }
+
+  return (
+    <span
+      className="flex items-center gap-1 text-crit"
+      title="This reply was generated but WhatsApp did not accept it. The customer has not seen it."
+    >
+      <TriangleAlert size={11} /> not delivered
+    </span>
+  )
 }
 
 function Bubble({ message }) {
@@ -61,20 +96,7 @@ function Bubble({ message }) {
           }`}
         >
           {clockOf(message.created_at)}
-          {/* A single grey tick is WhatsApp's "sent, not read yet", so it is
-              exactly the wrong thing to show for a reply that never left the
-              building. An undelivered message says so. */}
-          {!fromCustomer &&
-            (message.twilio_sid ? (
-              <CheckCheck size={11} className="text-accent" />
-            ) : (
-              <span
-                className="flex items-center gap-1 text-crit"
-                title="This reply was generated but WhatsApp did not accept it. The customer has not seen it."
-              >
-                <TriangleAlert size={11} /> not delivered
-              </span>
-            ))}
+          {!fromCustomer && <DeliveryMark message={message} />}
         </span>
       </div>
     </div>

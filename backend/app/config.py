@@ -99,6 +99,12 @@ class Settings(BaseSettings):
 
     # Follow-ups (Celery + Redis)
     redis_url: str = "redis://redis:6379/0"
+
+    # How often the outbound retry queue is walked. Short enough that a reply
+    # parked during a container restart goes out while the customer is still
+    # looking at the chat.
+    outbox_drain_seconds: int = 15
+
     followups_enabled: bool = True
     followup_first_hours: float = 4
     followup_second_hours: float = 24

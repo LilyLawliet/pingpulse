@@ -20,8 +20,7 @@ from app.deps import WRITE_ROLES, Tenant, current_org
 from app.models import ChannelConfig, CRMContact, LLMLog, Message
 from app.schemas import LLMLogOut, MessageOut, OutboundMessageRequest
 from app.schemas_tenancy import CRMContactOut
-from app.services import ws_manager
-from app.services.twilio_service import Sender, twilio_service
+from app.services import outbox, ws_manager
 from app.services.ws_manager import manager
 
 router = APIRouter(prefix="/api/v1", tags=["dashboard"])
@@ -145,17 +144,30 @@ async def send_manual_message(
         )
     ).scalars().first()
 
-    sent, sid_or_error = await twilio_service.send_whatsapp(
-        contact.phone_number, payload.content, sender=Sender.for_channel(channel)
-    )
+    # Routed by the channel's provider, exactly as the agent's own replies are.
+    # Calling Twilio directly here was a real bug: on a tenant paired over
+    # WhatsApp Web it sent nothing, while the dashboard showed the operator's
+    # message sitting in the thread as though it had gone.
     message = Message(
         organization_id=tenant.id,
         contact_id=contact.id,
         sender="agent",
         content=payload.content,
-        twilio_sid=sid_or_error if sent else None,
+        delivery_status=outbox.QUEUED,
     )
     db.add(message)
+    await db.flush()
+
+    delivery = await outbox.deliver(
+        channel,
+        contact.phone_number,
+        payload.content,
+        message_id=message.id,
+        organization_id=tenant.id,
+    )
+    message.delivery_status = delivery.status
+    message.twilio_sid = delivery.reference
+    sent = delivery.sent
     await db.flush()
     await db.refresh(message)
 
@@ -169,7 +181,8 @@ async def send_manual_message(
             "provider": "manual",
             "latency_ms": 0,
             "delivered": sent,
-            "twilio_sid": sid_or_error if sent else None,
+            "delivery_status": delivery.status,
+            "twilio_sid": delivery.reference,
         },
     )
     return message

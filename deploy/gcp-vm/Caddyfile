@@ -58,6 +58,22 @@
 	@api path /api/* /ws/* /media/* /health
 	handle @api {
 		reverse_proxy backend:8000 {
+			# Ride out a backend restart instead of answering 502.
+			#
+			# During a deploy the container is recreated, and for a few seconds
+			# Docker's embedded DNS has no record for "backend" (it answers
+			# SERVFAIL, which Caddy logs as "server misbehaving") or the name
+			# resolves to an address that is not listening yet. Both were
+			# reaching the desktop app as a 502 on /ws/monitor.
+			#
+			# Retrying re-dials, and re-dialing re-resolves, so the request is
+			# simply held until the new container answers. Fifteen seconds
+			# covers a normal restart; past that the client's own backoff takes
+			# over, so this never leaves a browser hanging on a backend that is
+			# genuinely down.
+			lb_try_duration 15s
+			lb_try_interval 500ms
+
 			header_up Host {host}
 			header_up X-Real-IP {remote_host}
 			# X-Forwarded-For and X-Forwarded-Proto are set by Caddy already;

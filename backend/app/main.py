@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -25,6 +26,7 @@ from app.config import settings
 from app.database import SessionLocal, engine
 from app.deps import resolve_token
 from app.schemas import ComponentHealth, HealthResponse
+from app.services import outbox
 from app.services.llm_service import probe_gemini, probe_groq
 from app.services.twilio_service import twilio_service
 from app.services.ws_manager import manager
@@ -34,6 +36,13 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
 )
 logger = logging.getLogger("pingpulse")
+
+# Twilio's client logs every request line and every response header at INFO,
+# and httpx logs full request URLs — which for Gemini carries the API key in
+# the query string. Both were being written to the log volume on the VM on
+# every health check. Neither is worth a secret in a file the operator keeps.
+for _noisy in ("twilio.http_client", "httpx", "httpcore"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 
 async def run_migrations() -> None:
@@ -70,7 +79,21 @@ async def lifespan(app: FastAPI):
             await run_migrations()
         except Exception as exc:  # noqa: BLE001 - app still serves /health when DB is down
             logger.error("startup migration failed: %s", exc)
+
+    # Replies that could not go out — most often because the WhatsApp Web
+    # bridge was restarting — are parked in Redis and retried here. Started
+    # after migrations so the drainer never touches a table that is mid-change.
+    stop_drainer = asyncio.Event()
+    drainer = asyncio.create_task(outbox.run_drainer(stop_drainer))
+
     yield
+
+    stop_drainer.set()
+    drainer.cancel()
+    try:
+        await drainer
+    except (asyncio.CancelledError, Exception):  # noqa: BLE001
+        pass
     await engine.dispose()
     logger.info("shutdown complete")
 
@@ -148,27 +171,35 @@ async def _check_provider(probe, name: str) -> ComponentHealth:
 
 
 @app.get("/health", response_model=HealthResponse)
-async def health():
-    """Live check of PostgreSQL, Groq, Gemini and the Twilio client.
+async def health(deep: bool = False):
+    """Is this container serving? Optionally, are the providers reachable too?
+
+    The default is deliberately cheap — a database round trip and nothing else.
+    Docker probes this every fifteen seconds, and the deep version calls Groq,
+    Gemini and Twilio over the internet, so leaving it on by default meant
+    thousands of outbound API calls a day whose only purpose was to answer a
+    liveness probe that a `SELECT 1` already answers.
+
+    `/health?deep=1` still runs the full check, for when a client reports that
+    replies have stopped and the question is which provider is at fault.
 
     The database is the only hard dependency: a provider outage degrades the
-    service (503 is reserved for a DB that is genuinely unreachable) but the
-    container should not be recycled for it.
+    service (503 is reserved for a database that is genuinely unreachable) but
+    the container should not be recycled for it.
     """
     database = await _check_database()
-    groq = await _check_provider(probe_groq, "Groq")
-    gemini = await _check_provider(probe_gemini, "Gemini")
-    twilio = await _check_provider(twilio_service.probe, "Twilio")
 
     components = {
         "database": database,
-        "groq": groq,
-        "gemini": gemini,
-        "twilio": twilio,
         "websocket": ComponentHealth(
             status="ok", detail=f"{manager.connection_count} monitor client(s)"
         ),
     }
+
+    if deep:
+        components["groq"] = await _check_provider(probe_groq, "Groq")
+        components["gemini"] = await _check_provider(probe_gemini, "Gemini")
+        components["twilio"] = await _check_provider(twilio_service.probe, "Twilio")
 
     if database.status == "error":
         overall = "error"

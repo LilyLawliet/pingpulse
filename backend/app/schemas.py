@@ -126,6 +126,9 @@ class MessageOut(BaseModel):
     sender: str
     content: str
     twilio_sid: str | None = None
+    # SENT | QUEUED | FAILED. The dashboard shows a different mark for each,
+    # so a reply still waiting on a retry is never presented as delivered.
+    delivery_status: str = "SENT"
     media_urls: list[str] = Field(default_factory=list)
     created_at: datetime
 

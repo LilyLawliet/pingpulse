@@ -7,6 +7,7 @@ retrieval, persistence — is filtered by that organization.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -32,7 +33,7 @@ from app.services import (
     vision,
     ws_manager,
 )
-from app.services import whatsapp
+from app.services import outbox, whatsapp
 from app.services.twilio_service import (
     Sender,
     signature_url,
@@ -430,30 +431,44 @@ async def process_inbound_message(
     # Routed by the channel's provider: Twilio's API, or the paired WhatsApp
     # Web session. Everything above and below this line is identical either
     # way, which is what keeps the two paths from drifting apart.
-    sent, sid_or_error = await whatsapp.send_message(
-        channel, phone_number, generation.text, outbound_media
-    )
-    if not sent:
-        logger.warning("outbound dispatch failed: %s", sid_or_error)
-        await manager.broadcast(
-            ws_manager.EVENT_ERROR,
-            {"contact_id": str(contact.id), "stage": "dispatch", "detail": sid_or_error},
-        )
-
-    # Recorded whether or not it went out — a reply the customer never saw is
-    # still something the operator needs to know was attempted. `twilio_sid`
-    # stays null on failure, which is how the dashboard tells the difference
-    # and why it must not present these as delivered.
+    #
+    # The row is written *before* the send, not after. A message that has to be
+    # parked in the retry queue needs an id to be reconciled against when it
+    # finally leaves, and there is no id until the row exists.
     outbound = Message(
         organization_id=organization.id,
         contact_id=contact.id,
         sender="agent",
         content=generation.text,
-        twilio_sid=sid_or_error if sent else None,
         media_urls=outbound_media,
+        delivery_status=outbox.QUEUED,
     )
     db.add(outbound)
     await db.flush()
+
+    delivery = await outbox.deliver(
+        channel,
+        phone_number,
+        generation.text,
+        outbound_media,
+        message_id=outbound.id,
+        organization_id=organization.id,
+    )
+    outbound.delivery_status = delivery.status
+    outbound.twilio_sid = delivery.reference
+    sent = delivery.sent
+    sid_or_error = delivery.reference or delivery.detail
+
+    if delivery.queued:
+        # Not an error: the transport is briefly missing and the drainer will
+        # carry this one out. Said plainly so the operator is not alarmed.
+        logger.info("reply to %s parked for retry: %s", phone_number, delivery.detail)
+    elif not sent:
+        logger.warning("outbound dispatch failed: %s", delivery.detail)
+        await manager.broadcast(
+            ws_manager.EVENT_ERROR,
+            {"contact_id": str(contact.id), "stage": "dispatch", "detail": delivery.detail},
+        )
 
     db.add(
         LLMLog(
@@ -477,7 +492,8 @@ async def process_inbound_message(
             "provider": generation.provider,
             "latency_ms": generation.latency_ms,
             "delivered": sent,
-            "twilio_sid": sid_or_error if sent else None,
+            "delivery_status": delivery.status,
+            "twilio_sid": delivery.reference,
             "media_urls": outbound_media,
         },
     )
@@ -699,6 +715,19 @@ async def qr_session_inbound(request: Request, db: AsyncSession = Depends(get_db
         return {"ok": False, "error": str(exc)}
 
 
+async def _drain_after_reconnect(channel_id) -> None:
+    """Push out whatever was parked while a paired session was away.
+
+    Its own task, so a slow or large drain never delays the bridge's status
+    call, and its own error handling, because a background task that raises
+    disappears with nothing in the log to say why.
+    """
+    try:
+        await outbox.drain_now(channel_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("could not drain the outbox for %s: %s", channel_id, exc)
+
+
 @router.post("/qr-status")
 async def qr_session_status(request: Request, db: AsyncSession = Depends(get_db)):
     """The bridge reporting where a pairing has got to.
@@ -731,6 +760,15 @@ async def qr_session_status(request: Request, db: AsyncSession = Depends(get_db)
         if body.get("phoneNumber"):
             channel.phone_number = str(body["phoneNumber"]).replace("whatsapp:", "")
     await db.commit()
+
+    if status_value == "AUTHENTICATED":
+        # The transport is back. Anything parked while it was gone goes out
+        # now rather than waiting for the next scheduled drain — this is the
+        # difference between a customer waiting seconds and waiting a minute.
+        # Detached deliberately: the bridge is holding this request open and
+        # must not wait on a queue that could hold many messages.
+        channel_id = channel.id
+        asyncio.create_task(_drain_after_reconnect(channel_id))
 
     await manager.broadcast(
         ws_manager.EVENT_SYNC,

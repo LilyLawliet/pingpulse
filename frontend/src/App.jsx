@@ -18,7 +18,7 @@ export default function App() {
 }
 
 function Dashboard({ onSignedOut }) {
-  const { connected, events } = useMonitorSocket()
+  const { connected, events, generation } = useMonitorSocket()
 
   const [organizations, setOrganizations] = useState([])
   const [selectedOrg, setSelectedOrg] = useState(null)
@@ -76,6 +76,7 @@ function Dashboard({ onSignedOut }) {
     loadContacts()
   }, [loadContacts])
 
+
   /**
    * Merge rows into a thread by message id, keeping chronological order.
    * Live events and the REST fetch both carry the row's real primary key, so
@@ -114,6 +115,40 @@ function Dashboard({ onSignedOut }) {
     [mergeMessages]
   )
 
+  const selectedContactRef = useRef(null)
+  selectedContactRef.current = selectedContact
+
+  /** Re-read the open conversation from the API, replacing what we hold. */
+  const refreshOpenThread = useCallback(async () => {
+    const contactId = selectedContactRef.current
+    if (!contactId) return
+    try {
+      const messages = await api.contactMessages(contactId)
+      mergeMessages(contactId, messages)
+    } catch {
+      // A refresh that fails changes nothing on screen; the socket will
+      // reconnect and ask again.
+    }
+  }, [mergeMessages])
+
+  // The socket came back, so we were disconnected — for a deploy, a sleeping
+  // laptop, a dropped network. Everything on screen is now as old as the gap,
+  // including the delivery mark on a reply that has since gone out, so it is
+  // re-read rather than left to look current.
+  const firstConnection = useRef(true)
+  useEffect(() => {
+    if (generation === 0) return
+    if (firstConnection.current) {
+      // The mount effects above have already loaded this.
+      firstConnection.current = false
+      return
+    }
+    loadOrganizations()
+    loadContacts()
+    loadStats()
+    refreshOpenThread()
+  }, [generation, loadOrganizations, loadContacts, loadStats, refreshOpenThread])
+
   // Live traffic drives the whole screen: new bubbles, typing state, stages.
   useEffect(() => {
     const fresh = events.slice(seenEvents.current)
@@ -151,6 +186,7 @@ function Dashboard({ onSignedOut }) {
           sender: 'agent',
           content: data.content,
           twilio_sid: data.twilio_sid,
+          delivery_status: data.delivery_status,
           media_urls: data.media_urls || [],
           created_at: event.timestamp,
         })
@@ -168,9 +204,12 @@ function Dashboard({ onSignedOut }) {
       if (event.type === 'sync') {
         loadContacts()
         loadStats()
+        // A drained outbox changes the delivery mark on messages already on
+        // screen, so the open thread is re-read rather than appended to.
+        if (data.outbox) refreshOpenThread()
       }
     }
-  }, [events, appendMessage, loadContacts, loadStats])
+  }, [events, appendMessage, loadContacts, loadStats, refreshOpenThread])
 
   const previews = useMemo(() => {
     const map = {}
