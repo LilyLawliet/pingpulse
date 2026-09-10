@@ -24,3 +24,6 @@ tools/
 
 # Recorded demo output; regenerate with scripts/record_demo.py
 demo/*.webm
+demo/*.mp4
+demo/raw
+demo/
