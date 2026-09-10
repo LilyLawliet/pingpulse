@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     # Signed desktop installers the app auto-updates from.
     updates_dir: str = "/app/updates"
 
+    # The dashboard bundle served at /app, for browser users. The same
+    # build that ships inside the desktop app; empty means do not serve it.
+    web_dir: str = "/app/web"
+
     # Follow-ups (Celery + Redis)
     redis_url: str = "redis://redis:6379/0"
 

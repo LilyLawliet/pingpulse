@@ -134,6 +134,22 @@ _updates_root = Path(settings.updates_dir)
 _updates_root.mkdir(parents=True, exist_ok=True)
 app.mount("/updates", StaticFiles(directory=str(_updates_root)), name="updates")
 
+# The dashboard, for operators who cannot run the desktop app — a client on a
+# Mac, most immediately, since a macOS build needs a Mac to produce.
+#
+# This is the same build that ships inside the desktop app, byte for byte, so
+# there is no second version to keep in step. It is served under /app rather
+# than at the root so the bare domain still answers with nothing but a status
+# line, and it is not a security boundary: an access token is what unlocks
+# data, here exactly as in the desktop app, and every API call and the monitor
+# socket check it the same way.
+_web_root = Path(settings.web_dir)
+if _web_root.is_dir() and (_web_root / "index.html").is_file():
+    app.mount("/app", StaticFiles(directory=str(_web_root), html=True), name="dashboard")
+    logger.info("serving the dashboard at /app from %s", _web_root)
+else:
+    logger.info("no web dashboard bundle at %s — /app is not served", _web_root)
+
 app.include_router(webhook_router)
 app.include_router(auth_router)
 app.include_router(organizations_router)

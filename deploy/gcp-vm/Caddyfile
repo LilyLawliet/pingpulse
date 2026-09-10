@@ -12,7 +12,7 @@
 # browser exposes no interface, no login form and no customer data — only a
 # status line saying the engine is alive.
 #
-# Exactly four things stay reachable from the internet, and each has a reason:
+# A short list stays reachable from the internet, and each has a reason:
 #
 #   /api/*    Twilio posts inbound WhatsApp messages to
 #             /api/v1/whatsapp/webhook, and the desktop app calls the rest.
@@ -24,6 +24,12 @@
 #             updates itself, so a client never runs an installer by hand
 #             twice. Public on purpose, and signed: the app verifies the
 #             signature against a baked-in public key before installing.
+#   /app      the dashboard in a browser, for operators who cannot run the
+#             desktop app — a Mac, most immediately. Deliberately not the
+#             root: the bare domain still answers with a status line and
+#             nothing else, so nothing advertises that a dashboard exists.
+#             It is not a security boundary either way — an access token is
+#             what unlocks data, and the API checks it identically for both.
 #   /health   uptime monitoring.
 #
 # Anything else — including FastAPI's /docs and /openapi.json, which would
@@ -59,7 +65,7 @@
 	# --- the only paths that reach the application ------------------------
 	# Twilio computes its webhook signature over the full external URL, so the
 	# upstream has to see the real host and scheme rather than the container's.
-	@api path /api/* /ws/* /media/* /updates/* /health
+	@api path /api/* /ws/* /media/* /updates/* /app /app/* /health
 	handle @api {
 		reverse_proxy backend:8000 {
 			# Ride out a backend restart instead of answering 502.

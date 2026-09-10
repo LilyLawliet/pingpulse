@@ -135,6 +135,9 @@ services:
       - ${DATA_DIR:-/opt/pingpulse/data}/logs:/app/logs
       # Signed installers the desktop app updates itself from.
       - ${DATA_DIR:-/opt/pingpulse/data}/updates:/app/updates
+      # The dashboard bundle served at /app — the same build that ships
+      # inside the desktop installer.
+      - ${DATA_DIR:-/opt/pingpulse/data}/web:/app/web
     depends_on:
       db:
         condition: service_healthy
