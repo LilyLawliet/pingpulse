@@ -440,6 +440,10 @@ async def process_inbound_message(
             {"contact_id": str(contact.id), "stage": "dispatch", "detail": sid_or_error},
         )
 
+    # Recorded whether or not it went out — a reply the customer never saw is
+    # still something the operator needs to know was attempted. `twilio_sid`
+    # stays null on failure, which is how the dashboard tells the difference
+    # and why it must not present these as delivered.
     outbound = Message(
         organization_id=organization.id,
         contact_id=contact.id,

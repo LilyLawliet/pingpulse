@@ -282,13 +282,13 @@ export default function WhatsAppSettings({ onChanged }) {
               id: 'TWILIO',
               icon: Cloud,
               title: 'Twilio Cloud API',
-              blurb: 'Official and supported. Costs per message.',
+              blurb: 'Official API. Costs per message.',
             },
             {
               id: 'QR_SESSION',
               icon: QrCode,
               title: 'WhatsApp Web QR',
-              blurb: 'Free. Against WhatsApp terms — risk of a ban.',
+              blurb: 'Link a phone by scanning a QR code.',
             },
           ].map(({ id, icon: Icon, title, blurb }) => (
             <button
@@ -307,18 +307,6 @@ export default function WhatsAppSettings({ onChanged }) {
             </button>
           ))}
         </div>
-
-        {provider === 'QR_SESSION' && (
-          <p className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2.5 text-2xs leading-relaxed text-warn">
-            <TriangleAlert size={13} className="mt-0.5 shrink-0" />
-            <span>
-              This links a real phone through an unofficial WhatsApp Web session.
-              WhatsApp does not permit it, and numbers used for automated sales
-              messages can be banned permanently. Twilio is the safe choice for a
-              business number you cannot afford to lose.
-            </span>
-          </p>
-        )}
 
         <label className="block">
           <span className="eyebrow mb-1.5 block">

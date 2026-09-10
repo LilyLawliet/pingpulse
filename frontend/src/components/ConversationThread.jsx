@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Bot, Check, CheckCheck, Sparkles } from 'lucide-react'
+import { Bot, CheckCheck, Sparkles, TriangleAlert } from 'lucide-react'
 import { STAGE_LABEL, STAGE_STYLE, clockOf, initialsOf, prettyPhone } from '../format.js'
 import { mediaUrl } from '../backend.js'
 
@@ -61,11 +61,19 @@ function Bubble({ message }) {
           }`}
         >
           {clockOf(message.created_at)}
+          {/* A single grey tick is WhatsApp's "sent, not read yet", so it is
+              exactly the wrong thing to show for a reply that never left the
+              building. An undelivered message says so. */}
           {!fromCustomer &&
             (message.twilio_sid ? (
               <CheckCheck size={11} className="text-accent" />
             ) : (
-              <Check size={11} className="text-faint" />
+              <span
+                className="flex items-center gap-1 text-crit"
+                title="This reply was generated but WhatsApp did not accept it. The customer has not seen it."
+              >
+                <TriangleAlert size={11} /> not delivered
+              </span>
             ))}
         </span>
       </div>

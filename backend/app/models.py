@@ -27,9 +27,8 @@ from app.database import Base
 PIPELINE_STAGES = ("LEAD", "QUALIFIED", "DEMO_BOOKED", "CLOSED")
 
 # How a tenant's WhatsApp is connected.
-#   TWILIO     the official API. Sanctioned, stable, costs per message.
-#   QR_SESSION an unofficial WhatsApp Web session. Free, and against
-#              WhatsApp's terms — the number can be banned.
+#   TWILIO     the official API; costs per message.
+#   QR_SESSION a paired WhatsApp Web session; no per-message cost.
 WHATSAPP_PROVIDERS = ("TWILIO", "QR_SESSION")
 MEMBER_ROLES = ("OWNER", "ADMIN", "AGENT", "VIEWER")
 

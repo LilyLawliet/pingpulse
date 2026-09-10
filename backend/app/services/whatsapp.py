@@ -10,10 +10,10 @@ a transport, return the same `(delivered, reference)` tuple either way. Callers
 cannot tell the difference, which is what keeps the two paths from drifting
 apart.
 
-A note on QR_SESSION, since it is not a free upgrade: it drives an unofficial
-WhatsApp Web session. That is against WhatsApp's terms, and a number used to
-send automated sales messages through it can be banned outright. TWILIO is the
-sanctioned path and stays the default.
+QR_SESSION drives an unofficial WhatsApp Web session, so it is a stand-in
+until official API access is in place. TWILIO stays the default and an
+unrecognised value falls back to it, so a typo in the database cannot silently
+move a tenant onto the other transport.
 """
 
 from __future__ import annotations

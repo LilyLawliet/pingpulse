@@ -267,3 +267,78 @@ async def test_the_bridge_status_route_rejects_an_unknown_caller(client):
     )
 
     assert response.status_code == 403
+
+
+# ------------------------------------------------------- delivery honesty
+@pytest.mark.asyncio
+async def test_a_failed_send_is_not_recorded_as_delivered(client, db_session, monkeypatch):
+    """A reply the customer never saw must not look like one they did.
+
+    This is the bug it exists for: the bridge had no session after a restart,
+    every send failed, and the dashboard still showed the agent replying — so
+    the operator believed a conversation was handled when nothing had been
+    sent. `twilio_sid` staying null is what the interface reads to tell the
+    difference, so it has to stay null.
+    """
+    monkeypatch.setattr(settings, "twilio_validate_signature", False)
+
+    organization = Organization(name="Undelivered Co", sales_prompt="Sell things.")
+    db_session.add(organization)
+    await db_session.flush()
+    db_session.add(
+        ChannelConfig(
+            organization_id=organization.id,
+            channel="whatsapp",
+            provider="twilio",
+            phone_number="+14155557777",
+            whatsapp_provider="QR_SESSION",
+        )
+    )
+    await db_session.flush()
+
+    # The bridge is unreachable, exactly as it was with no restored session.
+    class DeadBridge:
+        def __init__(self, *_, **__):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def post(self, *_, **__):
+            raise ConnectionError("session not connected")
+
+    monkeypatch.setattr(whatsapp.httpx, "AsyncClient", DeadBridge)
+
+    await client.post(
+        "/api/v1/whatsapp/webhook",
+        data={
+            "MessageSid": "SM_undelivered",
+            "From": "whatsapp:+971500002222",
+            "To": "whatsapp:+14155557777",
+            "Body": "are you there?",
+            "NumMedia": "0",
+        },
+    )
+
+    from sqlalchemy import select
+
+    from app.models import Message
+
+    replies = (
+        await db_session.execute(
+            select(Message).where(
+                Message.organization_id == organization.id,
+                Message.sender == "agent",
+            )
+        )
+    ).scalars().all()
+
+    assert replies, "the attempted reply should still be recorded for the operator"
+    for reply in replies:
+        assert reply.twilio_sid is None, (
+            "a failed send must leave twilio_sid null so the dashboard can show "
+            "it as undelivered rather than as sent"
+        )

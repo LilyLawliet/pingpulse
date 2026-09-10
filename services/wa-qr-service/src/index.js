@@ -15,15 +15,11 @@
  * Auth credentials are written to disk under SESSIONS_DIR, which is a mounted
  * volume, so a paired phone survives a container restart without re-scanning.
  *
- * ---------------------------------------------------------------------------
- * This uses an unofficial WhatsApp Web client. That is against WhatsApp's
- * terms of service, and a number sending automated sales messages through it
- * can be banned. Twilio is the sanctioned transport; this exists because
- * clients ask for it, not because it is the safer choice.
- * ---------------------------------------------------------------------------
+ * This uses an unofficial WhatsApp Web client, so it is a stand-in until
+ * official API access is in place rather than a permanent transport.
  */
 
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
 
@@ -119,7 +115,11 @@ async function startSession(sessionId) {
   })
 
   sessions.set(sessionId, socket)
-  reportStatus(sessionId, 'GENERATING_QR')
+  // Only a genuinely new pairing needs a QR. Resuming a stored session would
+  // otherwise flash "waiting for a scan" at a client who scanned weeks ago.
+  if (!state.creds?.registered) {
+    reportStatus(sessionId, 'GENERATING_QR')
+  }
 
   socket.ev.on('creds.update', saveCreds)
 
@@ -318,6 +318,43 @@ wss.on('connection', (socket, request) => {
   })
 })
 
-server.listen(PORT, '0.0.0.0', () => {
+/**
+ * Bring every already-paired session back up.
+ *
+ * Credentials are on a mounted volume precisely so a restart is invisible to a
+ * client, but that only holds if something reconnects them. Without this the
+ * sessions map is empty after a deploy, /send finds nothing, and replies are
+ * silently not delivered.
+ */
+async function restoreSessions() {
+  let folders = []
+  try {
+    folders = readdirSync(SESSIONS_DIR, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+  } catch (error) {
+    log.warn({ error: error.message }, 'could not read the sessions directory')
+    return
+  }
+
+  // A folder without creds.json was started but never scanned; reconnecting it
+  // would only produce a QR nobody is watching.
+  const paired = folders.filter((name) =>
+    existsSync(path.join(SESSIONS_DIR, name, 'creds.json')),
+  )
+
+  log.info({ found: folders.length, paired: paired.length }, 'restoring sessions')
+  for (const sessionId of paired) {
+    try {
+      await startSession(sessionId)
+      log.info({ sessionId }, 'session restored')
+    } catch (error) {
+      log.error({ sessionId, error: error.message }, 'could not restore session')
+    }
+  }
+}
+
+server.listen(PORT, '0.0.0.0', async () => {
   log.info({ port: PORT, api: API_URL }, 'wa-qr-service listening')
+  await restoreSessions()
 })

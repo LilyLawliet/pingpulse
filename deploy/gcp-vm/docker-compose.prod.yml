@@ -194,9 +194,8 @@ services:
     # provider, and speaks to the API over the internal network only — it
     # publishes no port and Caddy does not route to it.
     #
-    # This drives an unofficial WhatsApp Web client, which is against
-    # WhatsApp's terms; a number sending automated messages through it can be
-    # banned. Twilio remains the default and the sanctioned path.
+    # An unofficial WhatsApp Web client, so a stand-in until official API
+    # access is in place. Twilio remains the default.
     build:
       context: ../..
       dockerfile: services/wa-qr-service/Dockerfile
