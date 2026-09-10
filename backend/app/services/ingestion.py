@@ -1,6 +1,6 @@
 """Catalogue and policy ingestion.
 
-Nishat Linen runs on Shopify, which publishes a structured `products.json`
+Many retail shops run on Shopify, which publishes a structured `products.json`
 feed. That is used in preference to scraping HTML: it gives titles, prices,
 images and variants directly, and is far less likely to break.
 
@@ -131,67 +131,3 @@ async def fetch_catalogue(
 # --------------------------------------------------------------------------
 # Operational policy facts
 # --------------------------------------------------------------------------
-def nishat_policy_documents() -> list[dict[str, Any]]:
-    """The operational facts the agent must be able to answer from.
-
-    Written as separate documents so retrieval can return just the relevant
-    one, and phrased the way a customer would ask.
-    """
-    return [
-        {
-            "title": "Delivery time and areas",
-            "doc_type": "policy",
-            "content": (
-                "Delivery takes 5 to 7 working days nationwide across Pakistan, including "
-                "Lahore, Karachi, Islamabad, Rawalpindi, Faisalabad, Multan, Peshawar and "
-                "Quetta. During mega sale events delivery can take up to 7 working days. "
-                "Orders are dispatched from our warehouse and tracked by courier."
-            ),
-        },
-        {
-            "title": "Payment methods",
-            "doc_type": "policy",
-            "content": (
-                "We accept Cash on Delivery (COD) anywhere in Pakistan, online payment by "
-                "credit or debit card (Visa and Mastercard), and Tabby which lets you buy "
-                "now and pay later in 4 interest-free installments. For orders above "
-                "Rs. 15,000 an advance payment is required before dispatch."
-            ),
-        },
-        {
-            "title": "Advance payment rule",
-            "doc_type": "policy",
-            "content": (
-                "Orders above Rs. 15,000 require advance payment and cannot be placed as "
-                "Cash on Delivery. Orders of Rs. 15,000 or less can be paid on delivery."
-            ),
-        },
-        {
-            "title": "Returns and exchange policy",
-            "doc_type": "policy",
-            "content": (
-                "Items can be returned or exchanged within 7 days of delivery, provided "
-                "they are unused, unwashed and in their original packaging with tags "
-                "attached. Stitched-to-order, altered and sale items are not returnable. "
-                "Raise a return request through customer care and the courier will collect "
-                "the parcel. Refunds are issued once the item passes inspection."
-            ),
-        },
-        {
-            "title": "Delivery charges",
-            "doc_type": "policy",
-            "content": (
-                "A standard delivery charge applies per order and is shown at checkout "
-                "before you confirm. Cash on Delivery orders may carry a small additional "
-                "handling fee. Promotional free-delivery offers are announced on the site."
-            ),
-        },
-        {
-            "title": "Order tracking",
-            "doc_type": "policy",
-            "content": (
-                "Once an order is dispatched a tracking number is sent by SMS and email. "
-                "Orders can also be tracked from the account section on nishatlinen.com."
-            ),
-        },
-    ]

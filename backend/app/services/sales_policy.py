@@ -60,7 +60,11 @@ SALES_POLICY = """SALES POLICY (these override everything else):
    shop. You answer now, with what you have.
 9. Never pressure the customer, and never promise something the business cannot fulfil.
 10. If they are ready to buy, move to the next concrete step (confirm item, size, address,
-   payment method)."""
+   payment method).
+11. Be direct. One to three sentences, maximum. No preamble, no restating their question
+   back to them, no filler like "great question" or "I would be happy to help".
+12. If they asked a specific question, the FIRST sentence answers it. Only then may you
+   add one short line moving things forward."""
 
 
 STAGE_DIRECTIVES = {
@@ -80,13 +84,30 @@ ACTION_DIRECTIVES = {
     "handle_objection": "Acknowledge the objection, respond with real information, and do not discount unless the business rules allow it.",
     "qualify": "Ask the single most useful question to narrow down what they want.",
     "confirm_order": "Confirm the exact item and price, then ask for size, delivery address and payment method.",
+    "book_call": (
+        "They asked to book a call. Send the booking link from the BOOKING section "
+        "verbatim and ask which time suits them. Nothing else."
+    ),
     "greet": "Greet them once and ask what they are looking for.",
 }
 
 
 def directives(analysis: dict[str, Any]) -> list[str]:
-    """Turn the analyzer's reading into instructions for the response step."""
+    """Turn the analyzer's reading into instructions for the response step.
+
+    A booking request short-circuits everything. Once someone has asked for a
+    call, stage directives and product directives only compete with the link
+    for the model's attention, and the failure mode that produced this rule was
+    an agent answering "can we book a call?" with store policy and an FAQ.
+    """
     lines: list[str] = []
+
+    if analysis.get("intent") == "book_call" or analysis.get("next_action") == "book_call":
+        return [
+            ACTION_DIRECTIVES["book_call"],
+            "Do NOT list products, prices, delivery terms, payment terms, store policies "
+            "or FAQs on this turn. The only job is the booking link and the time slot.",
+        ]
 
     stage = analysis.get("stage", "NEW")
     if stage in STAGE_DIRECTIVES:
@@ -131,6 +152,7 @@ def deterministic_reply(
     knowledge_chunks: list[Any],
     organization: Any = None,
     products: list[Any] | None = None,
+    booking_url: str | None = None,
 ) -> str:
     """What to send when both providers are down.
 
@@ -138,6 +160,18 @@ def deterministic_reply(
     retrieved fact is read out. Only if nothing at all was found do we ask them
     to say more — and even then, without promising a human.
     """
+    # Booking first, and before anything is retrieved. A provider outage is no
+    # reason to answer "can we book a call?" with a catalogue — this path once
+    # replied to a booking request with "tell me the item and colour", which is
+    # the exact failure the book_call intent exists to prevent.
+    if analysis.get("intent") == "book_call" or analysis.get("next_action") == "book_call":
+        if booking_url:
+            return f"You can book a time here: {booking_url}\n\nWhat time suits you best?"
+        return (
+            "Happy to set up a call. What day and time suit you, and I'll get it in "
+            "the diary?"
+        )
+
     # A product question is answered with products, not with whatever policy
     # happened to score highest.
     if products:
@@ -145,13 +179,15 @@ def deterministic_reply(
         for product in products[:3]:
             attributes = getattr(product, "attributes", None) or {}
             price = attributes.get("price")
-            currency = attributes.get("currency", "PKR")
+            currency = attributes.get(
+                "currency", getattr(organization, "default_currency", None) or ""
+            )
             title = getattr(product, "title", "")
             lines.append(f"{title} — {currency} {price}" if price else title)
         listing = "\n".join(lines)
         return (
             f"Here's what we have:\n{listing}\n\n"
-            "Would you like me to reserve one, or shall I show you other colours?"
+            "Would you like me to reserve one, or show you something else?"
         )
 
     if knowledge_chunks:
@@ -165,12 +201,14 @@ def deterministic_reply(
 
     name = getattr(organization, "name", None) or "us"
     intent = analysis.get("intent", "")
+    # Deliberately industry-neutral: the same agent serves an electronics shop
+    # and a B2B SaaS company, and "what outfit are you after" is nonsense to one.
     if intent == "image_request":
         return (
-            f"Tell me the colour and the kind of outfit you're after and I'll pull up "
-            f"what {name} has in stock right now."
+            f"Tell me a bit more about what you're after and I'll pull up what "
+            f"{name} has right now."
         )
     return (
-        "Could you tell me a little more about what you're looking for — the item and "
-        "colour — and I'll check exactly what we have."
+        "Could you tell me a little more about what you're looking for, and I'll "
+        "check exactly what we have?"
     )

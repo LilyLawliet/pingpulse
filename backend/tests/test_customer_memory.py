@@ -204,3 +204,73 @@ async def test_extraction_failure_does_not_break_the_reply(db_session, default_o
 
 
 
+
+# ---------------------------------------------------------------------------
+# Regressions found while recording the lifecycle demo.
+# ---------------------------------------------------------------------------
+
+
+def test_normalise_does_not_alias_the_dict_it_was_given():
+    """Memory updates must not mutate the value SQLAlchemy loaded.
+
+    `contact.memory` is a plain JSON column with no mutation tracking. When
+    `normalise` aliased the nested containers, appending a rejection also
+    changed the loaded value, the before and after images compared equal, and
+    the UPDATE was never emitted — so nothing after the first message was ever
+    saved.
+    """
+    from app.services import customer_memory
+
+    loaded = customer_memory.reject_item(customer_memory.empty(), "green")
+
+    updated = customer_memory.apply_analysis(loaded, {"rejected_items": ["red"]})
+
+    assert updated["rejected_items"] == ["green", "red"]
+    # The dict we were handed is untouched, so the two really do differ.
+    assert loaded["rejected_items"] == ["green"]
+    assert updated["rejected_items"] is not loaded["rejected_items"]
+    assert updated["facts"] is not loaded["facts"]
+
+
+def test_apply_analysis_leaves_a_new_object_each_time():
+    """Two rounds in a row must each produce a distinguishable value."""
+    from app.services import customer_memory
+
+    first = customer_memory.apply_analysis(
+        customer_memory.empty(), {"new_requirements": ["blue"]}
+    )
+    second = customer_memory.apply_analysis(first, {"new_requirements": ["cotton"]})
+
+    assert set(first["requirements"]) == {"blue"}
+    assert set(second["requirements"]) == {"blue", "cotton"}
+
+
+@pytest.mark.parametrize(
+    "message, wanted, rejected",
+    [
+        ("i don't like red, show me blue.", "blue", ["red"]),
+        # The mirror image. Reading COLOUR_WORDS in tuple order rejected red
+        # here — the colour the customer had just asked for.
+        ("i don't like blue, show me red.", "red", ["blue"]),
+        ("not a fan of green, do you have black?", "black", ["green"]),
+        # Roman Urdu puts the dislike after the colour.
+        ("red pasand nahi, blue dikhayen", "blue", ["red"]),
+        ("show me blue", "blue", []),
+        ("i don't like red", None, ["red"]),
+        ("kuch aur dikhayen", None, []),
+    ],
+)
+def test_read_colours_pairs_each_colour_with_its_own_clause(message, wanted, rejected):
+    from app.services.analyzer import read_colours
+
+    assert read_colours(message) == (wanted, rejected)
+
+
+def test_heuristic_keeps_the_colour_that_was_asked_for():
+    """A compound message names a dislike and a request; both must survive."""
+    from app.services.analyzer import heuristic_analysis
+
+    analysis = heuristic_analysis("I don't like blue, show me red.")
+
+    assert analysis["rejected_items"] == ["blue"]
+    assert analysis["colour_preference"] == "red"

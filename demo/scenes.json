@@ -1,0 +1,26 @@
+{
+  "duration": 50.51,
+  "scenes": [
+    {
+      "key": "retail",
+      "title": "Retail \u2014 Product Query with Photo",
+      "caption": "Real stock, real price, and the picture attached",
+      "start": 10.18,
+      "end": 33.21
+    },
+    {
+      "key": "saas",
+      "title": "B2B SaaS \u2014 Tier Pricing, Answered Directly",
+      "caption": "Same agent, different tenant, its own plans and currency",
+      "start": 33.21,
+      "end": 43.5
+    },
+    {
+      "key": "booking",
+      "title": "Call Booking Detected Instantly",
+      "caption": "Calendar link straight away \u2014 no FAQs, no filler",
+      "start": 43.5,
+      "end": 50.51
+    }
+  ]
+}

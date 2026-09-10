@@ -24,6 +24,7 @@ Shape stored on `crm_contacts.memory`:
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
@@ -61,13 +62,22 @@ def empty() -> dict[str, Any]:
 
 
 def normalise(memory: dict[str, Any] | None) -> dict[str, Any]:
-    """Fill in any missing sections so callers can index without checking."""
+    """Fill in any missing sections so callers can index without checking.
+
+    The sections are deep-copied rather than aliased. Every helper below builds
+    on `normalise`, and `contact.memory` is a plain JSON column with no mutation
+    tracking: if the returned dict shared its lists and dicts with the one
+    SQLAlchemy loaded, appending a rejection would mutate the loaded value too.
+    The before and after images would then compare equal, no UPDATE would be
+    emitted, and the change would be lost on commit — silently, and only from
+    the second message onwards, because the first starts from an empty dict.
+    """
     base = empty()
     if not isinstance(memory, dict):
         return base
     for key, default in base.items():
         value = memory.get(key)
-        base[key] = value if isinstance(value, type(default)) else default
+        base[key] = deepcopy(value) if isinstance(value, type(default)) else default
     return base
 
 

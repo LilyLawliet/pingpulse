@@ -1,6 +1,6 @@
 """Seed a second, deliberately different tenant: a B2B SaaS company.
 
-Nishat Linen is retail — pictures, colours, cash on delivery. This one sells
+Aurora Retail is the e-commerce tenant — stock, delivery, cash on delivery. This one sells
 software to businesses: monthly plans, integrations, and calls booked rather
 than parcels shipped. Running both proves the agent is driven by each
 organization's own data rather than anything hard-coded for clothing.

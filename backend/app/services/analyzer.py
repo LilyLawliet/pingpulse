@@ -71,7 +71,44 @@ MEETING_MARKERS = (
     "wholesale", "bulk order", "b2b", "partnership", "reseller",
 )
 
-PRICE_MARKERS = ("price", "cost", "how much", "kitne", "kitna", "rate", "budget")
+# An explicit request to get on a call, as opposed to merely mentioning one.
+# MEETING_MARKERS is deliberately broad — it only decides whether to put a
+# booking link in the prompt — but the `book_call` intent suppresses the
+# catalogue entirely, so it needs phrases that can only mean "book me in".
+# "What do you call this?" contains "call" and must not qualify.
+BOOK_CALL_MARKERS = (
+    "book a call", "book a demo", "book a meeting", "book a slot", "book a time",
+    "schedule a call", "schedule a demo", "schedule a meeting", "schedule time",
+    "set up a call", "set up a demo", "set up a meeting", "setup a call",
+    "arrange a call", "arrange a meeting", "hop on a call", "get on a call",
+    "jump on a call", "have a call", "quick call", "demo call",
+    "consultation call", "talk to sales", "speak to sales", "talk to your team",
+    "speak to your team", "talk to someone", "speak to someone",
+    "book an appointment", "schedule an appointment",
+    "call book", "meeting book", "demo dikha",
+)
+
+# "Can we book a call?", "I'd like to schedule a demo" — the verb and the
+# noun separated by a few words, which the flat phrase list above misses.
+BOOK_CALL_PATTERN = re.compile(
+    r"\b(book|schedule|arrange|set\s?up|organis[ez]|have)\b[^.?!]{0,24}"
+    r"\b(call|demo|meeting|appointment|consultation)\b",
+    re.IGNORECASE,
+)
+
+
+def wants_to_book(text: str) -> bool:
+    """Is this an explicit request to get on a call, demo or meeting?"""
+    lowered = (text or "").lower()
+    return _contains(lowered, BOOK_CALL_MARKERS) or bool(BOOK_CALL_PATTERN.search(lowered))
+
+
+# "pricing" does not contain "price" as a substring ("prici" + "ng"), and
+# "what's the pricing?" is how B2B buyers ask, so it needs its own entry.
+PRICE_MARKERS = (
+    "price", "pricing", "cost", "how much", "kitne", "kitna", "rate",
+    "budget", "quote", "fees", "charges", "per month", "per seat",
+)
 DELIVERY_MARKERS = ("deliver", "delivery", "shipping", "ship", "courier", "days", "arrive")
 PAYMENT_MARKERS = ("payment", "pay", "cod", "cash on delivery", "card", "tabby", "installment")
 BUY_MARKERS = ("order", "buy", "purchase", "i'll take", "confirm", "checkout")
@@ -82,7 +119,8 @@ return STRICT JSON describing the customer's latest message. Do not write anythi
 Return exactly these keys:
 {{
   "intent": one of ["greeting","product_question","price_question","delivery_question",
-                    "payment_question","image_request","objection","purchase","smalltalk","other"],
+                    "payment_question","image_request","objection","purchase","book_call",
+                    "smalltalk","other"],
   "stage": one of ["NEW","DISCOVERY","QUALIFIED","PRESENTATION","OBJECTION","NEGOTIATION","READY_TO_BUY","CLOSED"],
   "wants_images": true or false,
   "colour_preference": a colour they asked for, or null,
@@ -100,7 +138,7 @@ Return exactly these keys:
                     styles or specific products ("I don't like blue" -> ["blue"]),
   "wants_meeting": true if they asked for a call, meeting, demo or to speak to someone,
   "next_action": one of ["answer_question","show_products","handle_objection",
-                         "qualify","confirm_order","greet"]
+                         "qualify","confirm_order","book_call","greet"]
 }}
 
 Rules:
@@ -108,6 +146,9 @@ Rules:
 - "dropped_requirements" is only for explicit reversals ("not red, I want blue").
 - "rejected_items" is for dislikes and refusals: "I don't like blue", "not silk",
   "too flashy", "not this one". Record the attribute, not the whole sentence.
+- Use intent "book_call" (and next_action "book_call") whenever they ask to book or
+  schedule a call, demo, meeting or consultation, or to talk to sales — even if they
+  also mention a product or a price in the same message. Booking wins.
 - Return raw JSON with no code fences.
 
 CONVERSATION SO FAR:
@@ -123,6 +164,67 @@ def _contains(text: str, markers: Iterable[str]) -> bool:
     return any(marker in lowered for marker in markers)
 
 
+# Where one clause stops and the next begins. "I don't like red, show me blue"
+# is a dislike followed by a request, and the comma is what separates them.
+CLAUSE_BREAK = re.compile(r"[,.;!?]|\bbut\b|\blekin\b|\bmagar\b|\bhowever\b")
+
+# How far from "don't like" a colour can sit and still be the thing disliked.
+REJECTION_REACH = 24
+
+
+def read_colours(text: str) -> tuple[str | None, list[str]]:
+    """Split the colours in a message into the wanted one and the rejected ones.
+
+    "I don't like red, show me blue" names two colours with opposite meanings,
+    so position decides which is which. A colour counts as rejected when it sits
+    beside a rejection marker inside the same clause - just behind it, as Roman
+    Urdu puts it ("red pasand nahi"), or just after it ("don't like red").
+    Whatever is left over is what the customer actually wants.
+
+    Reading in message order is the point. Taking the first colour that appears
+    in COLOUR_WORDS instead makes the outcome depend on the order of that tuple,
+    so "I don't like blue, show me red" would reject red - the very colour that
+    was just asked for.
+    """
+    colours = sorted(
+        (m.start(), m.end(), word)
+        for word in COLOUR_WORDS
+        for m in re.finditer(rf"\b{re.escape(word)}\b", text)
+    )
+    if not colours:
+        return None, []
+
+    markers = [
+        (m.start(), m.end())
+        for marker in REJECTION_MARKERS
+        for m in re.finditer(re.escape(marker), text)
+    ]
+
+    def unbroken(left: int, right: int) -> bool:
+        return left <= right and not CLAUSE_BREAK.search(text[left:right])
+
+    rejected: list[str] = []
+    for marker_start, marker_end in markers:
+        behind = [
+            c for c in colours
+            if c[1] <= marker_start
+            and marker_start - c[1] <= REJECTION_REACH
+            and unbroken(c[1], marker_start)
+        ]
+        ahead = [
+            c for c in colours
+            if c[0] >= marker_end
+            and c[0] - marker_end <= REJECTION_REACH
+            and unbroken(marker_end, c[0])
+        ]
+        hit = behind[-1] if behind else (ahead[0] if ahead else None)
+        if hit and hit[2] not in rejected:
+            rejected.append(hit[2])
+
+    wanted = next((c[2] for c in colours if c[2] not in rejected), None)
+    return wanted, rejected
+
+
 def heuristic_analysis(message: str, current_stage: str = "NEW") -> dict[str, Any]:
     """Deterministic reading used as the fallback and as a safety net.
 
@@ -131,17 +233,14 @@ def heuristic_analysis(message: str, current_stage: str = "NEW") -> dict[str, An
     """
     text = (message or "").lower()
 
-    colour = next((c for c in COLOUR_WORDS if re.search(rf"\b{c}\b", text)), None)
+    colour, rejected = read_colours(text)
     wants_images = _contains(text, IMAGE_REQUEST_MARKERS)
 
-    # A dislike names a colour they do NOT want. Recording that as a colour
-    # preference would be exactly backwards, so the rejection wins.
-    rejecting = _contains(text, REJECTION_MARKERS)
-    rejected = [colour] if (rejecting and colour) else []
-    if rejecting:
-        colour = None
-
-    if _contains(text, PAYMENT_MARKERS):
+    # Booking outranks every other reading. Someone asking for a call has
+    # stopped browsing, and answering with a product FAQ loses the meeting.
+    if wants_to_book(text):
+        intent, action = "book_call", "book_call"
+    elif _contains(text, PAYMENT_MARKERS):
         intent, action = "payment_question", "answer_question"
     elif _contains(text, DELIVERY_MARKERS):
         intent, action = "delivery_question", "answer_question"
@@ -157,6 +256,9 @@ def heuristic_analysis(message: str, current_stage: str = "NEW") -> dict[str, An
     stage = current_stage if current_stage in SALES_STAGES else "NEW"
     if intent == "purchase":
         stage = "READY_TO_BUY"
+    elif intent == "book_call":
+        # Asking for a call is a qualified lead by definition.
+        stage = max(stage, "QUALIFIED", key=SALES_STAGES.index)
     elif intent in ("price_question", "delivery_question", "payment_question"):
         stage = "QUALIFIED" if stage in ("NEW", "DISCOVERY") else stage
     elif stage == "NEW":
@@ -178,7 +280,10 @@ def heuristic_analysis(message: str, current_stage: str = "NEW") -> dict[str, An
         "dropped_requirements": [],
         "commitments": [],
         "rejected_items": rejected,
-        "wants_meeting": _contains(text, MEETING_MARKERS),
+        # Asking to book one is wanting one. MEETING_MARKERS is a looser net
+        # cast over mentions of calls, and misses some phrasings that
+        # BOOK_CALL_MARKERS catches outright ("talk to sales").
+        "wants_meeting": intent == "book_call" or _contains(text, MEETING_MARKERS),
         "next_action": action,
         "source": "heuristic",
     }
@@ -217,8 +322,21 @@ def _coerce(raw: dict[str, Any], message: str, current_stage: str) -> dict[str, 
     # the trigger for sending media, and a missed request is very visible.
     wants_images = bool(raw.get("wants_images")) or fallback["wants_images"]
 
+    # Booking is a floor too, and a hard one. If the customer explicitly asked
+    # for a call, no reading by the model may downgrade that to a product or
+    # price question — doing so answers with a catalogue and loses the meeting.
+    booking = fallback["intent"] == "book_call"
+    intent = "book_call" if booking else (raw.get("intent") or fallback["intent"])
+    next_action = (
+        "book_call" if booking else (raw.get("next_action") or fallback["next_action"])
+    )
+    # A booking request also means "show me nothing else" — the response step
+    # keys off this to suppress the catalogue.
+    if booking:
+        wants_images = False
+
     return {
-        "intent": raw.get("intent") or fallback["intent"],
+        "intent": intent,
         "stage": stage,
         "wants_images": wants_images,
         "colour_preference": text_or_none("colour_preference") or fallback["colour_preference"],
@@ -237,8 +355,10 @@ def _coerce(raw: dict[str, Any], message: str, current_stage: str) -> dict[str, 
         "rejected_items": list(
             dict.fromkeys(string_list("rejected_items") + fallback["rejected_items"])
         ),
-        "wants_meeting": bool(raw.get("wants_meeting")) or fallback["wants_meeting"],
-        "next_action": raw.get("next_action") or fallback["next_action"],
+        "wants_meeting": (
+            booking or bool(raw.get("wants_meeting")) or fallback["wants_meeting"]
+        ),
+        "next_action": next_action,
         "source": "llm",
     }
 

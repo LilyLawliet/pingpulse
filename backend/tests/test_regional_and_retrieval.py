@@ -71,11 +71,17 @@ def test_non_english_language_instructs_the_reply_language():
     assert any("Urdu" in rule for rule in rules)
 
 
-def test_english_needs_no_language_instruction():
-    """English is the model's default, so no rule is spent on it."""
+def test_english_gets_a_language_instruction_like_any_other():
+    """English used to be left implicit on the grounds that it is the default.
+
+    That held only while the rest of the prompt was full of English context.
+    On a booking turn the catalogue is stripped out, and an English-speaking
+    B2B tenant started getting Roman Urdu replies — so English is now stated
+    as explicitly as every other language.
+    """
     rules = regional_rules("USD", "en")
 
-    assert not any("Write the reply in" in rule for rule in rules)
+    assert any("Write the reply in English" in rule for rule in rules)
 
 
 def test_regional_variant_resolves_to_its_base_language():

@@ -288,7 +288,11 @@ def describe_state(
 def reply_rules(state_rules: list[str]) -> str:
     base = [
         "Write one WhatsApp message in plain text — no markdown, no bullet points, no headings.",
-        "Keep it under 45 words unless they asked for real detail.",
+        "One to three sentences. Under 45 words. Crisp, not chatty.",
+        "Answer the question they actually asked in the FIRST sentence. Propose the next "
+        "step after that, never before.",
+        "No preamble and no filler — skip \"great question\", \"I'd be happy to help\", "
+        "\"thanks for reaching out\" and restating their question back at them.",
         "Never paste catalogue or website copy. Name the product, give its price, and say "
         "one useful thing about it in your own words.",
         "Sound like a real person who works here, not a script or a chatbot.",
@@ -385,7 +389,13 @@ def regional_rules(currency: str | None, language: str | None) -> list[str]:
 
     code = (language or "en").strip()
     base = code.split("-")[0].lower()
-    if base and base != "en":
+    if base:
+        # English is stated as explicitly as any other language. Leaving it
+        # implicit — on the grounds that the model's default is English anyway
+        # — is what let a booking reply for an English-speaking B2B tenant come
+        # back in Roman Urdu: that turn strips the catalogue out of the prompt,
+        # and with the surrounding English context gone there was nothing left
+        # saying which language to write in.
         name = LANGUAGE_NAMES.get(base, code)
         rules.append(
             f"Write the reply in {name}. If the customer writes in another "
@@ -644,22 +654,41 @@ async def generate_reply(
         )
     )
 
+    # Did the customer give us any reason to answer in Roman Urdu? Only their
+    # own words count — what the agent said before does not, or one drifted
+    # reply teaches the guard to accept every reply after it.
+    customer_said = " ".join(
+        [latest_message]
+        + [
+            getattr(message, "content", "")
+            for message in history
+            if str(getattr(message, "sender", "")).lower() == "user"
+        ]
+    )
+    expects_english = (
+        (getattr(organization, "default_language", None) or "en").split("-")[0].lower() == "en"
+        and not is_roman_urdu(customer_said)
+    )
+
     async def guard(text: str, call) -> str:
         """Reject a reply quoting a price the business does not actually list.
 
         One corrective retry, then give up rather than send a wrong number to
         a customer — a made-up price is a commitment the shop has to honour.
         """
-        if not settings.price_guard_enabled:
-            return text
         problems: list[str] = []
 
-        bad = unsupported_prices(text, price_corpus)
-        if bad:
-            problems.append(
-                "you quoted " + ", ".join(sorted(bad)) + " which is NOT in the price "
-                "list; quote only exact figures from the price list above, or omit it"
-            )
+        # Only the price check is behind the price-guard flag. The handoff and
+        # language checks are about what the agent is allowed to say at all,
+        # not about price accuracy, and turning off price checking must not
+        # quietly turn those off too.
+        if settings.price_guard_enabled:
+            bad = unsupported_prices(text, price_corpus)
+            if bad:
+                problems.append(
+                    "you quoted " + ", ".join(sorted(bad)) + " which is NOT in the price "
+                    "list; quote only exact figures from the price list above, or omit it"
+                )
 
         # A promised human callback is never acceptable — the agent answers now.
         handoff = sales_policy.contains_handoff(text)
@@ -668,6 +697,17 @@ async def generate_reply(
                 f'you wrote "{handoff}"; never promise that a person will follow up, '
                 "answer using the facts above or say plainly what you do not know and "
                 "offer the closest thing you do have"
+            )
+
+        # An English-speaking tenant whose customer wrote in English must not
+        # be answered in Roman Urdu. The instruction to write in English is in
+        # the prompt, but on a booking turn the catalogue is stripped out and
+        # the model has drifted anyway, so the output is checked rather than
+        # trusted.
+        if expects_english and is_roman_urdu(text):
+            problems.append(
+                "you replied in Roman Urdu, but this customer wrote in English; "
+                "rewrite the same reply in English"
             )
 
         if not problems:
@@ -682,6 +722,8 @@ async def generate_reply(
             raise RuntimeError("reply still quoted an unlisted price")
         if sales_policy.contains_handoff(corrected):
             raise RuntimeError("reply still promised a human follow-up")
+        if expects_english and is_roman_urdu(corrected):
+            raise RuntimeError("reply still came back in Roman Urdu")
         return corrected
 
     started = time.perf_counter()

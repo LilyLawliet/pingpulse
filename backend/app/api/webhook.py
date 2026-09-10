@@ -303,10 +303,23 @@ async def process_inbound_message(
         )
     )
 
+    # A booking request is answered with the link and nothing else. Retrieval
+    # is skipped outright rather than fetched and ignored: whatever reaches the
+    # prompt competes for attention, and the bug this fixes was the agent
+    # replying to "can we book a call?" with store policy and a product FAQ.
+    booking_only = (
+        analysis.get("intent") == "book_call"
+        or analysis.get("next_action") == "book_call"
+    )
+
     # Policy documents only: product text reaches the prompt through the
     # compact product block below, never as a wall of catalogue copy.
-    chunks = await retrieval.search(
-        db, organization.id, search_terms, limit=3, doc_type="policy"
+    chunks = (
+        []
+        if booking_only
+        else await retrieval.search(
+            db, organization.id, search_terms, limit=3, doc_type="policy"
+        )
     )
     knowledge = retrieval.as_prompt_block(chunks)
 
@@ -317,7 +330,7 @@ async def process_inbound_message(
     # follow-up can be answered from real rows. Photos, though, are only
     # attached when they were actually asked for.
     wants_images = bool(analysis.get("wants_images")) or bool(image_analysis)
-    needs_products = (
+    needs_products = not booking_only and (
         wants_images
         or analysis.get("next_action") == "show_products"
         or analysis.get("intent") in ("product_question", "price_question", "purchase")
@@ -359,7 +372,7 @@ async def process_inbound_message(
 
     # Vision, and a booking link when they asked to talk to someone.
     extra_blocks = [vision.as_prompt_block(image_analysis, bool(stored_media))]
-    if analysis.get("wants_meeting") or scheduling.looks_like_b2b(body):
+    if booking_only or analysis.get("wants_meeting") or scheduling.looks_like_b2b(body):
         extra_blocks.append(
             scheduling.as_prompt_block(
                 organization.name,
@@ -381,7 +394,10 @@ async def process_inbound_message(
         # If both providers are down the customer still gets a real answer built
         # from retrieved facts — never a promise that a human will call back.
         last_resort=sales_policy.deterministic_reply(
-            analysis, chunks, organization, products
+            analysis, chunks, organization, products,
+            booking_url=scheduling.booking_link(
+                organization.name, contact.name, phone_number
+            ),
         ),
     )
 
