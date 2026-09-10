@@ -139,6 +139,18 @@ log "Starting the application"
 $COMPOSE up -d --remove-orphans
 ok "containers started"
 
+# Caddy's config is a single-file bind mount, and replacing that file on the
+# host does not reach a running container: the mount points at the old inode,
+# so Caddy keeps serving the config it started with and `caddy reload` reloads
+# that same stale copy. It fails silently — the deploy looks clean and the new
+# routes 404. Recreate only when the file has actually changed, so a normal
+# deploy still leaves the front door up.
+if ! $COMPOSE exec -T caddy cat /etc/caddy/Caddyfile 2>/dev/null | diff -q - ./Caddyfile >/dev/null 2>&1; then
+  log "Caddy config changed — recreating the front door"
+  $COMPOSE up -d --force-recreate --no-deps caddy
+  ok "caddy recreated with the current Caddyfile"
+fi
+
 # ------------------------------------------------------------------ verify
 # Plain /health is the liveness check the container probe uses: is this
 # process serving, and is the database reachable. ?deep=1 additionally calls

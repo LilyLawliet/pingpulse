@@ -94,12 +94,10 @@ def build(version: str) -> tuple[pathlib.Path, str]:
 def write_manifest(version: str, installer: pathlib.Path, signature: str, notes: str) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
 
-    # The URL the client downloads from. `latest/download` always resolves to
-    # the newest release, so the manifest never needs the tag hard-coded.
-    url = (
-        "https://github.com/LilyLawliet/pingpulse/releases/latest/download/"
-        f"{installer.name}"
-    )
+    # The URL the client downloads from — our own server, not a GitHub
+    # release. The repository is private, so release assets there are not
+    # publicly downloadable and the updater only ever saw a 404.
+    url = f"{BACKEND_URL.rstrip('/')}/updates/{installer.name}"
 
     manifest = {
         "version": version,

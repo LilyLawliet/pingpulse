@@ -1,11 +1,11 @@
 {
-  "version": "1.2.1",
-  "notes": "Replies queue and retry instead of being lost; three delivery states; one WhatsApp method at a time; faster reconnect after a deploy.",
-  "pub_date": "2026-09-10T21:14:54+00:00",
+  "version": "1.2.2",
+  "notes": "Auto-updates now come from your own server. Replies queue and retry instead of being lost; three delivery states; one WhatsApp method at a time.",
+  "pub_date": "2026-09-10T21:18:53+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjNneFZaQy9sVlAvMGlkcHFqdFQxbXk4NlplRmNjNmN0UGpOSStHQ0pUY1U1MElDVE1XU0RyQlhVUVVMV0FCZDNEb0dvMlFpbE1IN2w3ZWg2LzBSL1FFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDc0ODk0CWZpbGU6UGluZ1B1bHNlXzEuMi4xX3g2NC1zZXR1cC5leGUKajQyVklmZmsycHJVaFF2emRPZ2R6SlZFVFoyV29WNFg5YVJyMk5YSXlnOWplM3p0S0FZeTNUbmtjT0IzL01hVERTL2w5WUMxMWwzQkdJL28vVnIrQVE9PQo=",
-      "url": "https://github.com/LilyLawliet/pingpulse/releases/latest/download/PingPulse_1.2.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMitVeDFjSUdCRFZUNENnQzdpY2lDY1h2WW1rdk1yK2Z3T0tRcS9uYU56M2Q2YVdFNkpaeXVVcEdxcUE4cUdPWkhOSDlsckt0ZW5TZDJRRmdWWWxEcEFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MDc1MTMzCWZpbGU6UGluZ1B1bHNlXzEuMi4yX3g2NC1zZXR1cC5leGUKNXE5OTlDVVBnVmE1citmQ0JBUWdDL1g1TllYdlBiSmtWRXdMZ3VkUmpGWGVWbW9rcnVTQzRIT3lmUWxheDdkM25HdlVab1pxMm9PMmVQU0g2ei8zREE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.2.2_x64-setup.exe"
     }
   }
 }
