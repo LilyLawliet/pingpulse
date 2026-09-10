@@ -1,0 +1,21 @@
+# A workflow that does nothing, to tell two failure modes apart.
+#
+# Every run on this repository has failed instantly with "startup_failure" and
+# no job, which means GitHub refused to start it rather than a step failing.
+# That is either something in our workflow files or something at the account
+# level. This has nothing in it that could be wrong, so if it also fails, the
+# cause is the account: almost always Actions minutes or a spending limit on a
+# private repository.
+name: CI smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/ci-smoke.yml']
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Actions can run on this repository."
