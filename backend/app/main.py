@@ -122,6 +122,18 @@ _media_root = Path(settings.media_dir)
 _media_root.mkdir(parents=True, exist_ok=True)
 app.mount("/media", StaticFiles(directory=str(_media_root)), name="media")
 
+# Desktop updates. The app polls /updates/latest.json and downloads the
+# installer named there, so a client never runs an installer by hand twice.
+#
+# This is served from our own domain rather than a GitHub release because the
+# repository is private: release assets on a private repository are not
+# publicly downloadable, so the updater received a 404 and quietly did nothing.
+# Public by design — an installer everyone is meant to run, signed with a key
+# the app verifies before it will install anything.
+_updates_root = Path(settings.updates_dir)
+_updates_root.mkdir(parents=True, exist_ok=True)
+app.mount("/updates", StaticFiles(directory=str(_updates_root)), name="updates")
+
 app.include_router(webhook_router)
 app.include_router(auth_router)
 app.include_router(organizations_router)

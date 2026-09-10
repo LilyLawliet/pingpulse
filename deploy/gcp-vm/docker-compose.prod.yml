@@ -133,6 +133,8 @@ services:
     volumes:
       - ${DATA_DIR:-/opt/pingpulse/data}/media:/app/media
       - ${DATA_DIR:-/opt/pingpulse/data}/logs:/app/logs
+      # Signed installers the desktop app updates itself from.
+      - ${DATA_DIR:-/opt/pingpulse/data}/updates:/app/updates
     depends_on:
       db:
         condition: service_healthy

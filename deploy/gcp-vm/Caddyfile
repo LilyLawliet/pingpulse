@@ -20,6 +20,10 @@
 #   /ws/*     the desktop app's live monitor socket.
 #   /media/*  Twilio fetches outbound product images from here. If this is
 #             closed, customers receive messages with broken attachments.
+#   /updates/ signed desktop installers. The app polls latest.json here and
+#             updates itself, so a client never runs an installer by hand
+#             twice. Public on purpose, and signed: the app verifies the
+#             signature against a baked-in public key before installing.
 #   /health   uptime monitoring.
 #
 # Anything else — including FastAPI's /docs and /openapi.json, which would
@@ -55,7 +59,7 @@
 	# --- the only paths that reach the application ------------------------
 	# Twilio computes its webhook signature over the full external URL, so the
 	# upstream has to see the real host and scheme rather than the container's.
-	@api path /api/* /ws/* /media/* /health
+	@api path /api/* /ws/* /media/* /updates/* /health
 	handle @api {
 		reverse_proxy backend:8000 {
 			# Ride out a backend restart instead of answering 502.

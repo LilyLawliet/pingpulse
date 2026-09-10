@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     calcom_link: str = ""
     calendar_fallback_enabled: bool = True
 
+    # Signed desktop installers the app auto-updates from.
+    updates_dir: str = "/app/updates"
+
     # Follow-ups (Celery + Redis)
     redis_url: str = "redis://redis:6379/0"
 

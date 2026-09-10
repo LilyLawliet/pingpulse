@@ -73,7 +73,7 @@ if [[ "${TWILIO_VALIDATE_SIGNATURE:-}" != "true" ]]; then
 fi
 
 DATA_DIR="${DATA_DIR:-/opt/pingpulse/data}"
-mkdir -p "${DATA_DIR}"/{postgres,redis,media,logs,backups,caddy/data,caddy/config}
+mkdir -p "${DATA_DIR}"/{postgres,redis,media,logs,updates,backups,caddy/data,caddy/config}
 ok "environment validated (domain: ${DOMAIN})"
 
 # ------------------------------------------------------------------ source
