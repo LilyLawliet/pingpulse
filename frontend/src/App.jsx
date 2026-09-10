@@ -310,6 +310,9 @@ function Dashboard({ onSignedOut }) {
           // A conversation can be selected by a live event a moment before the
           // contact list catches up — that is arriving, not idle.
           arriving={Boolean(selectedContact) && !activeContact}
+          // Scheduling or cancelling a follow-up is stored on the contact, so
+          // the list has to be re-read for the panel to show what it now says.
+          onChanged={loadContacts}
         />
         <PipelineBoard
           contacts={contacts}

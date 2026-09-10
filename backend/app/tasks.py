@@ -61,6 +61,46 @@ def new_token() -> str:
     return uuid.uuid4().hex
 
 
+def schedule_one(contact, minutes: float, message: str | None = None) -> str | None:
+    """Queue a single follow-up an operator asked for, and return its token.
+
+    Separate from `schedule_followups` because the two are asked for by
+    different people for different reasons. The automatic sequence is a policy
+    — only warm conversations, at fixed hours, at most twice. This is someone
+    looking at a conversation and deciding it needs a nudge, so it takes the
+    delay and the wording they chose and does not second-guess the stage.
+
+    It shares the automatic sequence's cancellation: the token is stored on the
+    contact, and a customer writing back clears it, so a nudge is never sent to
+    someone who has already replied.
+    """
+    token = new_token()
+    try:
+        schedule_customer_followup.apply_async(
+            kwargs={
+                "contact_id": str(contact.id),
+                "organization_id": str(contact.organization_id),
+                "token": token,
+                "attempt": 1,
+                "body": message or None,
+                "manual": True,
+            },
+            countdown=max(1, int(minutes * 60)),
+            retry=False,
+        )
+    except Exception as exc:  # noqa: BLE001 - a broker outage is reported, not raised
+        logger.warning("could not queue the follow-up: %s", exc)
+        return None
+
+    logger.info(
+        "queued a manual follow-up for contact %s in %s minute(s) (token %s)",
+        contact.id,
+        minutes,
+        token[:8],
+    )
+    return token
+
+
 def schedule_followups(contact, delays: tuple[float, ...] | None = None) -> str | None:
     """Queue the nudges for one contact and return the token that owns them.
 
@@ -97,7 +137,14 @@ def schedule_followups(contact, delays: tuple[float, ...] | None = None) -> str 
     return token
 
 
-async def _run_followup(contact_id: str, organization_id: str, token: str, attempt: int) -> str:
+async def _run_followup(
+    contact_id: str,
+    organization_id: str,
+    token: str,
+    attempt: int,
+    body_override: str | None = None,
+    manual: bool = False,
+) -> str:
     """The actual work, awaited inside the worker's own event loop."""
     from app.models import CRMContact, Message
     from app.services import outbox, whatsapp
@@ -125,10 +172,13 @@ async def _run_followup(contact_id: str, organization_id: str, token: str, attem
                 # The customer replied, or a newer reply re-armed the sequence.
                 return "cancelled"
 
-            if contact.sales_stage not in FOLLOWUP_STAGES:
+            # The stage gate belongs to the automatic sequence: it is what
+            # stops the agent nudging a conversation that was never warm. An
+            # operator asking for a follow-up has already made that judgement.
+            if not manual and contact.sales_stage not in FOLLOWUP_STAGES:
                 return f"stage moved to {contact.sales_stage}"
 
-            body = FIRST_NUDGE if attempt == 1 else SECOND_NUDGE
+            body = body_override or (FIRST_NUDGE if attempt == 1 else SECOND_NUDGE)
 
             # A nudge must come from the same number the conversation is on.
             channel = await whatsapp.active_channel(session, contact.organization_id)
@@ -161,9 +211,12 @@ async def _run_followup(contact_id: str, organization_id: str, token: str, attem
             sent = delivery.sent
             metadata["last_followup_at"] = datetime.now(timezone.utc).isoformat()
             metadata["followup_attempts"] = attempt
-            if attempt >= 2:
-                # Two nudges is the limit; never become a nuisance.
+            if manual or attempt >= 2:
+                # One requested nudge is one nudge. For the automatic sequence,
+                # two is the limit; never become a nuisance.
                 metadata.pop("followup_token", None)
+                metadata.pop("followup_due_at", None)
+                metadata.pop("followup_message", None)
             contact.contact_metadata = metadata
 
             await session.commit()
@@ -176,11 +229,19 @@ async def _run_followup(contact_id: str, organization_id: str, token: str, attem
 
 @celery_app.task(name="pingpulse.schedule_customer_followup", bind=True, max_retries=2)
 def schedule_customer_followup(
-    self, contact_id: str, organization_id: str, token: str, attempt: int = 1
+    self,
+    contact_id: str,
+    organization_id: str,
+    token: str,
+    attempt: int = 1,
+    body: str | None = None,
+    manual: bool = False,
 ) -> str:
     """Send one follow-up, unless the customer has come back in the meantime."""
     try:
-        outcome = asyncio.run(_run_followup(contact_id, organization_id, token, attempt))
+        outcome = asyncio.run(
+            _run_followup(contact_id, organization_id, token, attempt, body, manual)
+        )
         logger.info("follow-up %d for %s: %s", attempt, contact_id, outcome)
         return outcome
     except Exception as exc:  # noqa: BLE001

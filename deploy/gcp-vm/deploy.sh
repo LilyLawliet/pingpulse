@@ -130,6 +130,25 @@ else
   fail "migration failed — the previous version is still serving, nothing was switched"
 fi
 
+# ------------------------------------------------------------- dashboard
+# The browser dashboard, served at /app for operators who cannot run the
+# desktop app. Copied before the containers start so the API mounts it on
+# boot rather than needing a second restart to notice it.
+#
+# Copied over the top rather than replacing the directory: asset filenames
+# carry a content hash, so old ones are inert, and a browser that loaded the
+# previous page mid-deploy can still fetch the assets it was promised.
+if [[ -f ../../frontend/dist/index.html ]]; then
+  log "Publishing the browser dashboard"
+  mkdir -p "${DATA_DIR}/web"
+  cp -r ../../frontend/dist/. "${DATA_DIR}/web/"
+  chmod -R a+rX "${DATA_DIR}/web"
+  ok "dashboard at https://${DOMAIN}/app/"
+else
+  printf '    [1;33m!![0m no frontend/dist — /app keeps the bundle it already has
+'
+fi
+
 # ------------------------------------------------------------------ start
 log "Starting the application"
 # --remove-orphans stops containers from services that no longer exist in the
@@ -138,6 +157,11 @@ log "Starting the application"
 # still up and still listening.
 $COMPOSE up -d --remove-orphans
 ok "containers started"
+
+# The API decides whether to serve /app when it starts, so a bundle that
+# arrived while it was already running would not be picked up until something
+# else happened to restart it.
+$COMPOSE restart backend >/dev/null 2>&1 || true
 
 # Caddy's config is a single-file bind mount, and replacing that file on the
 # host does not reach a running container: the mount points at the old inode,

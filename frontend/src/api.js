@@ -117,6 +117,16 @@ export const api = {
   // -------------------------------- CRM ---------------------------------
   listContacts: () => request('/crm/contacts'),
   contactMessages: (id) => request(`/crm/contacts/${id}/messages`),
+
+  // Follow-ups. The automatic sequence fires hours later for warm
+  // conversations only, so this is the same machinery driven by hand — which
+  // is the only way to watch it work.
+  scheduleFollowup: (id, { minutes, message }) =>
+    request(`/contacts/${id}/followup`, {
+      method: 'POST',
+      body: JSON.stringify({ minutes, message: message || null }),
+    }),
+  cancelFollowup: (id) => request(`/contacts/${id}/followup`, { method: 'DELETE' }),
   updateContact: (id, body) =>
     request(`/crm/contacts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   addTags: (id, tags) =>

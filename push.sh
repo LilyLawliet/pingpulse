@@ -57,6 +57,20 @@ if [[ $RUN_TESTS -eq 1 ]]; then
   fi
 fi
 
+# ------------------------------------------------------------- dashboard
+# The browser dashboard at /app is the same build that ships inside the
+# desktop installer, so it is built here from the same source rather than
+# uploaded by hand — which is how it would fall behind the API it talks to.
+log "Building the dashboard"
+if [[ -d frontend/node_modules ]]; then
+  ( cd frontend && VITE_API_BASE_URL="https://pingpulse.duckdns.org" npm run build >/dev/null 2>&1 )     || fail "the dashboard failed to build — nothing was deployed"
+  ok "$(du -sk frontend/dist | cut -f1) KB"
+else
+  printf '    [1;33m!![0m frontend/node_modules is missing — shipping the existing build
+'
+  [[ -f frontend/dist/index.html ]] || fail "and there is no existing build to ship (run: cd frontend && npm ci)"
+fi
+
 # ---------------------------------------------------------------- package
 # Only what the server actually builds from. node_modules, the virtualenv,
 # demo videos and the Rust target directory are hundreds of megabytes and
@@ -66,7 +80,7 @@ mkdir -p .tmp
 tar -czf "$ARCHIVE" \
   --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' \
   backend/app backend/alembic backend/alembic.ini backend/requirements.txt backend/tests \
-  frontend/src frontend/index.html frontend/package.json frontend/package-lock.json \
+  frontend/src frontend/index.html frontend/package.json frontend/package-lock.json \n  frontend/dist \
   frontend/vite.config.js frontend/tailwind.config.js frontend/postcss.config.js \
   docker/nginx.conf Dockerfile.backend Dockerfile.frontend \
   deploy/gcp-vm scripts services/wa-qr-service

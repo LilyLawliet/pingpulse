@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
-import { Bot, CheckCheck, Clock, Sparkles, TriangleAlert } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { AlarmClock, Bot, CheckCheck, Clock, Sparkles, TriangleAlert, X } from 'lucide-react'
 import { STAGE_LABEL, STAGE_STYLE, clockOf, initialsOf, prettyPhone } from '../format.js'
 import { mediaUrl } from '../backend.js'
+import { api } from '../api.js'
 
 /** Our own stored media is loaded from wherever the backend is.
  *
@@ -185,7 +186,141 @@ function KnownFacts({ contact }) {
   )
 }
 
-export default function ConversationThread({ contact, messages, composing, arriving }) {
+/** Schedule a nudge for a conversation that has gone quiet.
+ *
+ * The agent already follows up on its own, but only for warm conversations and
+ * only after four hours — which makes it impossible to see working. This drives
+ * the same machinery by hand: same queued task, same transport, same
+ * cancellation, just a delay you choose. A customer who replies before it lands
+ * cancels it, exactly as they would the automatic one.
+ */
+function FollowUpControl({ contact, onChanged }) {
+  const pending = contact.metadata?.followup_due_at || null
+  const [open, setOpen] = useState(false)
+  const [minutes, setMinutes] = useState(2)
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  // Reset when the conversation changes, or the form carries over.
+  useEffect(() => {
+    setOpen(false)
+    setError(null)
+    setMessage('')
+  }, [contact.id])
+
+  const schedule = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.scheduleFollowup(contact.id, { minutes: Number(minutes), message })
+      setOpen(false)
+      setMessage('')
+      onChanged?.()
+    } catch (err) {
+      setError(err.message || 'Could not schedule that.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cancel = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.cancelFollowup(contact.id)
+      onChanged?.()
+    } catch (err) {
+      setError(err.message || 'Could not cancel that.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (pending) {
+    const due = new Date(pending)
+    const valid = !Number.isNaN(due.getTime())
+    return (
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="flex items-center gap-1.5 rounded-md bg-accent/12 px-2 py-1 text-accent">
+          <AlarmClock size={12} />
+          Follow-up {valid ? `at ${due.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'scheduled'}
+        </span>
+        {contact.metadata?.followup_message && (
+          <span className="max-w-[32ch] truncate text-faint" title={contact.metadata.followup_message}>
+            “{contact.metadata.followup_message}”
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={cancel}
+          disabled={busy}
+          className="flex items-center gap-1 rounded-md px-1.5 py-1 text-faint transition-colors hover:bg-panel-2 hover:text-crit disabled:opacity-40"
+        >
+          <X size={11} /> cancel
+        </button>
+        {/* A reply from the customer cancels it too, which is the point. */}
+        <span className="text-faint">— cancelled automatically if they write back</span>
+        {error && <span className="text-crit">{error}</span>}
+      </div>
+    )
+  }
+
+  if (!open) {
+    return (
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex items-center gap-1.5 rounded-md border border-edge px-2 py-1 text-[11px] text-dim transition-colors hover:border-accent/40 hover:text-accent"
+        >
+          <AlarmClock size={12} /> Schedule a follow-up
+        </button>
+        {error && <span className="text-[11px] text-crit">{error}</span>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+      <select
+        value={minutes}
+        onChange={(e) => setMinutes(e.target.value)}
+        className="rounded-md border border-edge bg-bg px-2 py-1 text-[11px] text-ink"
+      >
+        <option value={2}>in 2 minutes</option>
+        <option value={15}>in 15 minutes</option>
+        <option value={60}>in 1 hour</option>
+        <option value={240}>in 4 hours</option>
+        <option value={1440}>tomorrow</option>
+      </select>
+      <input
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        placeholder="Leave empty to use the agent's own wording"
+        className="min-w-0 flex-1 rounded-md border border-edge bg-bg px-2 py-1 text-[11px] text-ink placeholder:text-faint"
+      />
+      <button
+        type="button"
+        onClick={schedule}
+        disabled={busy}
+        className="rounded-md bg-accent px-2.5 py-1 text-[11px] font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
+      >
+        {busy ? 'Scheduling…' : 'Schedule'}
+      </button>
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        className="rounded-md px-1.5 py-1 text-faint transition-colors hover:text-ink"
+      >
+        <X size={12} />
+      </button>
+      {error && <span className="w-full text-crit">{error}</span>}
+    </div>
+  )
+}
+
+export default function ConversationThread({ contact, messages, composing, arriving, onChanged }) {
   const endRef = useRef(null)
 
   useEffect(() => {
@@ -257,7 +392,8 @@ export default function ConversationThread({ contact, messages, composing, arriv
         <div ref={endRef} />
       </div>
 
-      <footer className="shrink-0 border-t border-edge px-4 py-2.5">
+      <footer className="shrink-0 space-y-2 border-t border-edge px-4 py-2.5">
+        <FollowUpControl contact={contact} onChanged={onChanged} />
         <p className="flex items-center gap-1.5 text-[11px] text-faint">
           <Bot size={12} className="text-accent" />
           Replies are sent automatically — no one has to be at a desk.

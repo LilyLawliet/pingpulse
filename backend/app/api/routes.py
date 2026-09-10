@@ -10,6 +10,7 @@ Every statement filters on the tenant resolved from the caller's session.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -18,7 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
 from app.models import ChannelConfig, CRMContact, LLMLog, Message
-from app.schemas import LLMLogOut, MessageOut, OutboundMessageRequest
+from app.schemas import (
+    FollowUpRequest,
+    FollowUpState,
+    LLMLogOut,
+    MessageOut,
+    OutboundMessageRequest,
+)
 from app.schemas_tenancy import CRMContactOut
 from app.services import outbox, whatsapp, ws_manager
 from app.services.ws_manager import manager
@@ -180,6 +187,98 @@ async def send_manual_message(
         },
     )
     return message
+
+
+@router.post("/contacts/{contact_id}/followup", response_model=FollowUpState, status_code=202)
+async def schedule_followup(
+    contact_id: uuid.UUID,
+    payload: FollowUpRequest,
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Queue one nudge for this contact, at a delay of the operator's choosing.
+
+    The automatic sequence only fires for warm conversations at fixed hours,
+    which makes it impossible to watch working. This is the same machinery
+    driven by hand: same task, same transport, same cancellation — a customer
+    who writes back before it lands clears the token and the nudge never goes.
+    """
+    tenant.require_role(WRITE_ROLES)
+
+    contact = (
+        await db.execute(
+            select(CRMContact).where(
+                CRMContact.id == contact_id,
+                CRMContact.organization_id == tenant.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if contact is None:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    from app.tasks import schedule_one
+
+    message = (payload.message or "").strip() or None
+    token = schedule_one(contact, payload.minutes, message)
+    if token is None:
+        raise HTTPException(
+            status_code=503,
+            detail="The scheduler is not reachable — the follow-up was not queued.",
+        )
+
+    due_at = datetime.now(timezone.utc) + timedelta(minutes=payload.minutes)
+    metadata = dict(contact.contact_metadata or {})
+    metadata["followup_token"] = token
+    metadata["followup_due_at"] = due_at.isoformat()
+    if message:
+        metadata["followup_message"] = message
+    else:
+        metadata.pop("followup_message", None)
+    contact.contact_metadata = metadata
+
+    await manager.broadcast(
+        ws_manager.EVENT_SYNC,
+        {"contact_id": str(contact.id), "organization_id": str(tenant.id)},
+    )
+    return FollowUpState(scheduled=True, due_at=due_at, message=message)
+
+
+@router.delete("/contacts/{contact_id}/followup", response_model=FollowUpState)
+async def cancel_followup(
+    contact_id: uuid.UUID,
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Call off a pending nudge.
+
+    Clearing the token is the cancellation: the queued task still runs at its
+    appointed time, looks for a token that no longer matches, and exits. That
+    is deliberate — revoking a scheduled task is unreliable across brokers,
+    while a database write is not.
+    """
+    tenant.require_role(WRITE_ROLES)
+
+    contact = (
+        await db.execute(
+            select(CRMContact).where(
+                CRMContact.id == contact_id,
+                CRMContact.organization_id == tenant.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if contact is None:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    metadata = dict(contact.contact_metadata or {})
+    for key in ("followup_token", "followup_due_at", "followup_message"):
+        metadata.pop(key, None)
+    contact.contact_metadata = metadata
+
+    await manager.broadcast(
+        ws_manager.EVENT_SYNC,
+        {"contact_id": str(contact.id), "organization_id": str(tenant.id)},
+    )
+    return FollowUpState(scheduled=False)
 
 
 @router.get("/logs", response_model=list[LLMLogOut])

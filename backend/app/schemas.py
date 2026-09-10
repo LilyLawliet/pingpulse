@@ -133,6 +133,25 @@ class MessageOut(BaseModel):
     created_at: datetime
 
 
+class FollowUpRequest(BaseModel):
+    """Schedule one nudge for a conversation that has gone quiet."""
+
+    # Minutes rather than hours so a follow-up can actually be watched working.
+    # Capped at a week: past that it is not a follow-up, and Celery would be
+    # holding the task in the broker the whole time.
+    minutes: float = Field(default=60, gt=0, le=10080)
+    # Optional. Empty means the agent's own wording.
+    message: str | None = Field(default=None, max_length=1000)
+
+
+class FollowUpState(BaseModel):
+    """Whether a nudge is pending for this contact, and when it lands."""
+
+    scheduled: bool
+    due_at: datetime | None = None
+    message: str | None = None
+
+
 class OutboundMessageRequest(BaseModel):
     """Manual send from the dashboard (operator takeover)."""
 
