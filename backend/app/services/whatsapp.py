@@ -58,7 +58,15 @@ async def _send_via_qr_session(
     url = f"{settings.wa_qr_service_url.rstrip('/')}/send"
     try:
         async with httpx.AsyncClient(timeout=settings.wa_qr_timeout_seconds) as client:
-            response = await client.post(url, json=payload)
+            # The bridge refuses anything that does not carry the shared
+            # secret. Leaving this off made every single outbound message 403,
+            # on every provider-QR tenant, silently — the reply was generated,
+            # stored and shown in the dashboard, and never left the building.
+            response = await client.post(
+                url,
+                json=payload,
+                headers={"X-PingPulse-Bridge": settings.wa_qr_shared_secret},
+            )
             response.raise_for_status()
             data = response.json()
     except Exception as exc:  # noqa: BLE001 - a transport failure is not a crash

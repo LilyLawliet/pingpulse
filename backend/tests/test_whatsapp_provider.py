@@ -99,9 +99,14 @@ async def test_qr_channels_go_to_the_bridge(monkeypatch):
         async def __aexit__(self, *_):
             return False
 
-        async def post(self, url, json=None):
+        async def post(self, url, json=None, headers=None):
+            # Mirrors the real call. The stub used to accept only (url, json),
+            # so a send that forgot its auth header still passed here while
+            # the live bridge answered 403 — the test was blind to the one
+            # thing that broke.
             sent["url"] = url
             sent["payload"] = json
+            sent["headers"] = headers or {}
             return FakeResponse()
 
     monkeypatch.setattr(whatsapp.httpx, "AsyncClient", FakeClient)
@@ -112,6 +117,7 @@ async def test_qr_channels_go_to_the_bridge(monkeypatch):
     assert delivered is True
     assert reference == "BAE5F00D"
     assert sent["url"].endswith("/send")
+    assert "X-PingPulse-Bridge" in sent["headers"], "the bridge refuses an unauthenticated send"
     # The whatsapp: prefix is stripped here; the bridge strips the rest of the
     # non-digits itself when it builds the JID.
     assert sent["payload"]["to"] == "+971500000002"
@@ -409,3 +415,54 @@ async def test_another_tenants_number_is_still_a_clash(org_a, org_b):
 
     taken = await org_b.post("/api/v1/organizations/active/channels", json=payload)
     assert taken.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_the_bridge_send_carries_the_shared_secret(monkeypatch):
+    """Without this header the bridge answers 403 and nothing is ever sent.
+
+    It failed in the worst possible way: the reply was generated, stored and
+    shown in the dashboard as the agent's answer, while the customer's phone
+    stayed silent. Every other call to the bridge — pair, session, logout —
+    sends the header, so the one that mattered was the one that did not.
+    """
+    monkeypatch.setattr(settings, "wa_qr_shared_secret", "the-secret")
+    seen = {}
+
+    class Recorder:
+        def __init__(self, *_, **__):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            seen["url"] = url
+            seen["headers"] = headers or {}
+
+            class Response:
+                @staticmethod
+                def raise_for_status():
+                    return None
+
+                @staticmethod
+                def json():
+                    return {"ok": True, "id": "WA-1"}
+
+            return Response()
+
+    monkeypatch.setattr(whatsapp.httpx, "AsyncClient", Recorder)
+
+    channel = make_channel(provider="QR_SESSION")
+    channel.id = "chan-secret"
+    sent, reference = await whatsapp.send_message(channel, "+971500001111", "hello")
+
+    assert sent is True
+    assert reference == "WA-1"
+    assert seen["headers"].get("X-PingPulse-Bridge") == "the-secret", (
+        "the bridge rejects an unauthenticated send with 403, so the reply "
+        "never reaches the customer"
+    )
