@@ -110,6 +110,9 @@ export const api = {
     request('/organizations/active/channels', { method: 'POST', body: JSON.stringify(body) }),
   removeChannel: (id) =>
     request(`/organizations/active/channels/${id}`, { method: 'DELETE' }),
+  startPairing: (id) =>
+    request(`/organizations/active/channels/${id}/pair`, { method: 'POST' }),
+  pairingState: (id) => request(`/organizations/active/channels/${id}/qr`),
 
   // -------------------------------- CRM ---------------------------------
   listContacts: () => request('/crm/contacts'),

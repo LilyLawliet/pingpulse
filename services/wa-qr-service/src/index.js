@@ -49,9 +49,16 @@ mkdirSync(SESSIONS_DIR, { recursive: true })
 const sessions = new Map()
 /** Sockets watching a pairing, keyed by channel id. */
 const watchers = new Map()
+/**
+ * Latest state per session, so a client that arrives mid-pairing can ask
+ * for the current QR instead of waiting for the next one to be pushed.
+ * A QR rotates every ~20s, so this is short-lived by nature.
+ */
+const latest = new Map()
 
 // ---------------------------------------------------------------- helpers
 function notifyWatchers(sessionId, event) {
+  latest.set(sessionId, { ...event, at: Date.now() })
   const listeners = watchers.get(sessionId)
   if (!listeners) return
   const message = JSON.stringify(event)
@@ -123,13 +130,21 @@ async function startSession(sessionId) {
       // Sent as a data URL so the desktop app can render it directly in an
       // <img>, with no QR library of its own.
       const dataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 320 })
+
+      // Notified once, deliberately. Calling reportStatus as well would run
+      // notifyWatchers a second time without the QR attached and overwrite the
+      // stored copy, so a client polling for it would see QR_READY and an
+      // empty payload forever.
       notifyWatchers(sessionId, { type: 'status', status: 'QR_READY', qr: dataUrl })
-      reportStatus(sessionId, 'QR_READY')
+      // The API only needs the state; sending it a 7 KB image on every
+      // twenty-second rotation would be waste.
+      callApi('/api/v1/whatsapp/qr-status', { sessionId, status: 'QR_READY' })
     }
 
     if (connection === 'open') {
       const phoneNumber = socket.user?.id?.split(':')[0]?.split('@')[0] || null
       log.info({ sessionId, phoneNumber }, 'session authenticated')
+      latest.delete(sessionId)
       reportStatus(sessionId, 'AUTHENTICATED', { phoneNumber })
     }
 
@@ -197,6 +212,18 @@ app.use((request, response, next) => {
 
 app.get('/health', (_request, response) => {
   response.json({ status: 'ok', sessions: sessions.size })
+})
+
+app.get('/session/:id', (request, response) => {
+  const sessionId = request.params.id
+  const state = latest.get(sessionId)
+  response.json({
+    ok: true,
+    sessionId,
+    connected: sessions.has(sessionId),
+    status: state?.status || (sessions.has(sessionId) ? 'AUTHENTICATED' : 'UNKNOWN'),
+    qr: state?.qr || null,
+  })
 })
 
 app.post('/pair', async (request, response) => {

@@ -30,6 +30,7 @@ export default function WhatsAppSettings({ onChanged }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [pairing, setPairing] = useState(null) // { channelId, status, qr }
 
   // Whatever this build talks to, so the URL shown is the one to paste.
   const webhookUrl = `${backendOrigin || window.location.origin}/api/v1/whatsapp/webhook`
@@ -80,6 +81,52 @@ export default function WhatsAppSettings({ onChanged }) {
       setError(err.message || 'Could not connect that number.')
     } finally {
       setBusy(false)
+    }
+  }
+
+
+  // While a pairing panel is open, poll for the current QR. WhatsApp rotates
+  // the code every twenty seconds or so, so a single fetch would go stale on
+  // screen; polling also catches the moment the phone links.
+  useEffect(() => {
+    if (!pairing?.channelId) return undefined
+    if (pairing.status === 'AUTHENTICATED') return undefined
+
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const state = await api.pairingState(pairing.channelId)
+        if (cancelled) return
+        setPairing((current) =>
+          current && current.channelId === pairing.channelId
+            ? { ...current, status: state.status, qr: state.qr }
+            : current,
+        )
+        if (state.status === 'AUTHENTICATED') {
+          await load()
+          onChanged?.()
+        }
+      } catch {
+        /* the bridge may still be starting; the next tick retries */
+      }
+    }
+
+    tick()
+    const timer = setInterval(tick, 2500)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [pairing?.channelId, pairing?.status, load, onChanged])
+
+  const beginPairing = async (channelId) => {
+    setError(null)
+    setPairing({ channelId, status: 'GENERATING_QR', qr: null })
+    try {
+      await api.startPairing(channelId)
+    } catch (err) {
+      setError(err.message || 'Could not start pairing.')
+      setPairing(null)
     }
   }
 
@@ -140,7 +187,7 @@ export default function WhatsAppSettings({ onChanged }) {
           {channels.map((channel) => (
             <li
               key={channel.id}
-              className="flex items-center gap-3 rounded-lg border border-edge bg-bg px-3 py-2.5"
+              className="flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-bg px-3 py-2.5"
             >
               <span className="grid h-7 w-7 place-items-center rounded-md bg-accent/12">
                 <Check size={13} className="text-accent" />
@@ -167,15 +214,60 @@ export default function WhatsAppSettings({ onChanged }) {
                   )}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => disconnect(channel.id)}
-                disabled={busy}
-                className="ml-auto rounded-lg p-1.5 text-faint transition-colors hover:bg-panel-2 hover:text-crit disabled:opacity-40"
-                aria-label={`Disconnect ${channel.phone_number}`}
-              >
-                <Trash2 size={14} />
-              </button>
+              <div className="ml-auto flex items-center gap-1.5">
+                {channel.whatsapp_provider === 'QR_SESSION' &&
+                  channel.session_status !== 'AUTHENTICATED' && (
+                    <button
+                      type="button"
+                      onClick={() => beginPairing(channel.id)}
+                      className="flex items-center gap-1.5 rounded-lg border border-accent/40 px-2.5 py-1.5 text-2xs font-semibold text-accent transition-colors hover:bg-accent/10"
+                    >
+                      <QrCode size={12} /> Show QR
+                    </button>
+                  )}
+                <button
+                  type="button"
+                  onClick={() => disconnect(channel.id)}
+                  disabled={busy}
+                  className="rounded-lg p-1.5 text-faint transition-colors hover:bg-panel-2 hover:text-crit disabled:opacity-40"
+                  aria-label={`Disconnect ${channel.phone_number}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+
+              {pairing?.channelId === channel.id && (
+                <div className="mt-3 w-full basis-full border-t border-edge pt-3">
+                  {pairing.status === 'AUTHENTICATED' ? (
+                    <p className="flex items-center gap-2 text-xs text-accent">
+                      <Check size={14} /> Linked. This phone now sends and receives.
+                    </p>
+                  ) : pairing.qr ? (
+                    <div className="flex items-start gap-4">
+                      {/* A white plate: QR readers struggle against a dark UI. */}
+                      <img
+                        src={pairing.qr}
+                        alt="WhatsApp pairing QR code"
+                        className="h-40 w-40 shrink-0 rounded-lg bg-white p-2"
+                      />
+                      <ol className="space-y-1 text-2xs leading-relaxed text-dim">
+                        <li>1. Open WhatsApp on the phone</li>
+                        <li>2. Settings → Linked devices</li>
+                        <li>3. Link a device</li>
+                        <li>4. Scan this code</li>
+                        <li className="pt-1 text-faint">
+                          The code refreshes on its own. You only do this once.
+                        </li>
+                      </ol>
+                    </div>
+                  ) : (
+                    <p className="flex items-center gap-2 text-xs text-faint">
+                      <Loader2 size={13} className="animate-spin" /> Asking WhatsApp for a
+                      code…
+                    </p>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>

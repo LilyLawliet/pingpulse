@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import uuid
 
+import httpx
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.deps import ADMIN_ROLES, Tenant, current_org, current_user, membership_of
 from app.models import ChannelConfig, Organization, OrganizationMember, User
@@ -315,3 +318,87 @@ async def remove_channel(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
     await db.delete(config)
     return None
+
+
+# --------------------------------------------------------------------------
+# WhatsApp Web pairing
+# --------------------------------------------------------------------------
+# The bridge is not reachable from the internet and holds a shared secret the
+# desktop app must never see. These two routes are the only way in: they prove
+# the caller owns the channel, then talk to the bridge on their behalf.
+@router.post("/active/channels/{channel_id}/pair", status_code=202)
+async def start_pairing(
+    channel_id: uuid.UUID,
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ask the bridge to begin a WhatsApp Web pairing for this channel."""
+    tenant.require_role(ADMIN_ROLES)
+    channel = await _own_channel(db, tenant, channel_id)
+
+    async with httpx.AsyncClient(timeout=settings.wa_qr_timeout_seconds) as client:
+        try:
+            response = await client.post(
+                f"{settings.wa_qr_service_url.rstrip('/')}/pair",
+                json={"sessionId": str(channel.id)},
+                headers={"X-PingPulse-Bridge": settings.wa_qr_shared_secret},
+            )
+            response.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"The WhatsApp bridge is not reachable: {exc}",
+            )
+
+    channel.session_status = "GENERATING_QR"
+    return {"ok": True, "status": "GENERATING_QR"}
+
+
+@router.get("/active/channels/{channel_id}/qr")
+async def pairing_state(
+    channel_id: uuid.UUID,
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Where the pairing has got to, and the current QR if one is waiting.
+
+    Polled by the desktop app while the pairing panel is open. A QR rotates
+    every twenty seconds or so, which is why this is polled rather than
+    fetched once.
+    """
+    channel = await _own_channel(db, tenant, channel_id)
+
+    async with httpx.AsyncClient(timeout=settings.wa_qr_timeout_seconds) as client:
+        try:
+            response = await client.get(
+                f"{settings.wa_qr_service_url.rstrip('/')}/session/{channel.id}",
+                headers={"X-PingPulse-Bridge": settings.wa_qr_shared_secret},
+            )
+            response.raise_for_status()
+            state = response.json()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"The WhatsApp bridge is not reachable: {exc}",
+            )
+
+    return {
+        "status": state.get("status", "UNKNOWN"),
+        "qr": state.get("qr"),
+        "connected": bool(state.get("connected")),
+        "phone_number": channel.phone_number,
+    }
+
+
+async def _own_channel(db: AsyncSession, tenant: Tenant, channel_id: uuid.UUID) -> ChannelConfig:
+    """The channel, if it belongs to the caller's organization.
+
+    Another tenant's channel returns 404 rather than 403 — the same rule the
+    rest of the API follows, so an id cannot be probed for existence.
+    """
+    channel = await db.get(ChannelConfig, channel_id)
+    if channel is None or channel.organization_id != tenant.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found"
+        )
+    return channel
