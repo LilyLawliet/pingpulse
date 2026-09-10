@@ -333,6 +333,26 @@ async def drain_channel(db, channel) -> dict:
     return {"delivered": delivered, "dropped": dropped, "remaining": remaining}
 
 
+async def discard(channel_id) -> int:
+    """Throw away everything parked for a channel that is going away.
+
+    Called when a channel is deleted. Without this the messages sit in Redis
+    with no number left to send them from, and the drainer picks the channel
+    up on every pass only to find it gone.
+    """
+    try:
+        async with _connection() as client:
+            depth = await client.llen(queue_key(channel_id))
+            await client.delete(queue_key(channel_id))
+            await client.srem(CHANNELS_KEY, str(channel_id))
+        if depth:
+            logger.info("discarded %d queued message(s) for channel %s", depth, channel_id)
+        return depth
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not clear the outbox for %s: %s", channel_id, exc)
+        return 0
+
+
 async def pending_channel_ids() -> list[str]:
     try:
         async with _connection() as client:

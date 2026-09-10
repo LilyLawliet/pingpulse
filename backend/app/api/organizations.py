@@ -7,6 +7,7 @@ client is never trusted on its own.
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 import httpx
@@ -19,6 +20,7 @@ from app.config import settings
 from app.database import get_db
 from app.deps import ADMIN_ROLES, Tenant, current_org, current_user, membership_of
 from app.models import ChannelConfig, Organization, OrganizationMember, User
+from app.services import outbox, whatsapp
 from app.schemas_tenancy import (
     ChannelConfigCreate,
     ChannelConfigOut,
@@ -30,6 +32,8 @@ from app.schemas_tenancy import (
     OrganizationUpdate,
     SwitchOrganizationRequest,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/organizations", tags=["organizations"])
 
@@ -316,8 +320,38 @@ async def remove_channel(
     config = result.scalar_one_or_none()
     if config is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
+
+    # Unpair the handset before the row goes, and clear anything still queued
+    # for it. Deleting only the row left the phone linked on the bridge, with
+    # its credentials on disk: it kept forwarding the customer's messages after
+    # every restart, to a channel that no longer existed, and every one of them
+    # was dropped. Best-effort — a bridge that is down must not block a delete.
+    if whatsapp.provider_of(config) == whatsapp.QR_SESSION:
+        await _unpair(config.id)
+    await outbox.discard(config.id)
+
     await db.delete(config)
     return None
+
+
+async def _unpair(channel_id: uuid.UUID) -> None:
+    """Tell the bridge to log this session out and forget its credentials."""
+    try:
+        async with httpx.AsyncClient(timeout=settings.wa_qr_timeout_seconds) as client:
+            response = await client.post(
+                f"{settings.wa_qr_service_url.rstrip('/')}/logout",
+                json={"sessionId": str(channel_id)},
+                headers={"X-PingPulse-Bridge": settings.wa_qr_shared_secret},
+            )
+            response.raise_for_status()
+        logger.info("unpaired session %s", channel_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "could not unpair session %s (%s) — the phone may still be linked; "
+            "remove it from WhatsApp's linked devices screen",
+            channel_id,
+            exc,
+        )
 
 
 # --------------------------------------------------------------------------

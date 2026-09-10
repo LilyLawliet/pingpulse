@@ -209,13 +209,24 @@ async def _recent_history(
 
 
 async def process_inbound_message(
-    db: AsyncSession, payload: TwilioWebhookPayload
+    db: AsyncSession,
+    payload: TwilioWebhookPayload,
+    channel: ChannelConfig | None = None,
 ) -> dict:
-    """The full Phase 2-4 pipeline for one inbound WhatsApp message."""
+    """The full Phase 2-4 pipeline for one inbound WhatsApp message.
+
+    `channel` is passed when the caller already knows which one this arrived
+    on — the WhatsApp Web bridge does, because its session id *is* the channel
+    id. Twilio does not, so that path still resolves by the number it
+    delivered to.
+    """
     phone_number = payload.clean_from
     body = (payload.body or "").strip()
 
-    organization, channel = await resolve_organization(db, payload.clean_to)
+    if channel is not None:
+        organization = await db.get(Organization, channel.organization_id)
+    else:
+        organization, channel = await resolve_organization(db, payload.clean_to)
     if organization is None:
         logger.error("no organization for inbound message to %s", payload.clean_to)
         await manager.broadcast(
@@ -707,8 +718,34 @@ async def qr_session_inbound(request: Request, db: AsyncSession = Depends(get_db
         logger.error("malformed bridge payload: %s", exc)
         return Response(status_code=400)
 
+    # The session id *is* the channel id, which is exact. Matching on the
+    # number the bridge reports is not: it arrives bare ("923052544605") while
+    # channels are stored dialled ("+9230..."), so a tenant whose row was
+    # perfectly fine could still fall through to "no organization owns this".
+    channel = None
+    session_id = body.get("sessionId")
+    if session_id:
+        try:
+            channel = await db.get(ChannelConfig, uuid.UUID(str(session_id)))
+        except (ValueError, TypeError):
+            channel = None
+
+    if session_id and channel is None:
+        # A paired handset whose channel has been deleted. The credentials are
+        # still on the bridge's disk, so this repeats for every message until
+        # someone unpairs it — say so once, clearly, rather than reporting a
+        # routing failure that looks like a configuration mistake.
+        logger.warning(
+            "session %s is paired but its channel no longer exists — the phone "
+            "is still linked and its messages have nowhere to go. Re-create the "
+            "channel with this id, or disconnect the phone from WhatsApp's "
+            "linked devices screen.",
+            session_id,
+        )
+        return {"ok": False, "error": "unknown session"}
+
     try:
-        result = await process_inbound_message(db, payload)
+        result = await process_inbound_message(db, payload, channel=channel)
         return {"ok": True, "delivered": result.get("delivered")}
     except Exception as exc:  # noqa: BLE001 - one bad message must not kill the bridge
         logger.exception("qr-session message failed: %s", exc)
