@@ -1,9 +1,20 @@
-# Build, sign and publish a desktop release when a version tag is pushed.
+# Build, sign and publish desktop releases for Windows and macOS.
 #
-#   git tag v1.1.0 && git push origin v1.1.0
+#   git tag v1.3.0 && git push origin v1.3.0
 #
 # Clients running the app pick the update up on their next launch. Nobody
 # downloads an installer again after their first one.
+#
+# ---------------------------------------------------------------------------
+# Why this exists rather than a local build
+# ---------------------------------------------------------------------------
+# A macOS .app cannot be built on Windows. Apple's SDK and codesign only run on
+# macOS, and Tauri does not cross-compile to it — so the Mac bundle needs a Mac,
+# and this workflow's macos-latest runner is the one that does not cost a Mac.
+#
+# macos-14 runners are Apple Silicon, so they produce an arm64 build. The
+# x86_64 target is built on the same runner via rustup, which works because
+# Apple ships both SDKs; that covers Intel Macs, which clients still have.
 #
 # ---------------------------------------------------------------------------
 # One-time setup
@@ -13,14 +24,19 @@
 #   TAURI_SIGNING_PRIVATE_KEY           contents of .secrets/updater.key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  empty string (the key has no password)
 #
-# The private key is what proves an update genuinely came from you. Anyone who
-# has it can push code to every client machine, and losing it means no existing
-# client can ever be updated again — they would each need a manual reinstall.
-# It is gitignored; keep the copy on D: safe.
+# The private key proves an update genuinely came from you. Anyone who has it
+# can push code to every client machine, and losing it means no existing client
+# can ever be updated again. It is gitignored; keep the copy on D: safe.
 #
-# No code-signing certificate is involved. Update packages are verified against
-# the minisign public key compiled into the app, which is a different mechanism
-# from Windows Authenticode.
+# ---------------------------------------------------------------------------
+# Gatekeeper
+# ---------------------------------------------------------------------------
+# Without an Apple Developer certificate the .app is unsigned, and macOS will
+# refuse to open it on first launch — "Apple could not verify this app is free
+# of malware". The client's way past it is right-click, Open, Open. That is a
+# bad first impression, and the only real fix is an Apple Developer account
+# ($99/yr) plus notarisation. The minisign key above is a different mechanism
+# entirely and does not satisfy Gatekeeper.
 
 name: Release desktop app
 
@@ -30,7 +46,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version, e.g. 1.1.0'
+        description: 'Version, e.g. 1.3.0'
         required: true
 
 permissions:
@@ -38,7 +54,24 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      # One platform failing must not throw away the other's build.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+            label: macOS (Apple Silicon)
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+            label: macOS (Intel)
+          - platform: windows-latest
+            args: ''
+            label: Windows
+
+    runs-on: ${{ matrix.platform }}
+    name: ${{ matrix.label }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -49,12 +82,17 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Both Apple targets are installed on the macOS runners; on Windows
+          # this is empty and the host target is used.
+          targets: ${{ contains(matrix.platform, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-        # A cold Tauri build is about five minutes; cached it is well under one.
+          # Keyed per matrix leg, or the three would overwrite each other.
+          key: ${{ matrix.platform }}-${{ matrix.args }}
 
       - name: Install frontend dependencies
         run: npm ci
@@ -76,7 +114,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Baked into the bundle so the installer knows which backend to call.
+          # Baked into the bundle so the app knows which backend to call.
           VITE_API_BASE_URL: https://pingpulse.duckdns.org
         with:
           tagName: v${{ steps.version.outputs.value }}
@@ -84,11 +122,31 @@ jobs:
           releaseBody: |
             Install once and the app keeps itself up to date.
 
-            New clients: download `PingPulse_Setup.exe` below.
+            **Windows** — download `PingPulse_Setup.exe`.
+            **macOS** — download the `.dmg` for your Mac: `aarch64` for Apple
+            Silicon (M1 and later), `x64` for Intel. On first open macOS will
+            warn that it cannot verify the app; right-click it, choose Open,
+            then Open again. That is only needed once.
+
             Existing clients: nothing to do — this arrives on next launch.
           releaseDraft: false
           prerelease: false
-          # Writes latest.json alongside the installer, which is the file the
-          # app polls. Without it clients never learn a release exists.
+          # Writes latest.json alongside the bundles, which is the file the app
+          # polls. Without it clients never learn a release exists.
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+          args: ${{ matrix.args }}
+
+      - name: Keep the bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: pingpulse-${{ matrix.platform }}-${{ strategy.job-index }}
+          # The .app.tar.gz is what the macOS updater installs; the .dmg is
+          # what a new client downloads. Both are needed.
+          path: |
+            src-tauri/target/**/release/bundle/dmg/*.dmg
+            src-tauri/target/**/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/**/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+          if-no-files-found: warn

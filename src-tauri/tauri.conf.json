@@ -28,11 +28,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "nsis",
-      "msi"
-    ],
+    "targets": "all",
     "icon": [
+      "icons/icon.icns",
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
@@ -55,7 +53,13 @@
       "digestAlgorithm": null,
       "timestampUrl": null
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "entitlements": null,
+      "exceptionDomain": "",
+      "signingIdentity": null
+    }
   },
   "plugins": {
     "updater": {

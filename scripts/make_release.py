@@ -109,16 +109,29 @@ def write_manifest(version: str, installer: pathlib.Path, signature: str, notes:
     # publicly downloadable and the updater only ever saw a 404.
     url = f"{BACKEND_URL.rstrip('/')}/updates/{installer.name}"
 
+    # Merge rather than overwrite. One manifest serves every platform, and the
+    # builds are produced on different machines — a macOS bundle cannot be made
+    # on Windows — so writing this file from scratch on a Windows release would
+    # silently delete the macOS entry and strand every Mac client on whatever
+    # version they happened to have.
+    existing = {}
+    manifest_path = OUT / "latest.json"
+    if manifest_path.is_file():
+        try:
+            previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if previous.get("version") == version:
+                existing = previous.get("platforms", {})
+        except (ValueError, OSError):
+            existing = {}
+
     manifest = {
         "version": version,
         "notes": notes,
         "pub_date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "platforms": {
-            "windows-x86_64": {"signature": signature, "url": url},
-        },
+        "platforms": {**existing, "windows-x86_64": {"signature": signature, "url": url}},
     }
 
-    (OUT / "latest.json").write_text(
+    manifest_path.write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n"
     )
 
