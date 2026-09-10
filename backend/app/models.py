@@ -25,6 +25,12 @@ from sqlalchemy.types import JSON, DateTime, TypeDecorator
 from app.database import Base
 
 PIPELINE_STAGES = ("LEAD", "QUALIFIED", "DEMO_BOOKED", "CLOSED")
+
+# How a tenant's WhatsApp is connected.
+#   TWILIO     the official API. Sanctioned, stable, costs per message.
+#   QR_SESSION an unofficial WhatsApp Web session. Free, and against
+#              WhatsApp's terms — the number can be banned.
+WHATSAPP_PROVIDERS = ("TWILIO", "QR_SESSION")
 MEMBER_ROLES = ("OWNER", "ADMIN", "AGENT", "VIEWER")
 
 
@@ -255,9 +261,23 @@ class ChannelConfig(Base):
     )
     phone_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
 
+    # How this number is connected. Both providers write to the same tables,
+    # so switching never hides or loses a conversation.
+    whatsapp_provider: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="TWILIO", server_default="TWILIO"
+    )
+
     # Optional per-tenant credentials; blank means use the platform defaults.
+    # Only meaningful for TWILIO.
     account_sid: Mapped[str | None] = mapped_column(String(64))
     auth_token: Mapped[str | None] = mapped_column(String(128))
+
+    # QR_SESSION only: what the bridge reports about the paired phone.
+    #   PENDING / QR_READY / AUTHENTICATED / DISCONNECTED
+    session_status: Mapped[str | None] = mapped_column(String(24))
+    session_connected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
     created_at: Mapped[datetime] = _now_column()

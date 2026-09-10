@@ -1,0 +1,296 @@
+/**
+ * PingPulse — WhatsApp Web session bridge.
+ *
+ * Holds one paired WhatsApp Web session per tenant channel and translates
+ * between it and the PingPulse API:
+ *
+ *   inbound   WhatsApp message  ->  POST /api/v1/whatsapp/qr-inbound
+ *   outbound  POST /send        ->  WhatsApp message
+ *   pairing   WebSocket /ws/wa-qr streams the QR and status changes
+ *
+ * The payloads are deliberately shaped like Twilio's, because the API feeds
+ * both providers into the same pipeline. Nothing downstream knows or cares
+ * which transport a message arrived on.
+ *
+ * Auth credentials are written to disk under SESSIONS_DIR, which is a mounted
+ * volume, so a paired phone survives a container restart without re-scanning.
+ *
+ * ---------------------------------------------------------------------------
+ * This uses an unofficial WhatsApp Web client. That is against WhatsApp's
+ * terms of service, and a number sending automated sales messages through it
+ * can be banned. Twilio is the sanctioned transport; this exists because
+ * clients ask for it, not because it is the safer choice.
+ * ---------------------------------------------------------------------------
+ */
+
+import { mkdirSync } from 'node:fs'
+import { createServer } from 'node:http'
+import path from 'node:path'
+
+import makeWASocket, {
+  DisconnectReason,
+  useMultiFileAuthState,
+} from '@whiskeysockets/baileys'
+import express from 'express'
+import pino from 'pino'
+import QRCode from 'qrcode'
+import { WebSocketServer } from 'ws'
+
+const PORT = Number(process.env.PORT || 3100)
+const API_URL = process.env.PINGPULSE_API_URL || 'http://backend:8000'
+const SHARED_SECRET = process.env.WA_QR_SHARED_SECRET || ''
+const SESSIONS_DIR = process.env.SESSIONS_DIR || '/data/wa_sessions'
+
+const log = pino({ level: process.env.LOG_LEVEL || 'info' })
+
+mkdirSync(SESSIONS_DIR, { recursive: true })
+
+/** Live sessions, keyed by channel id. */
+const sessions = new Map()
+/** Sockets watching a pairing, keyed by channel id. */
+const watchers = new Map()
+
+// ---------------------------------------------------------------- helpers
+function notifyWatchers(sessionId, event) {
+  const listeners = watchers.get(sessionId)
+  if (!listeners) return
+  const message = JSON.stringify(event)
+  for (const socket of listeners) {
+    // A dead tab must never break the pairing it was watching.
+    try {
+      if (socket.readyState === socket.OPEN) socket.send(message)
+    } catch (error) {
+      log.warn({ error: error.message }, 'could not reach a watcher')
+    }
+  }
+}
+
+async function callApi(pathname, body) {
+  try {
+    const response = await fetch(`${API_URL}${pathname}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-PingPulse-Bridge': SHARED_SECRET,
+      },
+      body: JSON.stringify(body),
+    })
+    if (!response.ok) {
+      log.error({ pathname, status: response.status }, 'API rejected the call')
+    }
+    return response.ok
+  } catch (error) {
+    log.error({ pathname, error: error.message }, 'API unreachable')
+    return false
+  }
+}
+
+function reportStatus(sessionId, status, extra = {}) {
+  notifyWatchers(sessionId, { type: 'status', status, ...extra })
+  callApi('/api/v1/whatsapp/qr-status', { sessionId, status, ...extra })
+}
+
+// ---------------------------------------------------------------- session
+/**
+ * Start (or resume) a session for one channel.
+ *
+ * Called both when a client asks to pair and on boot for every session already
+ * on disk, which is what makes a restart invisible to a paired client.
+ */
+async function startSession(sessionId) {
+  if (sessions.has(sessionId)) return sessions.get(sessionId)
+
+  const folder = path.join(SESSIONS_DIR, sessionId)
+  const { state, saveCreds } = await useMultiFileAuthState(folder)
+
+  const socket = makeWASocket({
+    auth: state,
+    logger: pino({ level: 'silent' }),
+    // Shown on the phone's linked-devices screen.
+    browser: ['PingPulse', 'Chrome', '1.0.0'],
+    markOnlineOnConnect: false,
+  })
+
+  sessions.set(sessionId, socket)
+  reportStatus(sessionId, 'GENERATING_QR')
+
+  socket.ev.on('creds.update', saveCreds)
+
+  socket.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update
+
+    if (qr) {
+      // Sent as a data URL so the desktop app can render it directly in an
+      // <img>, with no QR library of its own.
+      const dataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 320 })
+      notifyWatchers(sessionId, { type: 'status', status: 'QR_READY', qr: dataUrl })
+      reportStatus(sessionId, 'QR_READY')
+    }
+
+    if (connection === 'open') {
+      const phoneNumber = socket.user?.id?.split(':')[0]?.split('@')[0] || null
+      log.info({ sessionId, phoneNumber }, 'session authenticated')
+      reportStatus(sessionId, 'AUTHENTICATED', { phoneNumber })
+    }
+
+    if (connection === 'close') {
+      const status = lastDisconnect?.error?.output?.statusCode
+      sessions.delete(sessionId)
+
+      // Logged out from the phone: the credentials are dead and a re-scan is
+      // the only way back. Anything else is a dropped connection worth retrying.
+      if (status === DisconnectReason.loggedOut) {
+        log.warn({ sessionId }, 'logged out on the phone — re-pairing required')
+        reportStatus(sessionId, 'DISCONNECTED', { reason: 'logged_out' })
+        return
+      }
+
+      log.info({ sessionId, status }, 'connection dropped, reconnecting')
+      reportStatus(sessionId, 'DISCONNECTED', { reason: 'reconnecting' })
+      setTimeout(() => startSession(sessionId).catch(() => {}), 3000)
+    }
+  })
+
+  socket.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return
+
+    for (const message of messages) {
+      // Skip our own outgoing messages and system chatter.
+      if (message.key.fromMe || !message.message) continue
+      const remote = message.key.remoteJid || ''
+      if (remote.endsWith('@g.us') || remote === 'status@broadcast') continue
+
+      const text =
+        message.message.conversation ||
+        message.message.extendedTextMessage?.text ||
+        message.message.imageMessage?.caption ||
+        ''
+      if (!text.trim()) continue
+
+      await callApi('/api/v1/whatsapp/qr-inbound', {
+        id: message.key.id,
+        sessionId,
+        from: remote.split('@')[0],
+        to: socket.user?.id?.split(':')[0]?.split('@')[0] || '',
+        body: text,
+        pushName: message.pushName || '',
+        mediaUrls: [],
+      })
+    }
+  })
+
+  return socket
+}
+
+// ------------------------------------------------------------------- http
+const app = express()
+app.use(express.json({ limit: '2mb' }))
+
+// Only the API may drive this service.
+app.use((request, response, next) => {
+  if (request.path === '/health') return next()
+  if (!SHARED_SECRET || request.get('X-PingPulse-Bridge') !== SHARED_SECRET) {
+    return response.status(403).json({ ok: false, error: 'forbidden' })
+  }
+  next()
+})
+
+app.get('/health', (_request, response) => {
+  response.json({ status: 'ok', sessions: sessions.size })
+})
+
+app.post('/pair', async (request, response) => {
+  const { sessionId } = request.body || {}
+  if (!sessionId) return response.status(400).json({ ok: false, error: 'sessionId required' })
+  try {
+    await startSession(sessionId)
+    response.json({ ok: true })
+  } catch (error) {
+    log.error({ error: error.message }, 'could not start session')
+    response.status(500).json({ ok: false, error: error.message })
+  }
+})
+
+app.post('/send', async (request, response) => {
+  const { sessionId, to, body, mediaUrls } = request.body || {}
+  const socket = sessions.get(sessionId)
+
+  if (!socket) {
+    return response.json({ ok: false, error: 'session not connected' })
+  }
+
+  try {
+    const jid = `${String(to).replace(/[^0-9]/g, '')}@s.whatsapp.net`
+    let sent
+
+    if (mediaUrls?.length) {
+      // First image carries the text, the rest follow — same shape the Twilio
+      // path produces, so a conversation reads identically either way.
+      sent = await socket.sendMessage(jid, { image: { url: mediaUrls[0] }, caption: body })
+      for (const url of mediaUrls.slice(1)) {
+        await socket.sendMessage(jid, { image: { url } })
+      }
+    } else {
+      sent = await socket.sendMessage(jid, { text: body })
+    }
+
+    response.json({ ok: true, id: sent?.key?.id || 'sent' })
+  } catch (error) {
+    log.error({ error: error.message }, 'send failed')
+    response.json({ ok: false, error: error.message })
+  }
+})
+
+app.post('/logout', async (request, response) => {
+  const { sessionId } = request.body || {}
+  const socket = sessions.get(sessionId)
+  if (socket) {
+    try {
+      await socket.logout()
+    } catch {
+      /* already gone */
+    }
+    sessions.delete(sessionId)
+  }
+  reportStatus(sessionId, 'DISCONNECTED', { reason: 'logged_out' })
+  response.json({ ok: true })
+})
+
+// -------------------------------------------------------------- websocket
+const server = createServer(app)
+const wss = new WebSocketServer({ server, path: '/ws/wa-qr' })
+
+wss.on('connection', (socket, request) => {
+  const url = new URL(request.url, 'http://localhost')
+  const sessionId = url.searchParams.get('sessionId')
+  const secret = url.searchParams.get('secret')
+
+  // Browsers cannot set headers on a websocket handshake, so the secret comes
+  // in the query string — same reason the dashboard's own socket does it.
+  if (!sessionId || !SHARED_SECRET || secret !== SHARED_SECRET) {
+    socket.close(1008, 'forbidden')
+    return
+  }
+
+  if (!watchers.has(sessionId)) watchers.set(sessionId, new Set())
+  watchers.get(sessionId).add(socket)
+
+  socket.send(
+    JSON.stringify({
+      type: 'status',
+      status: sessions.has(sessionId) ? 'AUTHENTICATED' : 'GENERATING_QR',
+    }),
+  )
+
+  startSession(sessionId).catch((error) =>
+    log.error({ error: error.message }, 'pairing failed'),
+  )
+
+  socket.on('close', () => {
+    watchers.get(sessionId)?.delete(socket)
+  })
+})
+
+server.listen(PORT, '0.0.0.0', () => {
+  log.info({ port: PORT, api: API_URL }, 'wa-qr-service listening')
+})

@@ -94,7 +94,7 @@ jobs:
             frontend/package-lock.json frontend/vite.config.js \
             frontend/tailwind.config.js frontend/postcss.config.js \
             docker/nginx.conf Dockerfile.backend Dockerfile.frontend \
-            deploy/gcp-vm scripts
+            deploy/gcp-vm scripts services/wa-qr-service
           ls -lh push.tgz
 
       - name: Upload to the VM

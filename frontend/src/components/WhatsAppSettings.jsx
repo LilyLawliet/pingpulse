@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Copy, Link2, Loader2, Plug, Trash2, TriangleAlert } from 'lucide-react'
+import {
+  Check,
+  Cloud,
+  Copy,
+  Link2,
+  Loader2,
+  Plug,
+  QrCode,
+  Smartphone,
+  Trash2,
+  TriangleAlert,
+} from 'lucide-react'
 import { api } from '../api.js'
 import { backendOrigin } from '../backend.js'
 
@@ -14,6 +25,7 @@ import { backendOrigin } from '../backend.js'
  */
 export default function WhatsAppSettings({ onChanged }) {
   const [channels, setChannels] = useState(null)
+  const [provider, setProvider] = useState('TWILIO')
   const [form, setForm] = useState({ phone_number: '', account_sid: '', auth_token: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -48,7 +60,7 @@ export default function WhatsAppSettings({ onChanged }) {
       // which would send this client's replies from the wrong number.
       const sid = form.account_sid.trim()
       const token = form.auth_token.trim()
-      if (Boolean(sid) !== Boolean(token)) {
+      if (provider === 'TWILIO' && Boolean(sid) !== Boolean(token)) {
         throw new Error('Enter both the Account SID and the Auth Token, or neither.')
       }
 
@@ -56,8 +68,10 @@ export default function WhatsAppSettings({ onChanged }) {
         channel: 'whatsapp',
         provider: 'twilio',
         phone_number: form.phone_number.trim(),
-        account_sid: sid || null,
-        auth_token: token || null,
+        whatsapp_provider: provider,
+        // Only meaningful for Twilio; the QR path pairs a phone instead.
+        account_sid: provider === 'TWILIO' ? sid || null : null,
+        auth_token: provider === 'TWILIO' ? token || null : null,
       })
       setForm({ phone_number: '', account_sid: '', auth_token: '' })
       await load()
@@ -133,10 +147,24 @@ export default function WhatsAppSettings({ onChanged }) {
               </span>
               <div className="min-w-0">
                 <p className="font-mono text-[13px] text-ink">{channel.phone_number}</p>
-                <p className="text-2xs text-faint">
-                  {channel.account_sid
-                    ? `Your own Twilio account · ${channel.account_sid.slice(0, 10)}…`
-                    : 'Sending on the shared PingPulse Twilio account'}
+                <p className="flex items-center gap-1.5 text-2xs text-faint">
+                  {channel.whatsapp_provider === 'QR_SESSION' ? (
+                    <>
+                      <Smartphone size={11} />
+                      {channel.session_status === 'AUTHENTICATED'
+                        ? 'Paired phone · session active'
+                        : channel.session_status === 'DISCONNECTED'
+                          ? 'Paired phone · disconnected, re-scan needed'
+                          : 'Paired phone · waiting for a scan'}
+                    </>
+                  ) : (
+                    <>
+                      <Cloud size={11} />
+                      {channel.account_sid
+                        ? `Your own Twilio account · ${channel.account_sid.slice(0, 10)}…`
+                        : 'Shared PingPulse Twilio account'}
+                    </>
+                  )}
                 </p>
               </div>
               <button
@@ -153,10 +181,57 @@ export default function WhatsAppSettings({ onChanged }) {
         </ul>
       )}
 
-      {/* ------------------------------ add -------------------------------- */}
+      {/* -------------------------- strategy ------------------------------- */}
       <div className="space-y-3 rounded-lg border border-edge bg-bg/50 p-3.5">
+        <span className="eyebrow block">Connection strategy</span>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            {
+              id: 'TWILIO',
+              icon: Cloud,
+              title: 'Twilio Cloud API',
+              blurb: 'Official and supported. Costs per message.',
+            },
+            {
+              id: 'QR_SESSION',
+              icon: QrCode,
+              title: 'WhatsApp Web QR',
+              blurb: 'Free. Against WhatsApp terms — risk of a ban.',
+            },
+          ].map(({ id, icon: Icon, title, blurb }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setProvider(id)}
+              className={`rounded-lg border p-3 text-left transition-colors ${
+                provider === id
+                  ? 'border-accent/60 bg-accent/8'
+                  : 'border-edge hover:border-edge-strong'
+              }`}
+            >
+              <Icon size={15} className={provider === id ? 'text-accent' : 'text-faint'} />
+              <p className="mt-1.5 text-xs font-semibold text-ink">{title}</p>
+              <p className="mt-0.5 text-2xs leading-snug text-faint">{blurb}</p>
+            </button>
+          ))}
+        </div>
+
+        {provider === 'QR_SESSION' && (
+          <p className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2.5 text-2xs leading-relaxed text-warn">
+            <TriangleAlert size={13} className="mt-0.5 shrink-0" />
+            <span>
+              This links a real phone through an unofficial WhatsApp Web session.
+              WhatsApp does not permit it, and numbers used for automated sales
+              messages can be banned permanently. Twilio is the safe choice for a
+              business number you cannot afford to lose.
+            </span>
+          </p>
+        )}
+
         <label className="block">
-          <span className="eyebrow mb-1.5 block">WhatsApp number</span>
+          <span className="eyebrow mb-1.5 block">
+            {provider === 'TWILIO' ? 'WhatsApp number' : 'Phone number to pair'}
+          </span>
           <input
             {...field('phone_number')}
             className={inputClass}
@@ -165,7 +240,7 @@ export default function WhatsAppSettings({ onChanged }) {
           />
         </label>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className={`grid grid-cols-2 gap-3 ${provider === 'TWILIO' ? '' : 'hidden'}`}>
           <label className="block">
             <span className="eyebrow mb-1.5 block">Twilio Account SID</span>
             <input
@@ -188,10 +263,17 @@ export default function WhatsAppSettings({ onChanged }) {
           </label>
         </div>
 
-        <p className="text-2xs text-faint">
-          Leave both blank to send on the shared PingPulse account. Once saved, the token
-          is stored on the server and never shown again.
-        </p>
+        {provider === 'TWILIO' ? (
+          <p className="text-2xs text-faint">
+            Leave both blank to send on the shared PingPulse account. Once saved, the
+            token is stored on the server and never shown again.
+          </p>
+        ) : (
+          <p className="text-2xs text-faint">
+            No credentials needed. After saving, a QR code appears here — scan it from
+            WhatsApp on the phone under Linked devices. You only scan once.
+          </p>
+        )}
 
         <button
           type="button"
@@ -204,7 +286,13 @@ export default function WhatsAppSettings({ onChanged }) {
       </div>
 
       {/* ---------------------------- webhook ------------------------------ */}
-      <div className="rounded-lg border border-edge bg-bg/50 p-3.5">
+      {/* Only Twilio calls a webhook. A paired session pushes messages to the
+          bridge, which posts them onward — nothing to configure. */}
+      <div
+        className={`rounded-lg border border-edge bg-bg/50 p-3.5 ${
+          channels?.some((c) => c.whatsapp_provider !== 'QR_SESSION') !== false ? '' : 'hidden'
+        }`}
+      >
         <p className="eyebrow mb-1.5 flex items-center gap-1.5">
           <Link2 size={12} /> Paste this into Twilio
         </p>

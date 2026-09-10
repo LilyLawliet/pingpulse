@@ -108,6 +108,8 @@ class ChannelConfigCreate(BaseModel):
     phone_number: str = Field(min_length=3, max_length=50)
     channel: str = Field(default="whatsapp", max_length=30)
     provider: str = Field(default="twilio", max_length=30)
+    # TWILIO or QR_SESSION. Defaults to the sanctioned transport.
+    whatsapp_provider: str = Field(default="TWILIO", max_length=20)
     account_sid: str | None = None
     auth_token: str | None = None
 
@@ -119,9 +121,15 @@ class ChannelConfigOut(BaseModel):
     organization_id: uuid.UUID
     channel: str
     provider: str
+    whatsapp_provider: str = "TWILIO"
     phone_number: str
     is_active: bool
     created_at: datetime
+    # QR_SESSION only; null for Twilio channels.
+    session_status: str | None = None
+    session_connected_at: datetime | None = None
+    # Never serialised: the auth token is write-only.
+    account_sid: str | None = None
 
 
 # --------------------------------- CRM ------------------------------------

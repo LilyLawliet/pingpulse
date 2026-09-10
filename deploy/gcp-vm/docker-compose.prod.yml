@@ -124,6 +124,8 @@ services:
       # deploy.sh owns migrations. See the header note.
       AUTO_MIGRATE_ON_STARTUP: "false"
       APP_ENV: production
+      WA_QR_SERVICE_URL: http://wa-qr-service:3100
+      WA_QR_SHARED_SECRET: ${WA_QR_SHARED_SECRET}
     ports:
       # Bound to loopback: reachable over SSH for debugging, never from the
       # internet. Public traffic arrives through Caddy.
@@ -183,6 +185,49 @@ services:
     deploy:
       resources:
         limits:
+          memory: 512m
+    networks:
+      - pingpulse-net
+
+  wa-qr-service:
+    # Holds paired WhatsApp Web sessions for tenants on the QR_SESSION
+    # provider, and speaks to the API over the internal network only — it
+    # publishes no port and Caddy does not route to it.
+    #
+    # This drives an unofficial WhatsApp Web client, which is against
+    # WhatsApp's terms; a number sending automated messages through it can be
+    # banned. Twilio remains the default and the sanctioned path.
+    build:
+      context: ../..
+      dockerfile: services/wa-qr-service/Dockerfile
+    image: pingpulse-wa-qr:latest
+    container_name: pingpulse-wa-qr
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      PORT: "3100"
+      PINGPULSE_API_URL: http://backend:8000
+      WA_QR_SHARED_SECRET: ${WA_QR_SHARED_SECRET}
+      SESSIONS_DIR: /data/wa_sessions
+      LOG_LEVEL: info
+    volumes:
+      # Paired sessions survive a restart, so a client scans once and never
+      # again. Backed up with everything else under DATA_DIR.
+      - ${DATA_DIR:-/opt/pingpulse/data}/wa_sessions:/data/wa_sessions
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3100/health || exit 1"]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 25s
+    deploy:
+      resources:
+        limits:
+          # A Baileys session is mostly idle but holds message history in
+          # memory; this is comfortable for a handful of tenants.
           memory: 512m
     networks:
       - pingpulse-net

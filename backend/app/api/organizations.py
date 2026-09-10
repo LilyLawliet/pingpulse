@@ -287,6 +287,7 @@ async def add_channel(
         channel=payload.channel,
         provider=payload.provider,
         phone_number=number,
+        whatsapp_provider=(payload.whatsapp_provider or 'TWILIO').upper(),
         account_sid=payload.account_sid,
         auth_token=payload.auth_token,
     )

@@ -69,7 +69,7 @@ tar -czf "$ARCHIVE" \
   frontend/src frontend/index.html frontend/package.json frontend/package-lock.json \
   frontend/vite.config.js frontend/tailwind.config.js frontend/postcss.config.js \
   docker/nginx.conf Dockerfile.backend Dockerfile.frontend \
-  deploy/gcp-vm scripts
+  deploy/gcp-vm scripts services/wa-qr-service
 
 SIZE="$(du -k "$ARCHIVE" | cut -f1)"
 ok "${SIZE} KB, $(tar -tzf "$ARCHIVE" | wc -l | tr -d ' ') files"

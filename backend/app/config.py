@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     # payload to route on — without this the oldest organization silently wins.
     default_organization_id: str = ""
 
+    # WhatsApp Web bridge. Reached over the compose network, never exposed.
+    wa_qr_service_url: str = "http://wa-qr-service:3100"
+    wa_qr_timeout_seconds: int = 30
+    # Shared secret between the API and the bridge, so nothing else on the
+    # network can send messages as a tenant.
+    wa_qr_shared_secret: str = ""
+
     # Media. Kept on the D: volume and re-served from PUBLIC_BASE_URL so
     # WhatsApp can fetch what we store.
     media_dir: str = "/app/media"

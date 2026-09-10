@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Sequence
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -31,6 +32,7 @@ from app.services import (
     vision,
     ws_manager,
 )
+from app.services import whatsapp
 from app.services.twilio_service import (
     Sender,
     signature_url,
@@ -425,8 +427,11 @@ async def process_inbound_message(
     )
 
     # Sent on the tenant's own Twilio account and number when they have one.
-    sent, sid_or_error = await twilio_service.send_whatsapp(
-        phone_number, generation.text, outbound_media, sender=Sender.for_channel(channel)
+    # Routed by the channel's provider: Twilio's API, or the paired WhatsApp
+    # Web session. Everything above and below this line is identical either
+    # way, which is what keeps the two paths from drifting apart.
+    sent, sid_or_error = await whatsapp.send_message(
+        channel, phone_number, generation.text, outbound_media
     )
     if not sent:
         logger.warning("outbound dispatch failed: %s", sid_or_error)
@@ -634,3 +639,101 @@ async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db))
 async def whatsapp_webhook_probe():
     """Convenience GET so the endpoint can be verified from a browser."""
     return {"status": "ok", "detail": "POST Twilio form payloads to this URL"}
+
+
+# --------------------------------------------------------------------------
+# Inbound from the WhatsApp Web bridge
+# --------------------------------------------------------------------------
+@router.post("/qr-inbound")
+async def qr_session_inbound(request: Request, db: AsyncSession = Depends(get_db)):
+    """A message that arrived over a paired WhatsApp Web session.
+
+    The bridge speaks WhatsApp; this turns what it saw into the same payload
+    shape Twilio posts, then hands it to the very same pipeline. That is
+    deliberate — the analyzer, sales policy, CRM writes, follow-up scheduling
+    and live dashboard events are shared, so a tenant who switches provider
+    keeps every behaviour and every past conversation.
+
+    Authenticated with a shared secret rather than a Twilio signature: the
+    bridge is a service on the internal network, not a third party, and it has
+    no auth token to sign with.
+    """
+    secret = settings.wa_qr_shared_secret
+    if not secret or request.headers.get("X-PingPulse-Bridge") != secret:
+        logger.warning("rejected qr-inbound with a bad or missing bridge secret")
+        return Response(status_code=403)
+
+    body = await request.json()
+
+    # Reshaped into Twilio's field names so one payload model and one pipeline
+    # serve both providers.
+    raw = {
+        "MessageSid": str(body.get("id") or ""),
+        "From": f"whatsapp:{body.get('from', '')}",
+        "To": f"whatsapp:{body.get('to', '')}",
+        "Body": body.get("body") or "",
+        "ProfileName": body.get("pushName") or "",
+        "NumMedia": str(len(body.get("mediaUrls") or [])),
+    }
+    for index, url in enumerate(body.get("mediaUrls") or []):
+        raw[f"MediaUrl{index}"] = url
+        raw[f"MediaContentType{index}"] = "image/jpeg"
+
+    logger.info("inbound qr-session payload: %s", raw)
+
+    try:
+        payload = TwilioWebhookPayload.model_validate({**raw, "raw": raw})
+    except Exception as exc:  # noqa: BLE001
+        logger.error("malformed bridge payload: %s", exc)
+        return Response(status_code=400)
+
+    try:
+        result = await process_inbound_message(db, payload)
+        return {"ok": True, "delivered": result.get("delivered")}
+    except Exception as exc:  # noqa: BLE001 - one bad message must not kill the bridge
+        logger.exception("qr-session message failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/qr-status")
+async def qr_session_status(request: Request, db: AsyncSession = Depends(get_db)):
+    """The bridge reporting where a pairing has got to.
+
+    Stored on the channel so the desktop app can show "Session active" or
+    "Disconnected" without holding a socket open to the bridge itself.
+    """
+    if (
+        not settings.wa_qr_shared_secret
+        or request.headers.get("X-PingPulse-Bridge") != settings.wa_qr_shared_secret
+    ):
+        return Response(status_code=403)
+
+    body = await request.json()
+    session_id = body.get("sessionId")
+    status_value = (body.get("status") or "").upper()
+
+    try:
+        channel = await db.get(ChannelConfig, uuid.UUID(str(session_id)))
+    except (ValueError, TypeError):
+        channel = None
+
+    if channel is None:
+        return {"ok": False, "error": "unknown session"}
+
+    channel.session_status = status_value[:24]
+    if status_value == "AUTHENTICATED":
+        channel.session_connected_at = datetime.now(timezone.utc)
+        # The bridge learns the real number only after pairing.
+        if body.get("phoneNumber"):
+            channel.phone_number = str(body["phoneNumber"]).replace("whatsapp:", "")
+    await db.commit()
+
+    await manager.broadcast(
+        ws_manager.EVENT_SYNC,
+        {
+            "contact_id": None,
+            "organization_id": str(channel.organization_id),
+            "wa_session_status": status_value,
+        },
+    )
+    return {"ok": True}
