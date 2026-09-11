@@ -137,8 +137,13 @@ def write_manifest(version: str, installer: pathlib.Path, signature: str, notes:
 
     shutil.copy2(installer, OUT / installer.name)
     shutil.copy2(installer.with_suffix(".exe.sig"), OUT / f"{installer.name}.sig")
-    # Keep the stable filename too, for handing to a brand-new client.
+    # Keep the stable filename too, for handing to a brand-new client. The
+    # signature is copied with it and never separately: this file pair has gone
+    # out mismatched twice now — a 1.3.0 installer beside a 1.2.3 signature —
+    # because only the executable was refreshed. A signature that belongs to a
+    # different build is worse than none, since it looks like it was checked.
     shutil.copy2(installer, OUT / "PingPulse_Setup.exe")
+    shutil.copy2(installer.with_suffix(".exe.sig"), OUT / "PingPulse_Setup.exe.sig")
 
     print(f"  manifest  {OUT / 'latest.json'}")
     print(f"  installer {OUT / installer.name}")
