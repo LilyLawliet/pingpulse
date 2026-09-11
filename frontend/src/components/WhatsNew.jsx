@@ -20,8 +20,9 @@ const RELEASES = [
         body:
           'In your business settings, ask it to read your voice. It looks at the messages ' +
           'you have written to customers yourself and describes how you write — short or ' +
-          'warm, English or Roman Urdu, how you open and sign off. You read the description, ' +
-          'change anything that is wrong, and only then does it take effect. Until you do, ' +
+          'warm, formal or casual, the language you use and whether you mix two, how you open ' +
+          'and sign off. You read the description, change anything that is wrong, and only ' +
+          'then does it take effect. Until you do, ' +
           'nothing about your agent changes.',
       },
       {

@@ -200,7 +200,7 @@ export default function LearningSettings() {
               rows={5}
               value={style}
               onChange={(event) => setStyle(event.target.value)}
-              placeholder="Short, direct sentences. Greets in Roman Urdu."
+              placeholder="Short, direct sentences. Warm greeting, no sign-off."
               className="w-full rounded-lg border border-edge bg-bg px-3 py-2 text-2xs leading-relaxed text-ink placeholder:text-faint focus:border-accent/60"
             />
             <p className="text-2xs leading-relaxed text-faint">

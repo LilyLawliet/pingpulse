@@ -236,8 +236,8 @@ degraded in polish, never in accuracy, and never silent.
 
 Your agent can be taught to write the way you write. It reads the messages a person at your
 shop has actually typed to customers, describes the pattern in them — sentence length, whether
-you greet and how, English or Roman Urdu or both, formality, emoji — and shows you that
-description. You edit anything that is wrong, and only then does it take effect.
+you greet and how, the language you write in and whether you mix two, formality, emoji — and
+shows you that description. You edit anything that is wrong, and only then does it take effect.
 
 Two deliberate limits sit behind that. It never learns from the agent's own replies: WhatsApp
 records that a message came from your number, not who typed it, so everything sent after your
