@@ -1,9 +1,16 @@
 import { MessageSquare } from 'lucide-react'
 import { STAGE_LABEL, STAGE_STYLE, contactLabel, initialsOf, prettyPhone } from '../format.js'
 
-export default function ConversationList({ contacts, selectedId, onSelect, previews, composing }) {
+export default function ConversationList({
+  contacts,
+  selectedId,
+  onSelect,
+  previews,
+  composing,
+  className = '',
+}) {
   return (
-    <section className="panel w-[280px] shrink-0">
+    <section className={`panel shrink-0 ${className}`}>
       <header className="panel-head">
         <MessageSquare size={14} className="text-accent" />
         <h2 className="text-xs font-semibold text-ink">Conversations</h2>

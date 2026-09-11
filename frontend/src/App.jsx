@@ -10,6 +10,44 @@ import MetricStrip from './components/MetricStrip.jsx'
 import OrgSelector from './components/OrgSelector.jsx'
 import PulseLine from './components/PulseLine.jsx'
 
+/**
+ * Pane switcher, phones only.
+ *
+ * Hidden from `lg` up, where all three panes are on screen at once and a
+ * switcher would be a control that does nothing. "Conversation" only appears
+ * once there is one open, so it is never a tab leading to an empty panel.
+ */
+function PaneTabs({ pane, onPick, waiting }) {
+  const tabs = [
+    { id: 'list', label: 'Chats', count: waiting },
+    ...(pane === 'thread' ? [{ id: 'thread', label: 'Conversation' }] : []),
+    { id: 'pipeline', label: 'Pipeline' },
+  ]
+
+  return (
+    <div className="flex gap-1 rounded-xl border border-edge bg-panel p-1 lg:hidden">
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => onPick(tab.id)}
+          aria-current={pane === tab.id ? 'page' : undefined}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold transition-colors ${
+            pane === tab.id
+              ? 'bg-accent/12 text-accent ring-1 ring-inset ring-accent/25'
+              : 'text-dim hover:text-ink'
+          }`}
+        >
+          {tab.label}
+          {tab.count ? (
+            <span className="font-mono text-2xs text-faint">{tab.count}</span>
+          ) : null}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export default function App() {
   const [signedIn, setSignedIn] = useState(Boolean(auth.token))
 
@@ -27,6 +65,14 @@ function Dashboard({ onSignedOut }) {
   const [threads, setThreads] = useState({})
   const [composing, setComposing] = useState(new Set())
   const [stats, setStats] = useState(null)
+  /**
+   * Which pane a phone is showing. Three panes side by side is the right
+   * layout on a desktop and impossible on a 390px screen, so below `lg` they
+   * become one at a time — list, the conversation, or the pipeline. Above it
+   * the classes below are overridden and this is ignored entirely, so there is
+   * no second layout to keep in step.
+   */
+  const [mobilePane, setMobilePane] = useState('list')
 
   const seenEvents = useRef(0)
 
@@ -223,15 +269,15 @@ function Dashboard({ onSignedOut }) {
   const activeContact = contacts.find((c) => c.id === selectedContact) || null
 
   return (
-    <div className="relative flex h-full flex-col gap-3 p-3">
-      <header className="flex flex-wrap items-center gap-4 rounded-xl border border-edge bg-panel px-4 py-3">
+    <div className="relative flex h-full flex-col gap-2 p-2 sm:gap-3 sm:p-3">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-edge bg-panel px-3 py-2.5 sm:gap-x-4 sm:px-4 sm:py-3">
         <div className="flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-lg bg-accent/12 ring-1 ring-inset ring-accent/25">
             <Radio size={17} className="text-accent" />
           </span>
           <div>
             <h1 className="text-[15px] font-bold leading-none tracking-tight text-ink">PingPulse</h1>
-            <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-faint">
+            <p className="mt-1 hidden text-[10px] uppercase tracking-[0.16em] text-faint sm:block">
               WhatsApp sales agent
             </p>
           </div>
@@ -293,17 +339,30 @@ function Dashboard({ onSignedOut }) {
         </div>
       </header>
 
-      <MetricStrip stats={stats} contacts={contacts} />
+      {/* A phone reading a conversation should spend its height on the
+          conversation. The numbers stay one tap away under Chats, and on a
+          desktop nothing moves. */}
+      <div className={mobilePane === 'thread' ? 'hidden lg:block' : ''}>
+        <MetricStrip stats={stats} contacts={contacts} />
+      </div>
 
-      <main className="flex min-h-0 flex-1 gap-3">
+      <PaneTabs pane={mobilePane} onPick={setMobilePane} waiting={contacts.length} />
+
+      <main className="flex min-h-0 flex-1 gap-2 sm:gap-3">
         <ConversationList
+          className={`${mobilePane === 'list' ? 'flex' : 'hidden'} w-full lg:flex lg:w-[280px]`}
           contacts={contacts}
           selectedId={selectedContact}
-          onSelect={setSelectedContact}
+          onSelect={(id) => {
+            setSelectedContact(id)
+            setMobilePane('thread')
+          }}
           previews={previews}
           composing={composing}
         />
         <ConversationThread
+          className={`${mobilePane === 'thread' ? 'flex' : 'hidden'} lg:flex`}
+          onBack={() => setMobilePane('list')}
           contact={activeContact}
           messages={threads[selectedContact] || []}
           composing={composing.has(selectedContact)}
@@ -315,9 +374,13 @@ function Dashboard({ onSignedOut }) {
           onChanged={loadContacts}
         />
         <PipelineBoard
+          className={`${mobilePane === 'pipeline' ? 'flex' : 'hidden'} w-full lg:flex lg:w-[290px]`}
           contacts={contacts}
           selectedId={selectedContact}
-          onSelect={setSelectedContact}
+          onSelect={(id) => {
+            setSelectedContact(id)
+            setMobilePane('thread')
+          }}
         />
       </main>
     </div>

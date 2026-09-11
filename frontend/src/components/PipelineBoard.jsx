@@ -5,7 +5,7 @@ import { STAGE_DOT, STAGE_LABEL, STAGE_ORDER, contactLabel, initialsOf, prettyPh
  * Where every lead stands. Ordered by the funnel, so the shape of the
  * business reads before any individual name does.
  */
-export default function PipelineBoard({ contacts, selectedId, onSelect }) {
+export default function PipelineBoard({ contacts, selectedId, onSelect, className = '' }) {
   const byStage = STAGE_ORDER.map((stage) => ({
     stage,
     people: contacts.filter((c) => c.pipeline_stage === stage),
@@ -13,7 +13,7 @@ export default function PipelineBoard({ contacts, selectedId, onSelect }) {
   const total = contacts.length || 1
 
   return (
-    <section className="panel w-[290px] shrink-0">
+    <section className={`panel shrink-0 ${className}`}>
       <header className="panel-head">
         <TrendingUp size={14} className="text-accent" />
         <h2 className="text-xs font-semibold text-ink">Pipeline</h2>

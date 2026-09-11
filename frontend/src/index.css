@@ -32,6 +32,12 @@ body,
   height: 100%;
 }
 
+/* A phone's address bar is part of the 100% above, so the console's own
+   scroll containers ended up behind it. dvh follows the bar as it hides. */
+#root {
+  height: 100dvh;
+}
+
 body {
   margin: 0;
   background: var(--bg);

@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlarmClock, Bot, CheckCheck, Clock, Sparkles, TriangleAlert, X } from 'lucide-react'
+import {
+  AlarmClock,
+  Bot,
+  CheckCheck,
+  ChevronLeft,
+  Clock,
+  Sparkles,
+  TriangleAlert,
+  X,
+} from 'lucide-react'
 import { STAGE_LABEL, STAGE_STYLE, clockOf, contactLabel, initialsOf, isPlaceholderNumber, prettyPhone } from '../format.js'
 import { mediaUrl } from '../backend.js'
 import { api } from '../api.js'
@@ -320,7 +329,15 @@ function FollowUpControl({ contact, onChanged }) {
   )
 }
 
-export default function ConversationThread({ contact, messages, composing, arriving, onChanged }) {
+export default function ConversationThread({
+  contact,
+  messages,
+  composing,
+  arriving,
+  onChanged,
+  className = '',
+  onBack,
+}) {
   const endRef = useRef(null)
 
   useEffect(() => {
@@ -329,7 +346,7 @@ export default function ConversationThread({ contact, messages, composing, arriv
 
   if (!contact && arriving) {
     return (
-      <section className="panel flex-1 items-center justify-center">
+      <section className={`panel flex-1 items-center justify-center ${className}`}>
         <div className="flex items-center gap-2.5 text-xs text-dim">
           <span className="flex gap-1">
             <span className="dot-1 h-1.5 w-1.5 rounded-full bg-accent" />
@@ -344,7 +361,7 @@ export default function ConversationThread({ contact, messages, composing, arriv
 
   if (!contact) {
     return (
-      <section className="panel flex-1 items-center justify-center">
+      <section className={`panel flex-1 items-center justify-center ${className}`}>
         <div className="max-w-xs px-6 text-center">
           <span className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-full bg-panel-2">
             <Sparkles size={18} className="text-accent" />
@@ -360,9 +377,19 @@ export default function ConversationThread({ contact, messages, composing, arriv
   }
 
   return (
-    <section className="panel flex-1">
+    <section className={`panel flex-1 ${className}`}>
       <header className="panel-head">
-        <span className="grid h-8 w-8 place-items-center rounded-full bg-edge text-2xs font-semibold text-dim">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Back to conversations"
+            className="-ml-1 rounded-lg p-1 text-dim transition-colors hover:text-ink lg:hidden"
+          >
+            <ChevronLeft size={16} />
+          </button>
+        )}
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-edge text-2xs font-semibold text-dim">
           {initialsOf(contact.name, contact.phone_number)}
         </span>
         <div className="min-w-0">

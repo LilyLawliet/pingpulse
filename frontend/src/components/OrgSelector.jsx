@@ -114,9 +114,11 @@ export default function OrgSelector({ organizations, selectedId, onSelect, onSav
         </button>
         <button
           onClick={openCreate}
-          className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-bg transition-opacity hover:opacity-90"
+          className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-semibold text-bg transition-opacity hover:opacity-90 sm:px-3"
         >
-          <Plus size={13} /> Add business
+          <Plus size={13} />
+          <span className="hidden sm:inline">Add business</span>
+          <span className="sr-only sm:hidden">Add business</span>
         </button>
       </div>
 
