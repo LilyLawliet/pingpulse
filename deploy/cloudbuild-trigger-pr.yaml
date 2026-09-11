@@ -19,3 +19,9 @@ github:
     # that could reach production this would be the wrong setting.
     commentControl: COMMENTS_DISABLED
 filename: cloudbuild.yaml
+
+# Cloud Build no longer accepts a trigger with no service account on it: the
+# legacy per-project build account is gone, so the identity the build runs as
+# has to be named. Without this the API rejects the import as a bare
+# INVALID_ARGUMENT that says nothing about which argument.
+serviceAccount: projects/pingpulse-508212/serviceAccounts/309921924242-compute@developer.gserviceaccount.com
