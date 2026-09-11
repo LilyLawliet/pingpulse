@@ -3,6 +3,7 @@ import { Building2, Plus, Save, X } from 'lucide-react'
 import { api } from '../api.js'
 import WhatsAppSettings from './WhatsAppSettings.jsx'
 import KnowledgeSettings from './KnowledgeSettings.jsx'
+import LearningSettings from './LearningSettings.jsx'
 
 const EMPTY = {
   name: '',
@@ -216,6 +217,11 @@ export default function OrgSelector({ organizations, selectedId, onSelect, onSav
               {editingId && (
                 <div className="border-t border-edge pt-4">
                   <KnowledgeSettings />
+                </div>
+              )}
+              {editingId && (
+                <div className="border-t border-edge pt-4">
+                  <LearningSettings />
                 </div>
               )}
               {editingId && (

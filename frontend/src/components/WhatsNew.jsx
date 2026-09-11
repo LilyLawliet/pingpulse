@@ -12,6 +12,36 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.3.2',
+    date: '11 September 2026',
+    items: [
+      {
+        title: 'It can learn to sound like you',
+        body:
+          'In your business settings, ask it to read your voice. It looks at the messages ' +
+          'you have written to customers yourself and describes how you write — short or ' +
+          'warm, English or Roman Urdu, how you open and sign off. You read the description, ' +
+          'change anything that is wrong, and only then does it take effect. Until you do, ' +
+          'nothing about your agent changes.',
+      },
+      {
+        title: 'It can learn what you have already told people',
+        body:
+          'Your delivery areas, your timings, how you take payment — you have answered ' +
+          'these a hundred times in WhatsApp already. It reads those answers, turns them into ' +
+          'plain facts, and shows you the list. Tick what is still true and it becomes part of ' +
+          'what the agent knows.',
+      },
+      {
+        title: 'It never learns from itself',
+        body:
+          'Only messages a person at your shop actually typed are used. Anything sent after ' +
+          'the agent went live is set aside, because WhatsApp does not record who typed what ' +
+          'and we will not teach it your voice out of its own replies.',
+      },
+    ],
+  },
+  {
     version: '1.3.1',
     date: '11 September 2026',
     items: [

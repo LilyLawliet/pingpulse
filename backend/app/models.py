@@ -201,6 +201,19 @@ class Organization(Base):
     # Where this organization's catalogue and policies are ingested from.
     primary_domain: Mapped[str | None] = mapped_column(String(255))
 
+    # How this shop writes, learned from replies a person at the shop actually
+    # typed, and approved by a person before it takes effect.
+    #
+    # Style only, never facts. Content comes from product_rules and the
+    # knowledge base; a voice example carrying a price would hand the model a
+    # number with no product attached to it.
+    #
+    # Null means the agent writes in its default voice, which is what every
+    # tenant already running keeps until somebody chooses otherwise.
+    voice_style: Mapped[str | None] = mapped_column(Text)
+    voice_examples: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    voice_learned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = _now_column()
 
     members: Mapped[list["OrganizationMember"]] = relationship(

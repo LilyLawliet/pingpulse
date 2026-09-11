@@ -232,6 +232,34 @@ Two model providers with multiple keys each, rotated automatically on rate limit
 unreachable, a deterministic fallback still answers from your real catalogue and policies —
 degraded in polish, never in accuracy, and never silent.
 
+### Learns your voice from your own replies
+
+Your agent can be taught to write the way you write. It reads the messages a person at your
+shop has actually typed to customers, describes the pattern in them — sentence length, whether
+you greet and how, English or Roman Urdu or both, formality, emoji — and shows you that
+description. You edit anything that is wrong, and only then does it take effect.
+
+Two deliberate limits sit behind that. It never learns from the agent's own replies: WhatsApp
+records that a message came from your number, not who typed it, so everything sent after your
+agent went live is set aside rather than guessed at. And the examples it keeps are checked for
+figures and stripped of other customers' details, because an example written for one customer
+is reproduced in front of another — a price must never travel that way.
+
+Style only. What is true still comes from your catalogue and price list, never from the way
+you happen to have phrased something once.
+
+### Learns what you have already told customers
+
+Delivery areas, opening hours, how you take payment, your returns policy — you have answered
+these hundreds of times in WhatsApp already. Those answers are read, distilled into plain
+standalone facts, and shown to you as a list you tick. What you tick becomes part of what the
+agent knows and is retrieved like anything else you uploaded.
+
+Only exchanges a *person* answered are used. A fact extracted from the agent's own reply would
+be its guess laundered into knowledge, retrieved thereafter as though you had confirmed it —
+so those are excluded at the source. Contradictory answers are dropped rather than resolved,
+and re-running it replaces the previous set instead of leaving two answers to one question.
+
 ### Shows you everything, live
 
 The dashboard streams inbound and outbound messages, intent extraction, stage changes and

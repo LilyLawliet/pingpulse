@@ -418,6 +418,37 @@ def regional_rules(currency: str | None, language: str | None) -> list[str]:
     return rules
 
 
+def voice_block(organization: Organization | None) -> str:
+    """How this shop writes, when a person at the shop has approved a voice.
+
+    Empty for every tenant that has not, which is what keeps this from changing
+    the way a running client's agent sounds the moment it is deployed.
+
+    The fence in the first lines is the load-bearing part. The examples are real
+    messages written to real customers, and without being told otherwise a model
+    will happily lift a detail out of one and answer a different customer with
+    it. Form comes from here; facts come from above.
+    """
+    style = (getattr(organization, "voice_style", None) or "").strip()
+    examples = [e for e in (getattr(organization, "voice_examples", None) or []) if e]
+    if not style and not examples:
+        return ""
+
+    lines = [
+        "=== HOW THIS SHOP WRITES ===",
+        "Write the reply in this voice. This section describes FORM ONLY: length, "
+        "greeting, language, formality, punctuation.",
+        "Never take a fact, a price, a product name, a place or a promise from it. "
+        "Those come only from the business rules and knowledge base above.",
+    ]
+    if style:
+        lines.append(style)
+    if examples:
+        lines.append("Lines this shop has actually written, as examples of style:")
+        lines += [f'- "{example}"' for example in examples]
+    return "\n".join(lines)
+
+
 def build_prompt(
     organization: Organization | None,
     contact: Contact | None,
@@ -519,6 +550,12 @@ def build_prompt(
     if policy_block:
         sections.append(policy_block)
     sections.append(sales_policy.SALES_POLICY)
+
+    # Late, because an instruction about style competes with every other
+    # instruction in the prompt and the ones nearest the end are followed best.
+    voice = voice_block(organization)
+    if voice:
+        sections.append(voice)
 
     sections.append(reply_rules(state_rules + regional_rules(currency, language)))
     sections.append("=== YOUR REPLY (plain text only) ===")

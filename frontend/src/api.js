@@ -187,6 +187,19 @@ export const api = {
   replyToProspect: (jid, message) =>
     request('/prospects/reply', { method: 'POST', body: JSON.stringify({ jid, message }) }),
 
+  // ---------------------- learning from past replies --------------------
+  // Both halves are drafted first and applied only when a person says so: one
+  // changes what the agent believes, the other changes how it sounds, and
+  // neither should arrive at a working shop without being looked at.
+  learningSources: () => request('/learning/sources'),
+  previewVoice: () => request('/learning/voice/preview', { method: 'POST' }),
+  saveVoice: (style, examples) =>
+    request('/learning/voice', { method: 'PUT', body: JSON.stringify({ style, examples }) }),
+  clearVoice: () => request('/learning/voice', { method: 'DELETE' }),
+  previewLearnedFacts: () => request('/learning/facts/preview', { method: 'POST' }),
+  importLearnedFacts: (facts) =>
+    request('/learning/facts', { method: 'POST', body: JSON.stringify({ facts }) }),
+
   // ------------------------------- misc ---------------------------------
   stats: () => request('/stats'),
 }
