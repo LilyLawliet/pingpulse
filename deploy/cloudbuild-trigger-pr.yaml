@@ -1,0 +1,21 @@
+# Cloud Build trigger: the same checks, before anything reaches main.
+#
+# The push trigger in cloudbuild-trigger-main.yaml tells you main is broken.
+# This one tells you before it is, which is the half that actually saves an
+# evening — by the time a red main is noticed, it has already been merged.
+#
+# See cloudbuild-trigger-main.yaml for the one-time GitHub connection and the
+# import commands.
+
+name: tests-on-pull-request
+description: Backend tests and a dashboard build on every pull request into main
+github:
+  owner: LilyLawliet
+  name: pingpulse
+  pullRequest:
+    branch: ^main$
+    # Run on a contributor's PR without waiting for an owner to click. Safe
+    # here because the build has no secrets and no deploy rights; on a build
+    # that could reach production this would be the wrong setting.
+    commentControl: COMMENTS_DISABLED
+filename: cloudbuild.yaml

@@ -1,0 +1,62 @@
+# Cloud Build trigger: run the tests on every push to main.
+#
+# ---------------------------------------------------------------------------
+# One manual step first
+# ---------------------------------------------------------------------------
+# Cloud Build reaches a private repository through its own GitHub App, and
+# installing that app is an OAuth flow — a browser, a GitHub login, and a
+# consent screen. There is no headless equivalent, so this part is yours:
+#
+#   1. https://console.cloud.google.com/cloud-build/triggers?project=pingpulse-508212
+#   2. "Connect repository" -> GitHub (Cloud Build GitHub App)
+#   3. Authorise, pick LilyLawliet/pingpulse, and Connect.
+#
+# Then create the triggers. One file each: `triggers import` reads a single
+# BuildTrigger per call and rejects a list, which is why these are two files
+# and not the one they started as.
+#
+#   gcloud builds triggers import --source=deploy/cloudbuild-trigger-main.yaml \
+#     --project=pingpulse-508212
+#   gcloud builds triggers import --source=deploy/cloudbuild-trigger-pr.yaml \
+#     --project=pingpulse-508212
+#
+# Check they took:
+#
+#   gcloud builds triggers list --project=pingpulse-508212
+#
+# And to prove it end to end, push anything to main and watch:
+#
+#   gcloud builds list --limit=1 --project=pingpulse-508212
+#
+# ---------------------------------------------------------------------------
+# What this does not do
+# ---------------------------------------------------------------------------
+# It does not deploy. Deployment stays a deliberate `./push.sh` from a machine
+# with credentials, for two reasons.
+#
+# A CI account able to reach production is a much larger blast radius than this
+# buys back — the deploy is already one command, and the thing CI adds is
+# knowing the code is good, not typing that command for you.
+#
+# And this VM serves a live client. An automatic deploy on every push to main
+# restarts the API while somebody's customer is mid-conversation, at whatever
+# moment a commit happens to land. The migration that ran on the last deploy
+# was verified against a scratch database first; a trigger would have run it
+# the moment the branch moved.
+
+name: tests-on-main
+description: Backend tests and a dashboard build on every push to main
+github:
+  owner: LilyLawliet
+  name: pingpulse
+  push:
+    branch: ^main$
+filename: cloudbuild.yaml
+includedFiles:
+  # A release that only moves an installer, or a docs edit, does not need the
+  # suite run against it.
+  - backend/**
+  - frontend/**
+  - scripts/**
+  - services/**
+  - cloudbuild.yaml
