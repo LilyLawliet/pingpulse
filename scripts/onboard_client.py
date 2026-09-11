@@ -336,6 +336,8 @@ async def run(args) -> int:
     print(f"  WhatsApp       {number or 'the client connects their own'}")
     if loaded:
         print(f"  Knowledge      {loaded} document(s) indexed")
+    print("\n  Save it: python scripts/save_tokens.py")
+    print("  (writes .secrets/tokens.md, and every deploy refreshes it)")
     print("\n  Give the client:")
     print("    1. PingPulse_Setup.exe, or the dashboard in a browser")
     print("    2. the access token above")

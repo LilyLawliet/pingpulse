@@ -122,5 +122,16 @@ else
   fail "health check returned ${STATUS} — check the logs on the VM"
 fi
 
+# ----------------------------------------------------------------- tokens
+# A token is shown once and then scrolls away, so every deploy refreshes the
+# local copy from the database. Non-fatal: a working deploy must not be
+# reported as failed because a convenience file could not be written.
+log "Saving access tokens"
+if "$VENV_PY" scripts/save_tokens.py 2>/dev/null | sed 's/^/  /'; then
+  :
+else
+  printf '    \033[1;33m!!\033[0m could not refresh .secrets/tokens.md — run it by hand\n'
+fi
+
 rm -f "$ARCHIVE"
 printf '\n\033[1;32mDeployed.\033[0m\n\n'
