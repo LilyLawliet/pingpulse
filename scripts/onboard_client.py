@@ -16,6 +16,12 @@ credentials, or a token bound to no organization, both fail confusingly later.
 
     python scripts/onboard_client.py --name "Aurora Retail" --show
 
+Omit --whatsapp-number to hand over a client with no channel connected. They then
+pick Twilio or WhatsApp Web themselves in the dashboard, and whichever they connect
+claims the number for them:
+
+    python scripts/onboard_client.py --name "Aurora Retail" --preset retail --months 12
+
 Re-running is safe: an existing organization is updated rather than duplicated,
 and its channel is re-pointed rather than clashing. A fresh token is issued
 each run, because that is the only way to hand one over.
@@ -64,6 +70,32 @@ call, send the booking link you are given rather than promising anything.
 
 Never invent a product, a price or a delivery promise that is not in the facts below."""
 
+RETAIL_PROMPT = """You are the sales assistant for {name}, a retail shop, answering
+customers on WhatsApp.
+
+You are the shop. You answer from the catalogue and policies you are given, right now,
+in your own words. You never say a colleague will get back to them and you never
+promise a callback.
+
+How to sell:
+  * Open by finding out what they are actually after — the item, the size, the colour,
+    roughly what they want to spend. Ask one question at a time; this is a chat, not a
+    form.
+  * Quote exact prices and exact availability from the catalogue. If something is out
+    of stock, say so plainly and offer the nearest thing you do have.
+  * Remember what they have already told you. Asking a customer their size twice is the
+    fastest way to lose them.
+  * Be direct about delivery time, payment and returns when asked, using the policies
+    you are given.
+  * When they are ready, tell them clearly what happens next. If they ask for a person
+    or want to book, send the booking link you are given rather than promising anything.
+
+Never invent a product, a price, a size, a stock level or a delivery promise that is not
+in the facts below. If you do not know, say you will check rather than guessing — a wrong
+price quoted on WhatsApp is one the customer will hold the shop to."""
+
+PRESETS = {"retail": RETAIL_PROMPT, "general": DEFAULT_PROMPT}
+
 
 def slugify(name: str) -> str:
     return "".join(c.lower() if c.isalnum() else "-" for c in name.strip()).strip("-") or "client"
@@ -89,13 +121,15 @@ async def upsert_organization(session, args) -> Organization:
     if organization is None:
         organization = Organization(
             name=args.name,
-            sales_prompt=args.prompt or DEFAULT_PROMPT.format(name=args.name),
+            sales_prompt=args.prompt or PRESETS[args.preset].format(name=args.name),
         )
         session.add(organization)
         ok(f"created organization {args.name!r}")
     else:
         if args.prompt:
             organization.sales_prompt = args.prompt
+        elif args.preset != "general":
+            organization.sales_prompt = PRESETS[args.preset].format(name=args.name)
         ok(f"reusing organization {args.name!r}")
 
     organization.default_currency = args.currency
@@ -271,7 +305,15 @@ async def run(args) -> int:
         organization = await upsert_organization(session, args)
 
         step(2, total, "WhatsApp channel")
-        await attach_channel(session, organization, args)
+        if args.whatsapp_number:
+            await attach_channel(session, organization, args)
+        else:
+            # Deliberately left empty. A client who is going to pair their own
+            # handset over WhatsApp Web has no number to give here, and one
+            # invented for them would be a second channel the dashboard then
+            # has to disconnect — the number a tenant is reached on is decided
+            # by whichever method they connect, not before.
+            note("none — the client connects Twilio or WhatsApp Web themselves")
 
         loaded = 0
         if args.knowledge:
@@ -283,7 +325,7 @@ async def run(args) -> int:
 
         await session.commit()
 
-    number = args.whatsapp_number.replace("whatsapp:", "").strip()
+    number = (args.whatsapp_number or "").replace("whatsapp:", "").strip()
     webhook = f"{args.public_url.rstrip('/')}/api/v1/whatsapp/webhook"
 
     print("\n  " + "=" * 68)
@@ -291,16 +333,26 @@ async def run(args) -> int:
     print("  " + "=" * 68)
     print(f"\n  Access token   {token}")
     print(f"  Expires        {expires_at:%Y-%m-%d}")
-    print(f"  WhatsApp       {number}")
+    print(f"  WhatsApp       {number or 'the client connects their own'}")
     if loaded:
         print(f"  Knowledge      {loaded} document(s) indexed")
     print("\n  Give the client:")
-    print("    1. PingPulse_Setup.exe")
+    print("    1. PingPulse_Setup.exe, or the dashboard in a browser")
     print("    2. the access token above")
-    print("\n  Set in THEIR Twilio console (Messaging -> your sender -> webhook):")
-    print(f"    {webhook}")
-    print("\n  Signature validation is on, so it must be that exact URL —")
-    print("  a mismatched scheme, host or trailing slash rejects every message.")
+
+    if number:
+        print("\n  Set in THEIR Twilio console (Messaging -> your sender -> webhook):")
+        print(f"    {webhook}")
+        print("\n  Signature validation is on, so it must be that exact URL —")
+        print("  a mismatched scheme, host or trailing slash rejects every message.")
+    else:
+        print("\n  They connect WhatsApp themselves, in Settings:")
+        print("    WhatsApp Web  scan the QR with the handset they sell from.")
+        print("    Twilio        their own SID and auth token, then set the")
+        print(f"                  webhook to {webhook}")
+        print("\n  Either one claims the number for them alone. Connecting one")
+        print("  disconnects the other, so there is never a question of which")
+        print("  number a reply goes out on.")
     print("  " + "=" * 68)
     return 0
 
@@ -314,12 +366,25 @@ def main() -> int:
 
     parser.add_argument("--twilio-sid", default="", help="Client's Twilio Account SID")
     parser.add_argument("--twilio-token", default="", help="Client's Twilio Auth Token")
-    parser.add_argument("--whatsapp-number", help="Their WhatsApp sender, e.g. +14155238886")
+    parser.add_argument(
+        "--whatsapp-number",
+        help=(
+            "Their WhatsApp sender, e.g. +14155238886. Omit it to create the "
+            "client with no channel, so they connect Twilio or WhatsApp Web "
+            "themselves from the dashboard."
+        ),
+    )
 
     parser.add_argument("--currency", default="USD", help="ISO code, default USD")
     parser.add_argument("--language", default="en", help="Default reply language, default en")
     parser.add_argument("--tone", help="How the agent should sound")
-    parser.add_argument("--prompt", help="Override the generated sales prompt")
+    parser.add_argument(
+        "--preset",
+        choices=sorted(PRESETS),
+        default="general",
+        help="Sales prompt to start from; default general",
+    )
+    parser.add_argument("--prompt", help="Override the preset entirely")
     parser.add_argument("--price-list", help="Text file of products and prices")
     parser.add_argument("--domain", help="The client's website")
     parser.add_argument("--knowledge", help="Folder of .txt/.md policies and FAQs")
@@ -338,8 +403,11 @@ def main() -> int:
     if args.show:
         return asyncio.run(show(args))
 
-    if not args.whatsapp_number:
-        parser.error("--whatsapp-number is required (it is how inbound messages route)")
+    if args.twilio_sid and not args.whatsapp_number:
+        parser.error(
+            "--twilio-sid needs --whatsapp-number: credentials belong to the "
+            "number they send from. Omit both to let the client connect their own."
+        )
     if bool(args.twilio_sid) != bool(args.twilio_token):
         parser.error(
             "--twilio-sid and --twilio-token must be given together: a tenant auth "
