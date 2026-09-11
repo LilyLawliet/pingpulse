@@ -169,8 +169,7 @@ h2, h3 { page-break-after: avoid; }
   <div class="mark">PingPulse · WhatsApp AI Sales Agent</div>
   <h1>Client Overview<br>&amp; Upgrade</h1>
   <p class="lede">An end-to-end, multi-tenant AI sales engine — built for any industry.</p>
-  <div class="meta">Document version 2.0 &nbsp;·&nbsp; 10 September 2026 &nbsp;·&nbsp;
-  Supersedes all earlier architecture and guide documents</div>
+  <div class="meta">Document version 2.0 &nbsp;·&nbsp; 10 September 2026 &nbsp;·&nbsp; Supersedes all earlier architecture and guide documents</div>
 </div>
 
 
@@ -442,6 +441,27 @@ answered.</p>
 <p>Two model providers with multiple keys each, rotated automatically on rate limits. If both are
 unreachable, a deterministic fallback still answers from your real catalogue and policies —
 degraded in polish, never in accuracy, and never silent.</p>
+<h3>Learns your voice from your own replies</h3>
+<p>Your agent can be taught to write the way you write. It reads the messages a person at your
+shop has actually typed to customers, describes the pattern in them — sentence length, whether
+you greet and how, the language you write in and whether you mix two, formality, emoji — and
+shows you that description. You edit anything that is wrong, and only then does it take effect.</p>
+<p>Two deliberate limits sit behind that. It never learns from the agent's own replies: WhatsApp
+records that a message came from your number, not who typed it, so everything sent after your
+agent went live is set aside rather than guessed at. And the examples it keeps are checked for
+figures and stripped of other customers' details, because an example written for one customer
+is reproduced in front of another — a price must never travel that way.</p>
+<p>Style only. What is true still comes from your catalogue and price list, never from the way
+you happen to have phrased something once.</p>
+<h3>Learns what you have already told customers</h3>
+<p>Delivery areas, opening hours, how you take payment, your returns policy — you have answered
+these hundreds of times in WhatsApp already. Those answers are read, distilled into plain
+standalone facts, and shown to you as a list you tick. What you tick becomes part of what the
+agent knows and is retrieved like anything else you uploaded.</p>
+<p>Only exchanges a <em>person</em> answered are used. A fact extracted from the agent's own reply would
+be its guess laundered into knowledge, retrieved thereafter as though you had confirmed it —
+so those are excluded at the source. Contradictory answers are dropped rather than resolved,
+and re-running it replaces the previous set instead of leaving two answers to one question.</p>
 <h3>Shows you everything, live</h3>
 <p>The dashboard streams inbound and outbound messages, intent extraction, stage changes and
 reply latency as they happen over a websocket. No refreshing.</p>

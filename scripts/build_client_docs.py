@@ -30,9 +30,32 @@ import markdown
 from playwright.async_api import async_playwright
 
 DOCS_DIR = pathlib.Path(r"D:\pingpulse\docs")
-MD_PATH = DOCS_DIR / "PingPulse_Client_Overview.md"
-PDF_PATH = DOCS_DIR / "PingPulse_Client_Overview.pdf"
-HTML_PATH = DOCS_DIR / "PingPulse_Client_Overview.html"
+
+# One pipeline, several documents. They share the stylesheet on purpose: a
+# client who reads two of these should not be able to tell they were built at
+# different times.
+#
+#     python scripts/build_client_docs.py                     the overview
+#     python scripts/build_client_docs.py PingPulse_Whats_New  a named one
+DOCUMENTS = {
+    "PingPulse_Client_Overview": {
+        "title": "Client Overview<br>&amp; Upgrade",
+        "lede": "An end-to-end, multi-tenant AI sales engine — built for any industry.",
+        "meta": (
+            "Document version 2.0 &nbsp;·&nbsp; 10 September 2026 &nbsp;·&nbsp; "
+            "Supersedes all earlier architecture and guide documents"
+        ),
+    },
+    "PingPulse_Whats_New": {
+        "title": "What Changed,<br>and How to Use It",
+        "lede": "Everything added in 1.3.x, and the order to set it up in.",
+        "meta": (
+            "Release 1.3.2 &nbsp;·&nbsp; 11 September 2026 &nbsp;·&nbsp; "
+            "Read alongside the Client Overview"
+        ),
+    },
+}
+DEFAULT_DOC = "PingPulse_Client_Overview"
 
 PLACEHOLDER = re.compile(r"^\[IMAGE PLACEHOLDER:\s*(.+?)\]$", re.MULTILINE)
 
@@ -194,13 +217,12 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 7mm 0; }
 h2, h3 { page-break-after: avoid; }
 """
 
-COVER = """
+COVER_TEMPLATE = """
 <div class="cover">
   <div class="mark">PingPulse · WhatsApp AI Sales Agent</div>
-  <h1>Client Overview<br>&amp; Upgrade</h1>
-  <p class="lede">An end-to-end, multi-tenant AI sales engine — built for any industry.</p>
-  <div class="meta">Document version 2.0 &nbsp;·&nbsp; 10 September 2026 &nbsp;·&nbsp;
-  Supersedes all earlier architecture and guide documents</div>
+  <h1>{title}</h1>
+  <p class="lede">{lede}</p>
+  <div class="meta">{meta}</div>
 </div>
 """
 
@@ -251,7 +273,7 @@ def inline_images(body: str) -> tuple[str, int]:
     return IMG_TAG.sub(figure, body), embedded
 
 
-def build_html(md_text: str) -> tuple[str, int]:
+def build_html(md_text: str, cover: str) -> tuple[str, int]:
     body = markdown.markdown(
         render_placeholders(md_text),
         extensions=["tables", "attr_list", "sane_lists", "md_in_html"],
@@ -280,7 +302,7 @@ def build_html(md_text: str) -> tuple[str, int]:
 <style>{STYLE}</style>
 </head>
 <body>
-{COVER}
+{cover}
 {body}
 </body>
 </html>"""
@@ -288,34 +310,43 @@ def build_html(md_text: str) -> tuple[str, int]:
 
 
 async def main() -> int:
-    if not MD_PATH.is_file():
-        print(f"{MD_PATH} is missing", file=sys.stderr)
+    stem = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DOC
+    if stem not in DOCUMENTS:
+        known = ", ".join(sorted(DOCUMENTS))
+        print(f"unknown document {stem!r} - try one of: {known}", file=sys.stderr)
+        return 2
+
+    md_path = DOCS_DIR / f"{stem}.md"
+    html_path = DOCS_DIR / f"{stem}.html"
+    pdf_path = DOCS_DIR / f"{stem}.pdf"
+    if not md_path.is_file():
+        print(f"{md_path} is missing", file=sys.stderr)
         return 2
 
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
-    md_text = MD_PATH.read_text(encoding="utf-8")
+    md_text = md_path.read_text(encoding="utf-8")
     placeholders = len(PLACEHOLDER.findall(md_text))
 
-    page, embedded = build_html(md_text)
-    HTML_PATH.write_text(page, encoding="utf-8")
-    print(f"  markdown : {MD_PATH.name} ({len(md_text.splitlines())} lines)")
+    page, embedded = build_html(md_text, COVER_TEMPLATE.format(**DOCUMENTS[stem]))
+    html_path.write_text(page, encoding="utf-8")
+    print(f"  markdown : {md_path.name} ({len(md_text.splitlines())} lines)")
     print(f"  images   : {embedded} embedded, {placeholders} placeholder frame(s)")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         tab = await browser.new_page()
-        await tab.goto(HTML_PATH.as_uri(), wait_until="networkidle")
+        await tab.goto(html_path.as_uri(), wait_until="networkidle")
         await tab.pdf(
-            path=str(PDF_PATH),
+            path=str(pdf_path),
             format="A4",
             print_background=True,
             margin={"top": "18mm", "bottom": "16mm", "left": "16mm", "right": "16mm"},
         )
         await browser.close()
 
-    size_kb = PDF_PATH.stat().st_size / 1024
-    print(f"\n  markdown : {MD_PATH}")
-    print(f"  pdf      : {PDF_PATH}  ({size_kb:.0f} KB)")
+    size_kb = pdf_path.stat().st_size / 1024
+    print(f"\n  markdown : {md_path}")
+    print(f"  pdf      : {pdf_path}  ({size_kb:.0f} KB)")
     return 0
 
 
