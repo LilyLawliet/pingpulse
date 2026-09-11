@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { LogOut, Sparkles } from 'lucide-react'
+import { Inbox, LogOut, Sparkles } from 'lucide-react'
 import useMonitorSocket from './useMonitorSocket.js'
 import { api, auth } from './api.js'
 import SignIn from './components/SignIn.jsx'
@@ -11,6 +11,7 @@ import OrgSelector from './components/OrgSelector.jsx'
 import PulseLine from './components/PulseLine.jsx'
 import BrandMark from './components/BrandMark.jsx'
 import WhatsNew, { hasUnseenUpgrades } from './components/WhatsNew.jsx'
+import Prospects from './components/Prospects.jsx'
 
 /**
  * Pane switcher, phones only.
@@ -76,6 +77,10 @@ function Dashboard({ onSignedOut }) {
    */
   const [mobilePane, setMobilePane] = useState('list')
   const [showUpgrades, setShowUpgrades] = useState(false)
+  const [showProspects, setShowProspects] = useState(false)
+  // Only shown once there is something to act on — a button offering an empty
+  // list is a button that teaches people to ignore it.
+  const [waiting, setWaiting] = useState(0)
   // Only until they open it once. A dot that never goes away is noise.
   const [unseen, setUnseen] = useState(hasUnseenUpgrades)
 
@@ -122,6 +127,19 @@ function Dashboard({ onSignedOut }) {
     loadOrganizations()
     loadStats()
   }, [loadOrganizations, loadStats])
+
+  const countWaiting = useCallback(async () => {
+    try {
+      const found = await api.listProspects(30)
+      setWaiting(found.available ? found.prospects.length : 0)
+    } catch {
+      setWaiting(0)
+    }
+  }, [])
+
+  useEffect(() => {
+    countWaiting()
+  }, [countWaiting, selectedOrg])
 
   useEffect(() => {
     loadContacts()
@@ -321,6 +339,17 @@ function Dashboard({ onSignedOut }) {
             {connected ? 'Live' : 'Reconnecting'}
           </span>
 
+          {waiting > 0 && (
+            <button
+              onClick={() => setShowProspects(true)}
+              title="People who never got a reply"
+              className="flex items-center gap-1.5 rounded-full border border-warn/25 bg-warn/10 px-3 py-1.5 text-[11px] font-semibold text-warn transition-colors hover:bg-warn/15"
+            >
+              <Inbox size={12} />
+              {waiting} waiting
+            </button>
+          )}
+
           <button
             onClick={() => {
               setShowUpgrades(true)
@@ -394,6 +423,18 @@ function Dashboard({ onSignedOut }) {
       </main>
 
       {showUpgrades && <WhatsNew onClose={() => setShowUpgrades(false)} />}
+      {showProspects && (
+        <Prospects
+          onClose={() => {
+            setShowProspects(false)
+            countWaiting()
+          }}
+          onReplied={() => {
+            loadContacts()
+            countWaiting()
+          }}
+        />
+      )}
     </div>
   )
 }

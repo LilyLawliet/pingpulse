@@ -180,6 +180,13 @@ export const api = {
   deleteKnowledgeSource: (source) =>
     request(`/knowledge/sources?source=${encodeURIComponent(source)}`, { method: 'DELETE' }),
 
+  // ------------------------ unanswered customers ------------------------
+  // People already in the shop's WhatsApp who asked something and never got a
+  // reply. Listing is read-only; replying goes one conversation at a time.
+  listProspects: (days = 30) => request(`/prospects?days=${days}`),
+  replyToProspect: (jid, message) =>
+    request('/prospects/reply', { method: 'POST', body: JSON.stringify({ jid, message }) }),
+
   // ------------------------------- misc ---------------------------------
   stats: () => request('/stats'),
 }

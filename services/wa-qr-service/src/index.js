@@ -75,6 +75,45 @@ const watchers = new Map()
  * API stores the mapping durably once it has seen it.
  */
 const lidPhones = new Map()
+/**
+ * Conversation history WhatsApp pushed to us, keyed by session.
+ *
+ * WhatsApp sends a chunk of past conversations when a handset pairs, which is
+ * how a shop's existing customers can be found at all — the people who asked
+ * about a product and never got an answer are already in there.
+ *
+ * In memory and capped, deliberately. This is the shop's customers' messages,
+ * not the shop's own, and the bridge should hold as little of it as possible
+ * for as short a time as possible: the API reads it once, decides what matters,
+ * and keeps only that. Restarting the service forgets all of it.
+ */
+const history = new Map()
+const HISTORY_CAP = 4000
+
+function rememberHistory(sessionId, messages) {
+  const kept = history.get(sessionId) || []
+  for (const message of messages || []) {
+    const remote = message.key?.remoteJid || ''
+    if (remote.endsWith('@g.us') || remote === 'status@broadcast') continue
+
+    const text =
+      message.message?.conversation ||
+      message.message?.extendedTextMessage?.text ||
+      message.message?.imageMessage?.caption ||
+      ''
+    if (!text.trim()) continue
+
+    kept.push({
+      jid: remote,
+      fromMe: Boolean(message.key?.fromMe),
+      text: text.slice(0, 2000),
+      at: Number(message.messageTimestamp) || 0,
+      pushName: message.pushName || '',
+    })
+  }
+  // Oldest first out, so a long sync does not push out what just arrived.
+  history.set(sessionId, kept.slice(-HISTORY_CAP))
+}
 
 /** Digits of a JID: "15323@lid" / "923097209908:3@s.whatsapp.net" -> digits. */
 function jidDigits(jid) {
@@ -181,6 +220,18 @@ async function startSession(sessionId) {
   // Where the LID to phone-number pairing comes from. WhatsApp syncs contacts
   // on connect and updates them as it learns more, and each one can carry both
   // identifiers.
+  // WhatsApp pushes past conversations after a pairing. This is the only way
+  // to find a shop's existing customers; nothing is requested, and nothing here
+  // sends anything to anyone.
+  socket.ev.on('messaging-history.set', ({ messages, contacts, progress, isLatest }) => {
+    contacts?.forEach(rememberContact)
+    rememberHistory(sessionId, messages)
+    log.info(
+      { sessionId, received: messages?.length || 0, held: (history.get(sessionId) || []).length, progress, isLatest },
+      'history sync',
+    )
+  })
+
   socket.ev.on('contacts.upsert', (contacts) => contacts.forEach(rememberContact))
   socket.ev.on('contacts.update', (contacts) => contacts.forEach(rememberContact))
 
@@ -477,6 +528,39 @@ app.get('/catalog/:sessionId', async (request, response) => {
       url: p.url || '',
       images: Object.values(p.imageUrls || {}).filter(Boolean).slice(0, 3),
     })),
+  })
+})
+
+/**
+ * The conversations WhatsApp pushed us for this session. Read-only.
+ *
+ * Returned as flat messages with their chat, and nothing more: who said what,
+ * when, and which way round. Deciding which of them matter is the API's job,
+ * because that decision depends on the shop's own catalogue, and the bridge
+ * has no business knowing about that.
+ */
+app.get('/history/:sessionId', (request, response) => {
+  const sessionId = request.params.sessionId
+  const messages = history.get(sessionId) || []
+
+  const chats = new Map()
+  for (const message of messages) {
+    const chat = chats.get(message.jid) || { jid: message.jid, pushName: '', messages: [] }
+    if (!chat.pushName && message.pushName) chat.pushName = message.pushName
+    chat.messages.push({
+      fromMe: message.fromMe,
+      text: message.text,
+      at: message.at,
+    })
+    chats.set(message.jid, chat)
+  }
+
+  for (const chat of chats.values()) chat.messages.sort((a, b) => a.at - b.at)
+
+  response.json({
+    ok: true,
+    synced: messages.length > 0,
+    chats: [...chats.values()],
   })
 })
 
