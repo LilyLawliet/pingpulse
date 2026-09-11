@@ -14,7 +14,7 @@ from typing import Any, Iterable, Sequence
 import httpx
 
 from app.config import settings
-from app.models import Contact, Message, Organization
+from app.models import SENDER_CUSTOMER, SENDER_OPERATOR, Contact, Message, Organization
 from app.schemas import GenerationResult
 from app.services import sales_policy
 
@@ -198,12 +198,18 @@ def unsupported_prices(reply: str, product_rules: str) -> set[str]:
 # Prompt construction
 # --------------------------------------------------------------------------
 def format_history(messages: Sequence[Message] | Iterable[Any]) -> str:
-    """Render stored messages as a Customer / Agent transcript."""
+    """Render stored messages as a Customer / Shop / Agent transcript.
+
+    Three roles rather than two. A message from `Shop` was typed by a person
+    who took the conversation over, and saying so is worth the handful of
+    tokens: it is the shop's own voice, in front of this very customer, and the
+    model should follow it rather than treat it as more of its own output.
+    """
+    roles = {SENDER_CUSTOMER: "Customer", SENDER_OPERATOR: "Shop"}
     lines: list[str] = []
     for message in messages:
-        sender = getattr(message, "sender", "user")
-        role = "Customer" if str(sender).lower() == "user" else "Agent"
-        lines.append(f"{role}: {getattr(message, 'content', '')}")
+        sender = str(getattr(message, "sender", SENDER_CUSTOMER)).lower()
+        lines.append(f"{roles.get(sender, 'Agent')}: {getattr(message, 'content', '')}")
     return "\n".join(lines) if lines else "(no prior messages - this is the first contact)"
 
 

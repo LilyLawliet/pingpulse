@@ -51,14 +51,40 @@ else
   echo "[$(date -Is)] no media to archive"
 fi
 
+# --------------------------------------------------------- whatsapp sessions
+# The Baileys credentials for every paired handset. Small, and the one thing on
+# this disk that cannot be regenerated from anything else: the database can be
+# restored, media can be re-sent, but losing these means every client rescans a
+# QR code — which means telephoning each of them to say their WhatsApp needs
+# reconnecting. Backed up for that reason alone.
+#
+# They are secrets. The bucket they are copied to has public access prevention
+# enforced, and this archive should be treated like the .env beside it.
+SESSION_FILE="wa-sessions-${STAMP}.tar.gz"
+if [[ -d "${DATA_DIR}/wa_sessions" ]] && [[ -n "$(ls -A "${DATA_DIR}/wa_sessions" 2>/dev/null)" ]]; then
+  tar -czf "${BACKUP_DIR}/${SESSION_FILE}" -C "${DATA_DIR}" wa_sessions
+  echo "[$(date -Is)] sessions archived: ${SESSION_FILE} ($(du -h "${BACKUP_DIR}/${SESSION_FILE}" | cut -f1))"
+else
+  SESSION_FILE=""
+  echo "[$(date -Is)] no paired sessions to archive"
+fi
+
 # ------------------------------------------------------------------ offsite
 # On-VM backups do not survive the VM. If a bucket is configured, copy them
 # off the machine — this is the difference between a backup and a real one.
 if [[ -n "${BACKUP_GCS_BUCKET:-}" ]]; then
   if command -v gsutil >/dev/null 2>&1; then
-    gsutil -q cp "${BACKUP_DIR}/${DB_FILE}" "gs://${BACKUP_GCS_BUCKET}/db/${DB_FILE}"
+    # An upload that fails must fail the run. A backup script that reports
+    # success while nothing left the machine is worse than one that is missing,
+    # because nobody goes looking for it.
+    gsutil -q cp "${BACKUP_DIR}/${DB_FILE}" "gs://${BACKUP_GCS_BUCKET}/db/${DB_FILE}" || {
+      echo "[$(date -Is)] ERROR: database backup did not reach the bucket" >&2
+      exit 1
+    }
     [[ -n "$MEDIA_FILE" ]] && \
       gsutil -q cp "${BACKUP_DIR}/${MEDIA_FILE}" "gs://${BACKUP_GCS_BUCKET}/media/${MEDIA_FILE}"
+    [[ -n "$SESSION_FILE" ]] && \
+      gsutil -q cp "${BACKUP_DIR}/${SESSION_FILE}" "gs://${BACKUP_GCS_BUCKET}/wa-sessions/${SESSION_FILE}"
     echo "[$(date -Is)] uploaded to gs://${BACKUP_GCS_BUCKET}"
   else
     echo "[$(date -Is)] WARNING: BACKUP_GCS_BUCKET is set but gsutil is not installed" >&2
@@ -70,7 +96,7 @@ fi
 # ------------------------------------------------------------------ retention
 DELETED="$(find "$BACKUP_DIR" -maxdepth 1 -name '*.dump' -o -name '*.tar.gz' \
   | wc -l)"
-find "$BACKUP_DIR" -maxdepth 1 \( -name 'db-*.dump' -o -name 'media-*.tar.gz' -o -name 'pre-deploy-*.dump' \) \
+find "$BACKUP_DIR" -maxdepth 1 \( -name 'db-*.dump' -o -name 'media-*.tar.gz' -o -name 'wa-sessions-*.tar.gz' -o -name 'pre-deploy-*.dump' \) \
   -mtime "+${RETENTION_DAYS}" -print -delete | sed 's/^/[pruned] /'
 
 echo "[$(date -Is)] backup complete — ${DELETED} archive(s) on disk, keeping ${RETENTION_DAYS} days"

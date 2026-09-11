@@ -7,6 +7,7 @@ import {
   Clock,
   Sparkles,
   TriangleAlert,
+  User,
   X,
 } from 'lucide-react'
 import { STAGE_LABEL, STAGE_STYLE, clockOf, contactLabel, initialsOf, isPlaceholderNumber, prettyPhone } from '../format.js'
@@ -65,17 +66,29 @@ function DeliveryMark({ message }) {
 }
 
 function Bubble({ message }) {
-  const fromCustomer = message.sender === 'user' 
+  const fromCustomer = message.sender === 'user'
+  // A person took over and typed this. Shown differently from the agent's own
+  // replies because the operator needs to see at a glance which words were
+  // theirs — and because the two are no longer the same thing anywhere else.
+  const fromOperator = message.sender === 'operator'
+
   return (
     <div className={`flex animate-land ${fromCustomer ? 'justify-start' : 'justify-end'}`}>
       <div
         className={`max-w-[46ch] rounded-2xl px-3.5 py-2.5 ${
           fromCustomer
             ? 'rounded-tl-sm bg-panel-2 text-ink'
-            : 'rounded-tr-sm bg-accent/12 text-ink ring-1 ring-inset ring-accent/25'
+            : fromOperator
+              ? 'rounded-tr-sm bg-platinum/10 text-ink ring-1 ring-inset ring-platinum/25'
+              : 'rounded-tr-sm bg-accent/12 text-ink ring-1 ring-inset ring-accent/25'
         }`}
       >
-        {!fromCustomer && (
+        {fromOperator && (
+          <span className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-platinum">
+            <User size={10} /> You
+          </span>
+        )}
+        {!fromCustomer && !fromOperator && (
           <span className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
             <Sparkles size={10} /> AI agent
           </span>

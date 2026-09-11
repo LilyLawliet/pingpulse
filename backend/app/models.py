@@ -365,6 +365,28 @@ class CRMContact(Base):
 Contact = CRMContact
 
 
+# Who wrote a message.
+#
+# Until now there were two: the customer, and "the business". But the business
+# speaks with two different voices — the model's, and a person's, when an
+# operator takes a conversation over from the dashboard — and both were stored
+# as SENDER_AGENT.
+#
+# Separating them matters beyond bookkeeping. The shop's own replies are the
+# only honest record of how that shop actually talks to its customers, and that
+# is what a persona should be learned from. Conflated with the model's output,
+# learning from them means learning from the model's own words: a copy of a
+# copy, drifting further from the shop with every round.
+#
+# It has to be recorded at the time. Nothing distinguishes an operator's reply
+# from the agent's after both are written down as "agent", so rows created
+# before this stay ambiguous forever. That is the reason this landed before the
+# feature that needs it, rather than alongside it.
+SENDER_CUSTOMER = "user"
+SENDER_AGENT = "agent"
+SENDER_OPERATOR = "operator"
+
+
 class Message(Base):
     __tablename__ = "messages"
 
@@ -375,7 +397,11 @@ class Message(Base):
     contact_id: Mapped[uuid.UUID] = mapped_column(
         UUIDType, ForeignKey("crm_contacts.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    sender: Mapped[str] = mapped_column(String(20), nullable=False)  # 'user' | 'agent'
+    # SENDER_CUSTOMER | SENDER_AGENT | SENDER_OPERATOR. The last two are both
+    # "the business", and telling them apart is the point: one is the model's
+    # output, the other is a person typing in their own voice. See the constants
+    # above for why that distinction cannot be recovered after the fact.
+    sender: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     twilio_sid: Mapped[str | None] = mapped_column(String(100))
 

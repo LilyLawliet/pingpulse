@@ -1,0 +1,52 @@
+# Continuous integration on Cloud Build.
+#
+#   gcloud builds submit --config cloudbuild.yaml .
+#
+# Why here and not GitHub Actions: the account's Actions runners are locked
+# behind a billing issue, and every run failed at zero seconds with no output.
+# Cloud Build connects to the same private repository through its own GitHub
+# App, has a free tier far larger than this suite needs, and runs in the project
+# the service is already deployed in.
+#
+# What it does not do, so nobody goes looking: Cloud Build runs Linux containers
+# only. It cannot build the Windows installer or the macOS app — those still
+# build locally, and a macOS bundle still needs a Mac. This is CI for the code,
+# not for the desktop releases.
+#
+# The two steps run in parallel. Neither depends on the other, and a broken JSX
+# file should not be hidden behind a slow pip install.
+
+steps:
+  # ----------------------------------------------------------------- backend
+  - id: tests
+    name: python:3.13-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        pip install --quiet --no-cache-dir -r backend/requirements.txt
+        cd backend && python -m pytest tests -q
+
+  # ---------------------------------------------------------------- frontend
+  # A build, not a lint. The dashboard has no test suite, so this catches what
+  # actually breaks it: a bad import, a syntax error, a component referenced
+  # before it exists. All three have shipped from this repository before.
+  - id: dashboard
+    name: node:20-slim
+    entrypoint: bash
+    waitFor: ['-']
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        cd frontend
+        npm ci --no-audit --no-fund
+        npm run build
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+# Generous: a cold pip install of the backend requirements dominates the run.
+timeout: 1200s

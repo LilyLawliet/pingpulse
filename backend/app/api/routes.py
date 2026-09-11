@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
-from app.models import ChannelConfig, CRMContact, LLMLog, Message
+from app.models import SENDER_OPERATOR, ChannelConfig, CRMContact, LLMLog, Message
 from app.schemas import (
     FollowUpRequest,
     FollowUpState,
@@ -151,7 +151,10 @@ async def send_manual_message(
     message = Message(
         organization_id=tenant.id,
         contact_id=contact.id,
-        sender="agent",
+        # A person wrote this, not the model. Stored as such because it is the
+        # only honest record of how this shop talks to its customers, and a
+        # persona learned from the model's own output learns nothing.
+        sender=SENDER_OPERATOR,
         content=payload.content,
         delivery_status=outbox.QUEUED,
     )

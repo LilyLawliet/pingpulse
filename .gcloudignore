@@ -1,0 +1,46 @@
+# What must never be uploaded to a Cloud Build staging bucket.
+#
+# `gcloud builds submit` tars this directory and uploads it. Without this file
+# it falls back to .gitignore, which is close but not the same question:
+# .gitignore answers "what should not be committed", and a build upload is a
+# different place with different readers. Two of the entries below are the
+# reason this file exists rather than being left to that fallback.
+
+# Credentials. The updater signing key can push code to every client machine,
+# and tokens.md is every client's live access token in plain text. Neither has
+# any business leaving this disk.
+.secrets/
+.env
+.env.*
+
+# Nothing here is needed to run the tests, and together they are hundreds of
+# megabytes of upload on every build.
+.venv/
+node_modules/
+frontend/node_modules/
+frontend/dist/
+src-tauri/target/
+builds/
+tools/
+demo/
+.git/
+.tmp/
+.cache/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Generated artefacts and local scratch.
+docs/images/
+assets/
+*.mp4
+*.webm
+*.png
+*.icns
+*.ico
+
+# Local Docker volumes. Gitignored, and large enough to dominate the upload.
+docker/postgres-data/
+docker/redis-data/
+docker/media/
+docker/backend-logs/
