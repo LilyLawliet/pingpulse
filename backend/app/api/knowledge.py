@@ -17,7 +17,7 @@ from app.schemas_tenancy import (
     KnowledgeDocumentOut,
     RetrievedChunk,
 )
-from app.services import documents, retrieval
+from app.services import catalogue, documents, retrieval, whatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +228,184 @@ async def delete_source(
         await db.delete(document)
     logger.info("removed %d passage(s) from %s for %s", len(found), source, tenant.id)
     return None
+
+
+CATALOGUE_SOURCE = "WhatsApp catalogue"
+
+
+@router.get("/readiness")
+async def knowledge_readiness(
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """What this agent actually knows, and what would most improve it.
+
+    Three places its answers can come from, in descending order of how specific
+    they let it be:
+
+      1. the shop's WhatsApp Business catalogue, if the paired account has one;
+      2. documents they have uploaded;
+      3. the description of the business and how it should sell.
+
+    The third is never empty — it is required to create an organization — so an
+    agent is always able to hold a conversation. What the first two add is the
+    ability to quote a price without inventing one, which is the difference
+    between a demo and a shop.
+
+    Reported rather than enforced. A shop with a good description and no files
+    is working, not broken, and telling them otherwise would be wrong.
+    """
+    rows = await db.execute(
+        select(
+            func.count(KnowledgeDocument.id),
+            func.count(func.distinct(KnowledgeDocument.source)),
+        ).where(KnowledgeDocument.organization_id == tenant.id)
+    )
+    passages, files = rows.one()
+
+    organization = tenant.organization
+    description = (organization.product_rules or "").strip()
+
+    channel = await whatsapp.active_channel(db, tenant.id)
+    found = None
+    if channel is not None and whatsapp.provider_of(channel) == whatsapp.QR_SESSION:
+        found = await catalogue.read(channel)
+
+    # Ordered so the dashboard can render the first thing worth doing next.
+    if passages:
+        status, advice = "ready", "Your agent is answering from the files you uploaded."
+    elif found is not None and found.available:
+        status, advice = (
+            "catalogue",
+            "Your WhatsApp catalogue is readable — import it and the agent can quote from it.",
+        )
+    elif len(description) > 120:
+        status, advice = (
+            "described",
+            "Your agent is working from your description. Upload a price list and it can quote exact prices.",
+        )
+    else:
+        status, advice = (
+            "thin",
+            "Add what you sell, or upload a price list, so the agent has something to quote.",
+        )
+
+    return {
+        "status": status,
+        "advice": advice,
+        "documents": {"files": files or 0, "passages": passages or 0},
+        "description": {"characters": len(description)},
+        "catalogue": {
+            # None means we did not ask: a Twilio tenant has no paired account,
+            # so "no catalogue" would be a misleading thing to report.
+            "checked": found is not None,
+            "reachable": found.reachable if found else False,
+            "business_account": found.business if found else False,
+            "products": len(found.products) if found else 0,
+            "truncated": found.truncated if found else False,
+        },
+    }
+
+
+@router.get("/catalogue/preview")
+async def catalogue_preview(
+    scale: str = Query(default=catalogue.DEFAULT_SCALE),
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Exactly what importing the catalogue would write, before it writes it.
+
+    WhatsApp reports a price as an integer and does not say what scale it is
+    on. Guessing is how an agent quotes a hundredth of the real price with
+    complete confidence, so the guess is shown to a person once instead.
+    """
+    channel = await whatsapp.active_channel(db, tenant.id)
+    if channel is None or whatsapp.provider_of(channel) != whatsapp.QR_SESSION:
+        raise HTTPException(
+            status_code=422,
+            detail="A catalogue can only be read from a WhatsApp Web connection",
+        )
+
+    found = await catalogue.read(channel)
+    if not found.reachable:
+        raise HTTPException(status_code=503, detail="The WhatsApp bridge did not answer")
+    if not found.available:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "This WhatsApp account has no product catalogue. Upload your price "
+                "list instead, or add one in WhatsApp Business."
+            ),
+        )
+
+    return {
+        "products": catalogue.preview(found, scale),
+        "truncated": found.truncated,
+        "scales": list(catalogue.SCALES),
+    }
+
+
+@router.post("/catalogue/import", status_code=201)
+async def catalogue_import(
+    scale: str = Query(default=catalogue.DEFAULT_SCALE),
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Index the catalogue, replacing anything imported from it before.
+
+    Replaced rather than added to: a catalogue is a current statement of what a
+    shop sells, and leaving last week's prices beside this week's gives the
+    agent two answers to the same question.
+    """
+    tenant.require_role(WRITE_ROLES)
+
+    channel = await whatsapp.active_channel(db, tenant.id)
+    if channel is None or whatsapp.provider_of(channel) != whatsapp.QR_SESSION:
+        raise HTTPException(
+            status_code=422,
+            detail="A catalogue can only be read from a WhatsApp Web connection",
+        )
+
+    found = await catalogue.read(channel)
+    if not found.available:
+        raise HTTPException(status_code=404, detail="No catalogue to import")
+
+    previous = (
+        await db.execute(
+            select(KnowledgeDocument).where(
+                KnowledgeDocument.organization_id == tenant.id,
+                KnowledgeDocument.source == CATALOGUE_SOURCE,
+            )
+        )
+    ).scalars().all()
+    for stale in previous:
+        await db.delete(stale)
+    await db.flush()
+
+    for product in found.products:
+        document = await retrieval.index_document(
+            db,
+            organization_id=tenant.id,
+            title=product.get("name") or "Product",
+            content=catalogue.as_passage(product, scale),
+            source=CATALOGUE_SOURCE,
+        )
+        document.doc_type = "product"
+        if product.get("images"):
+            document.media_urls = list(product["images"])
+
+    await db.flush()
+    logger.info(
+        "imported %d product(s) from the WhatsApp catalogue for %s (replacing %d)",
+        len(found.products),
+        tenant.id,
+        len(previous),
+    )
+    return {
+        "imported": len(found.products),
+        "replaced": len(previous),
+        "truncated": found.truncated,
+    }
 
 
 @router.get("/search", response_model=list[RetrievedChunk])

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { LogOut } from 'lucide-react'
+import { LogOut, Sparkles } from 'lucide-react'
 import useMonitorSocket from './useMonitorSocket.js'
 import { api, auth } from './api.js'
 import SignIn from './components/SignIn.jsx'
@@ -10,6 +10,7 @@ import MetricStrip from './components/MetricStrip.jsx'
 import OrgSelector from './components/OrgSelector.jsx'
 import PulseLine from './components/PulseLine.jsx'
 import BrandMark from './components/BrandMark.jsx'
+import WhatsNew, { hasUnseenUpgrades } from './components/WhatsNew.jsx'
 
 /**
  * Pane switcher, phones only.
@@ -74,6 +75,9 @@ function Dashboard({ onSignedOut }) {
    * no second layout to keep in step.
    */
   const [mobilePane, setMobilePane] = useState('list')
+  const [showUpgrades, setShowUpgrades] = useState(false)
+  // Only until they open it once. A dot that never goes away is noise.
+  const [unseen, setUnseen] = useState(hasUnseenUpgrades)
 
   const seenEvents = useRef(0)
 
@@ -319,6 +323,20 @@ function Dashboard({ onSignedOut }) {
 
           <button
             onClick={() => {
+              setShowUpgrades(true)
+              setUnseen(false)
+            }}
+            title="What's new"
+            className="relative rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
+          >
+            <Sparkles size={13} />
+            {unseen && (
+              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-panel" />
+            )}
+          </button>
+
+          <button
+            onClick={() => {
               auth.clear()
               onSignedOut()
             }}
@@ -374,6 +392,8 @@ function Dashboard({ onSignedOut }) {
           }}
         />
       </main>
+
+      {showUpgrades && <WhatsNew onClose={() => setShowUpgrades(false)} />}
     </div>
   )
 }

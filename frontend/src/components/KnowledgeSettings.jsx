@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileText, Loader2, Trash2, TriangleAlert, Upload } from 'lucide-react'
+import { BookOpen, Check, FileText, Loader2, Trash2, TriangleAlert, Upload } from 'lucide-react'
 import { api } from '../api.js'
 
 const ACCEPT = '.pdf,.docx,.txt,.md'
@@ -19,6 +19,9 @@ const ACCEPT = '.pdf,.docx,.txt,.md'
  */
 export default function KnowledgeSettings() {
   const [sources, setSources] = useState([])
+  const [readiness, setReadiness] = useState(null)
+  const [catalogue, setCatalogue] = useState(null)
+  const [scale, setScale] = useState('cents')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)
@@ -32,6 +35,11 @@ export default function KnowledgeSettings() {
       // An empty list and a failed read look the same here, and neither is
       // worth an error banner over the upload control that still works.
       setSources([])
+    }
+    try {
+      setReadiness(await api.knowledgeReadiness())
+    } catch {
+      setReadiness(null)
     }
   }, [])
 
@@ -86,6 +94,94 @@ export default function KnowledgeSettings() {
           it will never invent a price — so the more you add, the more it can answer.
         </p>
       </div>
+
+      {readiness?.catalogue?.products > 0 && (
+        <div className="rounded-xl border border-accent/30 bg-accent/5 px-4 py-3">
+          <p className="flex items-center gap-2 text-xs font-semibold text-accent">
+            <BookOpen size={13} />
+            {readiness.catalogue.products} product
+            {readiness.catalogue.products === 1 ? '' : 's'} in your WhatsApp catalogue
+          </p>
+          <p className="mt-1 text-2xs leading-relaxed text-dim">
+            We can read these straight from WhatsApp — nothing to upload. Check the
+            prices below look right before importing: WhatsApp stores them as whole
+            numbers and does not say where the decimal point goes.
+          </p>
+
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <select
+              id="catalogue-scale"
+              value={scale}
+              onChange={(e) => {
+                setScale(e.target.value)
+                setCatalogue(null)
+              }}
+              className="rounded-lg border border-edge bg-bg px-2 py-1.5 text-2xs text-ink"
+            >
+              <option value="cents">8900 means 89.00</option>
+              <option value="whole">8900 means 8,900</option>
+              <option value="thousandths">89000 means 89.00</option>
+            </select>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                setError(null)
+                try {
+                  setCatalogue(await api.previewCatalogue(scale))
+                } catch (err) {
+                  setError(err.message)
+                }
+                setBusy(false)
+              }}
+              className="rounded-lg border border-edge px-2.5 py-1.5 text-2xs text-dim transition-colors hover:border-edge-hi hover:text-ink"
+            >
+              Preview
+            </button>
+            {catalogue && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  setError(null)
+                  try {
+                    const done = await api.importCatalogue(scale)
+                    setNote(`Imported ${done.imported} product(s) from WhatsApp.`)
+                    setCatalogue(null)
+                  } catch (err) {
+                    setError(err.message)
+                  }
+                  setBusy(false)
+                  await load()
+                }}
+                className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-2xs font-semibold text-bg transition-opacity hover:opacity-90"
+              >
+                <Check size={12} /> Looks right — import
+              </button>
+            )}
+          </div>
+
+          {catalogue && (
+            <ul className="mt-2.5 space-y-1 rounded-lg bg-bg/60 px-3 py-2">
+              {catalogue.products.slice(0, 5).map((product, i) => (
+                <li key={i} className="flex items-baseline gap-2 text-2xs">
+                  <span className="truncate text-ink">{product.name}</span>
+                  <span className="ml-auto shrink-0 font-mono text-accent">
+                    {product.price}
+                  </span>
+                </li>
+              ))}
+              {catalogue.products.length > 5 && (
+                <li className="text-2xs text-faint">
+                  and {catalogue.products.length - 5} more
+                </li>
+              )}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div
         onDragOver={(e) => {
@@ -160,7 +256,8 @@ export default function KnowledgeSettings() {
 
       {sources.length === 0 && (
         <p className="text-2xs text-faint">
-          Nothing uploaded yet — the agent is answering from the description above only.
+          {readiness?.advice ||
+            'Nothing uploaded yet — the agent is answering from the description above only.'}
         </p>
       )}
     </div>

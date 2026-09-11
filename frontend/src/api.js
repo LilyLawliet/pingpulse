@@ -167,7 +167,14 @@ export const api = {
 
   // --------------------------- what it knows ----------------------------
   // A shop's catalogue and policies, read out of the files they already have.
+  knowledgeReadiness: () => request('/knowledge/readiness'),
   listKnowledgeSources: () => request('/knowledge/sources'),
+  // A catalogue is previewed before it is imported: WhatsApp reports prices as
+  // an integer without saying what scale it is on, and a wrong guess has the
+  // agent quoting a hundredth of the real price with total confidence.
+  previewCatalogue: (scale) => request(`/knowledge/catalogue/preview?scale=${scale}`),
+  importCatalogue: (scale) =>
+    request(`/knowledge/catalogue/import?scale=${scale}`, { method: 'POST' }),
   uploadKnowledge: (file, docType = 'policy') =>
     upload('/knowledge/upload', file, { doc_type: docType }),
   deleteKnowledgeSource: (source) =>

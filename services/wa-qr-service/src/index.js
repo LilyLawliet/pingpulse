@@ -397,6 +397,89 @@ app.post('/send', async (request, response) => {
   }
 })
 
+/**
+ * What this paired account already knows about itself. Read-only.
+ *
+ * A WhatsApp Business account can carry a product catalogue, and a shop that
+ * has one has already done the work we would otherwise ask them to repeat by
+ * uploading a price list. Reading it is the difference between "send us your
+ * catalogue" and "we already have it".
+ *
+ * Three outcomes, and the caller needs to tell them apart:
+ *
+ *   business: false   a personal WhatsApp account. There is no catalogue to
+ *                     read and never will be, so stop asking for one.
+ *   catalogue: []     a business account with an empty catalogue. Worth
+ *                     pointing them at, because they can fill it in WhatsApp.
+ *   catalogue: [...]  products we can index.
+ *
+ * Nothing here writes. `productCreate` and `productUpdate` exist on the same
+ * socket and are deliberately not wired up: this reads a shop's own data, and
+ * the first version of that should not be able to alter it.
+ */
+app.get('/catalog/:sessionId', async (request, response) => {
+  const sessionId = request.params.sessionId
+  const socket = await awaitReady(sessionId)
+
+  if (!socket) {
+    return response.json({ ok: false, error: 'session not connected' })
+  }
+
+  // The paired account's own number, which is whose catalogue we want.
+  const own = socket.user?.id
+  const jid = `${String(own || '').split(':')[0].split('@')[0]}@s.whatsapp.net`
+
+  // WhatsApp does not answer "no" to these questions — it does not answer at
+  // all. Asking a personal account for its catalogue hangs until Baileys' own
+  // query timeout fires around two minutes later, which is far too long for a
+  // panel someone is watching, and long enough that they assume it is broken.
+  // Silence for this many seconds is taken as the answer it is.
+  const ASK_MS = 8000
+  const ask = (promise) =>
+    Promise.race([
+      promise,
+      new Promise((resolve) => setTimeout(() => resolve(undefined), ASK_MS)),
+    ]).catch(() => undefined)
+
+  const profile = (await ask(socket.getBusinessProfile(jid))) || null
+  const catalogue = await ask(socket.getCatalog({ jid, limit: 100 }))
+
+  const products = catalogue?.products || []
+  const truncated = Boolean(catalogue?.nextPageCursor)
+  if (!catalogue) {
+    log.info({ sessionId }, 'no catalogue answer within the wait — treating as none')
+  }
+
+  response.json({
+    ok: true,
+    business: Boolean(profile),
+    profile: profile
+      ? {
+          description: profile.description || '',
+          category: profile.category || '',
+          email: profile.email || '',
+          website: (profile.website || [])[0] || '',
+          address: profile.address || '',
+        }
+      : null,
+    truncated,
+    // Passed through close to as WhatsApp gave them. Interpreting the price is
+    // the API's job, not the bridge's — the bridge should not be the place a
+    // currency assumption is buried.
+    products: products.map((p) => ({
+      id: p.id,
+      retailerId: p.retailerId || '',
+      name: p.name || '',
+      description: p.description || '',
+      price: p.price,
+      currency: p.currency || '',
+      availability: p.availability || '',
+      url: p.url || '',
+      images: Object.values(p.imageUrls || {}).filter(Boolean).slice(0, 3),
+    })),
+  })
+})
+
 app.post('/logout', async (request, response) => {
   const { sessionId } = request.body || {}
   const socket = sessions.get(sessionId)
