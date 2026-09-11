@@ -60,6 +60,47 @@ const ready = new Set()
 /** Sockets watching a pairing, keyed by channel id. */
 const watchers = new Map()
 /**
+ * LID -> phone number, for everyone WhatsApp has told us about.
+ *
+ * WhatsApp addresses more and more chats by LID (a privacy identifier like
+ * 153231615328393@lid) and only sometimes attaches the real number to the
+ * message. When it does not, the shop owner would otherwise see a fifteen-digit
+ * identifier rendered as a phone number that cannot be dialled, and the same
+ * person appears twice the moment WhatsApp changes how it addresses them.
+ *
+ * Baileys hands the pairing over on its contact events, where a contact
+ * carries both `lid` and `jid`, so this is a cache of what WhatsApp already
+ * knows rather than a guess. It is deliberately global — a LID identifies one
+ * account everywhere, not one per session — and in memory only, because the
+ * API stores the mapping durably once it has seen it.
+ */
+const lidPhones = new Map()
+
+/** Digits of a JID: "15323@lid" / "923097209908:3@s.whatsapp.net" -> digits. */
+function jidDigits(jid) {
+  return String(jid || '').split('@')[0].split(':')[0].replace(/[^0-9]/g, '')
+}
+
+/** Learn a LID -> phone pairing from anything that carries both. */
+function rememberLid(lid, phone) {
+  const key = jidDigits(lid)
+  const value = jidDigits(phone)
+  if (!key || !value || key === value) return
+  if (lidPhones.get(key) !== value) {
+    lidPhones.set(key, value)
+    log.info({ lid: key, phone: value }, 'learned a LID to phone mapping')
+  }
+}
+
+/** Record both directions from a Baileys contact, whichever fields it has. */
+function rememberContact(contact) {
+  if (!contact) return
+  const lid = contact.lid || (String(contact.id || '').endsWith('@lid') ? contact.id : '')
+  const phone =
+    contact.jid || (String(contact.id || '').endsWith('@s.whatsapp.net') ? contact.id : '')
+  rememberLid(lid, phone)
+}
+/**
  * Latest state per session, so a client that arrives mid-pairing can ask
  * for the current QR instead of waiting for the next one to be pushed.
  * A QR rotates every ~20s, so this is short-lived by nature.
@@ -137,6 +178,12 @@ async function startSession(sessionId) {
 
   socket.ev.on('creds.update', saveCreds)
 
+  // Where the LID to phone-number pairing comes from. WhatsApp syncs contacts
+  // on connect and updates them as it learns more, and each one can carry both
+  // identifiers.
+  socket.ev.on('contacts.upsert', (contacts) => contacts.forEach(rememberContact))
+  socket.ev.on('contacts.update', (contacts) => contacts.forEach(rememberContact))
+
   socket.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update
 
@@ -213,12 +260,26 @@ async function startSession(sessionId) {
       // record. The JID travels alongside so the reply still lands.
       const alternative =
         message.key.senderPn || message.key.remoteJidAlt || message.key.participantPn || ''
-      const identity = (alternative || remote).split('@')[0].split(':')[0]
+
+      // The LID, when this chat is addressed by one. Sent to the API whether or
+      // not we can resolve it: it is the only stable identifier for this person
+      // across a WhatsApp account switch, so the API uses it to recognise
+      // someone it has already met rather than creating a second contact.
+      const lidSource = [remote, message.key.participant, message.key.remoteJidAlt]
+        .find((candidate) => String(candidate || '').endsWith('@lid'))
+      const lid = lidSource ? jidDigits(lidSource) : ''
+
+      // WhatsApp gave us both, so remember it for the messages where it does not.
+      if (lid && alternative) rememberLid(lid, alternative)
+
+      const resolved = alternative || (lid ? lidPhones.get(lid) || '' : '')
+      const identity = jidDigits(resolved || remote)
 
       await callApi('/api/v1/whatsapp/qr-inbound', {
         id: message.key.id,
         sessionId,
         from: identity,
+        fromLid: lid,
         fromJid: remote,
         to: socket.user?.id?.split(':')[0]?.split('@')[0] || '',
         body: text,

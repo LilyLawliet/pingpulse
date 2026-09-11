@@ -47,6 +47,29 @@ export function prettyPhone(phone) {
   return [country && `+${country}`, area, mid, last4].filter(Boolean).join(' ')
 }
 
+/**
+ * How to label a contact whose number WhatsApp has not given us.
+ *
+ * WhatsApp addresses some chats by LID — a privacy identifier — and until it
+ * hands over the real number that identifier is all we have. Running it through
+ * prettyPhone produced "+15323 161 532 8393": a number that cannot be dialled,
+ * presented as though it could. Say what is actually true instead, and keep the
+ * last digits so two unnamed people are still tellable apart.
+ */
+export function isPlaceholderNumber(contact) {
+  if (!contact?.wa_lid) return false
+  return (contact.phone_number || '').replace(/\D/g, '') === String(contact.wa_lid)
+}
+
+export function contactLabel(contact) {
+  if (!contact) return ''
+  if (contact.name) return contact.name
+  if (isPlaceholderNumber(contact)) {
+    return `WhatsApp user ···${String(contact.wa_lid).slice(-4)}`
+  }
+  return prettyPhone(contact.phone_number)
+}
+
 export function clockOf(iso) {
   if (!iso) return ''
   const date = new Date(iso)

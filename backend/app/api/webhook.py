@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Sequence
 
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -151,39 +151,122 @@ async def _channel_for(db: AsyncSession, organization_id) -> ChannelConfig | Non
     return await whatsapp.active_channel(db, organization_id)
 
 
+async def _merge_contacts(
+    db: AsyncSession, keep: CRMContact, drop: CRMContact
+) -> CRMContact:
+    """Fold one contact into another, transcript and all.
+
+    Reached when WhatsApp tells us two records are the same person — it
+    addressed them by LID for a while, then finally handed over the number we
+    already had a conversation under. Repointing the messages is the whole
+    point: leaving them behind would split one conversation across two entries
+    in the dashboard, which is the symptom this is here to remove.
+    """
+    await db.execute(
+        update(Message).where(Message.contact_id == drop.id).values(contact_id=keep.id)
+    )
+    # The surviving record wins every field it already has; the other fills gaps.
+    keep.contact_metadata = {**(drop.contact_metadata or {}), **(keep.contact_metadata or {})}
+    for field in ("name", "city", "shoe_size", "category_interest", "colour_preference"):
+        if not getattr(keep, field, None) and getattr(drop, field, None):
+            setattr(keep, field, getattr(drop, field))
+
+    await db.flush()
+    await db.delete(drop)
+    await db.flush()
+    logger.info("merged contact %s into %s (same person, two identifiers)", drop.id, keep.id)
+    return keep
+
+
 async def _resolve_contact(
     db: AsyncSession,
     organization: Organization,
     phone_number: str,
     profile_name: str | None,
+    *,
+    wa_lid: str | None = None,
+    wa_jid: str | None = None,
 ) -> tuple[CRMContact, bool]:
-    """Find this organization's contact for the number, or create it as a LEAD.
+    """Find this organization's contact for whoever sent this, or create them.
 
     Scoped by organization: the same person messaging two businesses on the
     platform is two separate contacts, and neither can see the other.
-    """
-    result = await db.execute(
-        select(CRMContact).where(
-            CRMContact.organization_id == organization.id,
-            CRMContact.phone_number == phone_number,
-        )
-    )
-    contact = result.scalar_one_or_none()
-    if contact is not None:
-        if profile_name and not contact.name:
-            contact.name = profile_name
-        return contact, False
 
-    contact = CRMContact(
-        organization_id=organization.id,
-        phone_number=phone_number,
-        name=profile_name,
-        pipeline_stage="LEAD",
-        tags=[],
-    )
-    db.add(contact)
+    Identity is matched on two things, because WhatsApp does not consistently
+    give us either one. A phone number is what the shop recognises. A LID is
+    what WhatsApp increasingly sends instead, and it is the only identifier
+    that survives someone switching the account on their handset. Matching on
+    both, and reconciling them the moment WhatsApp reveals the pairing, is what
+    stops one person becoming two conversations.
+    """
+    lid = (wa_lid or "").strip() or None
+    number = (phone_number or "").strip()
+
+    by_lid = None
+    if lid:
+        by_lid = (
+            await db.execute(
+                select(CRMContact).where(
+                    CRMContact.organization_id == organization.id,
+                    CRMContact.wa_lid == lid,
+                )
+            )
+        ).scalar_one_or_none()
+
+    # When all WhatsApp gave us was the LID, `number` *is* the LID. Matching a
+    # contact on it would be matching an identifier against a number column.
+    by_number = None
+    if number and number != lid:
+        by_number = (
+            await db.execute(
+                select(CRMContact).where(
+                    CRMContact.organization_id == organization.id,
+                    CRMContact.phone_number == number,
+                )
+            )
+        ).scalar_one_or_none()
+
+    created = False
+    if by_lid is not None and by_number is not None and by_lid.id != by_number.id:
+        # Both exist and WhatsApp has just told us they are one person.
+        contact = await _merge_contacts(db, keep=by_number, drop=by_lid)
+    elif (contact := by_number or by_lid) is None:
+        contact = CRMContact(
+            organization_id=organization.id,
+            # Only ever the LID when WhatsApp has given us nothing better; the
+            # branch below replaces it the moment a real number turns up.
+            phone_number=number or lid or "",
+            wa_lid=lid,
+            name=profile_name,
+            pipeline_stage="LEAD",
+            tags=[],
+        )
+        db.add(contact)
+        created = True
+
+    if lid and contact.wa_lid != lid:
+        contact.wa_lid = lid
+
+    # The record was created from a LID because that was all we had. Now that a
+    # dialable number has arrived, it replaces the placeholder — the shop should
+    # never be shown an identifier where a phone number belongs.
+    if number and number != lid and contact.phone_number in ("", lid, contact.wa_lid):
+        contact.phone_number = number
+
+    if profile_name and not contact.name:
+        contact.name = profile_name
+
+    # The exact chat address, kept so replies go back the way the message came.
+    # Rebuilding one from the digits produces a valid address for a number that
+    # does not exist: WhatsApp accepts it and the reply reaches nobody.
+    if wa_jid:
+        metadata = dict(contact.contact_metadata or {})
+        if metadata.get("wa_jid") != wa_jid:
+            metadata["wa_jid"] = wa_jid
+            contact.contact_metadata = metadata
+
     await db.flush()
-    return contact, True
+    return contact, created
 
 
 async def _recent_history(
@@ -229,8 +312,15 @@ async def process_inbound_message(
         )
         return {"error": "unrouted", "to": payload.clean_to}
 
+    raw_payload = payload.raw or {}
     contact, created = await _resolve_contact(
-        db, organization, phone_number, payload.profile_name
+        db,
+        organization,
+        phone_number,
+        payload.profile_name,
+        # Both are empty for Twilio, which addresses everyone by phone number.
+        wa_lid=(raw_payload.get("WaLid") or "").strip() or None,
+        wa_jid=(raw_payload.get("WaJid") or "").strip() or None,
     )
     history = await _recent_history(db, organization.id, contact.id)
 
@@ -703,6 +793,9 @@ async def qr_session_inbound(request: Request, db: AsyncSession = Depends(get_db
         # The exact chat JID. Carried through the raw payload because it has no
         # equivalent in Twilio's field set, which this shape otherwise mirrors.
         "WaJid": body.get("fromJid") or "",
+        # WhatsApp's privacy identifier for the sender, when it used one. The
+        # identifier that survives them switching accounts on the handset.
+        "WaLid": body.get("fromLid") or "",
     }
     for index, url in enumerate(body.get("mediaUrls") or []):
         raw[f"MediaUrl{index}"] = url

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlarmClock, Bot, CheckCheck, Clock, Sparkles, TriangleAlert, X } from 'lucide-react'
-import { STAGE_LABEL, STAGE_STYLE, clockOf, initialsOf, prettyPhone } from '../format.js'
+import { STAGE_LABEL, STAGE_STYLE, clockOf, contactLabel, initialsOf, isPlaceholderNumber, prettyPhone } from '../format.js'
 import { mediaUrl } from '../backend.js'
 import { api } from '../api.js'
 
@@ -367,9 +367,13 @@ export default function ConversationThread({ contact, messages, composing, arriv
         </span>
         <div className="min-w-0">
           <h2 className="truncate text-sm font-semibold text-ink">
-            {contact.name || prettyPhone(contact.phone_number)}
+            {contactLabel(contact)}
           </h2>
-          <p className="font-mono text-2xs text-faint">{prettyPhone(contact.phone_number)}</p>
+          <p className="font-mono text-2xs text-faint">
+            {isPlaceholderNumber(contact)
+              ? 'number not shared by WhatsApp'
+              : prettyPhone(contact.phone_number)}
+          </p>
         </div>
         <KnownFacts contact={contact} />
 

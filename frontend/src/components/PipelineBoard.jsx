@@ -1,5 +1,5 @@
 import { TrendingUp } from 'lucide-react'
-import { STAGE_DOT, STAGE_LABEL, STAGE_ORDER, initialsOf, prettyPhone } from '../format.js'
+import { STAGE_DOT, STAGE_LABEL, STAGE_ORDER, contactLabel, initialsOf, prettyPhone } from '../format.js'
 
 /**
  * Where every lead stands. Ordered by the funnel, so the shape of the
@@ -51,7 +51,7 @@ export default function PipelineBoard({ contacts, selectedId, onSelect }) {
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-xs text-ink">
-                      {person.name || prettyPhone(person.phone_number)}
+                      {contactLabel(person)}
                     </span>
                   </span>
                 </button>

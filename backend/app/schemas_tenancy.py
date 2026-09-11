@@ -164,6 +164,11 @@ class CRMContactOut(BaseModel):
     id: uuid.UUID
     organization_id: uuid.UUID
     phone_number: str
+    # WhatsApp's privacy identifier, when it addressed this person by one.
+    # The dashboard reads it to tell a real number from a placeholder: where
+    # phone_number equals this, WhatsApp has not told us the number yet and
+    # showing it as one would be showing something undialable.
+    wa_lid: str | None = None
     name: str | None = None
     email: str | None = None
     pipeline_stage: str

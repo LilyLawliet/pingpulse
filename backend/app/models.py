@@ -299,6 +299,18 @@ class CRMContact(Base):
         UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     phone_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+
+    # WhatsApp's privacy identifier for this person, when it addresses them by
+    # one — "153231615328393" from 153231615328393@lid.
+    #
+    # It gets its own column because it is an identity, not incidental data. A
+    # LID survives what a phone number does not: the same person switching the
+    # account on their handset arrives under a different number, and without
+    # this they become a second contact with a fifteen-digit identifier stored
+    # where a dialable number should be. Matching on it is what keeps one
+    # person one conversation.
+    wa_lid: Mapped[str | None] = mapped_column(String(32), index=True)
+
     name: Mapped[str | None] = mapped_column(String(255))
     email: Mapped[str | None] = mapped_column(String(320))
     pipeline_stage: Mapped[str] = mapped_column(

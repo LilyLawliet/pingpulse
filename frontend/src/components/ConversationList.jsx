@@ -1,5 +1,5 @@
 import { MessageSquare } from 'lucide-react'
-import { STAGE_LABEL, STAGE_STYLE, initialsOf, prettyPhone } from '../format.js'
+import { STAGE_LABEL, STAGE_STYLE, contactLabel, initialsOf, prettyPhone } from '../format.js'
 
 export default function ConversationList({ contacts, selectedId, onSelect, previews, composing }) {
   return (
@@ -43,14 +43,14 @@ export default function ConversationList({ contacts, selectedId, onSelect, previ
               <span className="min-w-0 flex-1">
                 <span className="flex items-baseline gap-2">
                   <span className="truncate text-sm font-medium text-ink">
-                    {contact.name || prettyPhone(contact.phone_number)}
+                    {contactLabel(contact)}
                   </span>
                 </span>
                 <span className="mt-0.5 block truncate text-2xs text-dim">
                   {composing.has(contact.id) ? (
                     <span className="text-accent">typing…</span>
                   ) : (
-                    preview || prettyPhone(contact.phone_number)
+                    preview || contactLabel(contact)
                   )}
                 </span>
                 <span
