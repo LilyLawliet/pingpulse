@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Building2, Plus, Save, X } from 'lucide-react'
 import { api } from '../api.js'
 import WhatsAppSettings from './WhatsAppSettings.jsx'
+import KnowledgeSettings from './KnowledgeSettings.jsx'
 
 const EMPTY = {
   name: '',
@@ -210,8 +211,13 @@ export default function OrgSelector({ organizations, selectedId, onSelect, onSav
                 />
               </label>
 
-              {/* A channel binds to an organization, so it can only be set up
-                  once the business itself exists. */}
+              {/* Both of these belong to an organization, so they can only be
+                  set up once the business itself exists. */}
+              {editingId && (
+                <div className="border-t border-edge pt-4">
+                  <KnowledgeSettings />
+                </div>
+              )}
               {editingId && (
                 <div className="border-t border-edge pt-4">
                   <WhatsAppSettings />

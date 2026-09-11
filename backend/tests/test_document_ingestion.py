@@ -265,3 +265,67 @@ async def test_an_empty_file_is_refused(org_a):
         files={"file": ("empty.txt", b"", "text/plain")},
     )
     assert response.status_code == 422
+
+
+# ------------------------------------------------- what the dashboard shows
+@pytest.mark.asyncio
+async def test_uploads_are_listed_by_file_not_by_passage(org_a):
+    """Someone who uploaded one price list should see one row, not twelve.
+
+    Splitting into passages is right for retrieval and meaningless to the
+    person who sent the file.
+    """
+    long_text = "\n\n".join(f"Section {i}. " + ("detail " * 60) for i in range(8))
+
+    uploaded = await org_a._client.post(
+        "/api/v1/knowledge/upload",
+        headers=org_a.headers,
+        files={"file": ("handbook.txt", long_text.encode(), "text/plain")},
+    )
+    assert uploaded.status_code == 201
+    assert uploaded.json()["passages_indexed"] > 1, "not enough text to prove the point"
+
+    listed = await org_a.get("/api/v1/knowledge/sources")
+    assert listed.status_code == 200
+    rows = listed.json()
+    assert len(rows) == 1, "one file should be one row"
+    assert rows[0]["source"] == "handbook.txt"
+    assert rows[0]["passages"] == uploaded.json()["passages_indexed"]
+
+
+@pytest.mark.asyncio
+async def test_removing_a_file_removes_all_of_it(org_a):
+    """Half a price list is worse than none: the agent quotes the half that
+    survived and looks confidently wrong."""
+    data = _docx(["Winter prices", "Scarf $34", "Boots $189"])
+    await org_a._client.post(
+        "/api/v1/knowledge/upload",
+        headers=org_a.headers,
+        files={"file": ("winter.docx", data, "application/octet-stream")},
+    )
+
+    removed = await org_a._client.delete(
+        "/api/v1/knowledge/sources?source=winter.docx", headers=org_a.headers
+    )
+    assert removed.status_code == 204
+
+    assert (await org_a.get("/api/v1/knowledge/sources")).json() == []
+    assert (await org_a.get("/api/v1/knowledge/search?q=scarf")).json() == []
+
+
+@pytest.mark.asyncio
+async def test_one_tenant_cannot_delete_anothers_upload(org_a, org_b):
+    """The filename is the handle, and filenames collide between shops."""
+    await org_a._client.post(
+        "/api/v1/knowledge/upload",
+        headers=org_a.headers,
+        files={"file": ("prices.txt", b"Scarf $34 in stock", "text/plain")},
+    )
+
+    theirs = await org_b._client.delete(
+        "/api/v1/knowledge/sources?source=prices.txt", headers=org_b.headers
+    )
+    assert theirs.status_code == 404, "a shared filename must not delete across tenants"
+
+    still_there = await org_a.get("/api/v1/knowledge/sources")
+    assert len(still_there.json()) == 1

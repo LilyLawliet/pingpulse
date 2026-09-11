@@ -6,7 +6,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -168,6 +168,65 @@ async def delete_document(
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     await db.delete(document)
+    return None
+
+
+@router.get("/sources")
+async def list_sources(
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """The files this organization has uploaded, one row each.
+
+    A file becomes as many rows as it has passages, which is right for
+    retrieval and wrong for a person looking at what they uploaded: they sent
+    one price list, not eleven. Grouped back together here so the dashboard can
+    show what they actually did.
+    """
+    rows = await db.execute(
+        select(
+            KnowledgeDocument.source,
+            func.count(KnowledgeDocument.id),
+            func.max(KnowledgeDocument.created_at),
+        )
+        .where(
+            KnowledgeDocument.organization_id == tenant.id,
+            KnowledgeDocument.source.is_not(None),
+        )
+        .group_by(KnowledgeDocument.source)
+        .order_by(func.max(KnowledgeDocument.created_at).desc())
+    )
+    return [
+        {"source": source, "passages": passages, "added_at": added_at}
+        for source, passages, added_at in rows.all()
+    ]
+
+
+@router.delete("/sources", status_code=204)
+async def delete_source(
+    source: str = Query(min_length=1, description="The filename to remove"),
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove every passage that came from one file.
+
+    Deleting a file passage by passage from the dashboard would be a dozen
+    requests, and half-deleting a price list leaves the agent quoting from the
+    half that survived — which is worse than either extreme.
+    """
+    tenant.require_role(WRITE_ROLES)
+    result = await db.execute(
+        select(KnowledgeDocument).where(
+            KnowledgeDocument.organization_id == tenant.id,
+            KnowledgeDocument.source == source,
+        )
+    )
+    found = result.scalars().all()
+    if not found:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nothing from that file")
+    for document in found:
+        await db.delete(document)
+    logger.info("removed %d passage(s) from %s for %s", len(found), source, tenant.id)
     return None
 
 

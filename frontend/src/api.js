@@ -82,6 +82,37 @@ async function request(path, options = {}) {
   return response.status === 204 ? null : response.json()
 }
 
+/**
+ * A file upload, which the JSON helper above cannot do.
+ *
+ * Setting Content-Type by hand on a FormData body omits the multipart
+ * boundary, and the server then cannot find the file at all. The browser
+ * writes that header itself, correctly, when we leave it alone.
+ */
+async function upload(path, file, fields = {}) {
+  const body = new FormData()
+  body.append('file', file)
+  for (const [key, value] of Object.entries(fields)) body.append(key, value)
+
+  const headers = {}
+  if (auth.token) headers.Authorization = `Bearer ${auth.token}`
+  const device = deviceId()
+  if (device) headers['X-PingPulse-Device'] = device
+
+  const response = await fetch(`${BASE}${path}`, { method: 'POST', headers, body })
+  if (!response.ok) {
+    let detail = response.statusText
+    try {
+      detail = (await response.json()).detail || detail
+    } catch {
+      // non-JSON error body
+    }
+    if (response.status === 401) auth.clear()
+    throw new ApiError(response.status, detail)
+  }
+  return response.json()
+}
+
 export const api = {
   // ------------------------------ identity ------------------------------
   // There is no sign-up and no password. A client is issued an access
@@ -133,6 +164,14 @@ export const api = {
     request(`/crm/contacts/${id}/tags`, { method: 'POST', body: JSON.stringify({ tags }) }),
   removeTag: (id, tag) =>
     request(`/crm/contacts/${id}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' }),
+
+  // --------------------------- what it knows ----------------------------
+  // A shop's catalogue and policies, read out of the files they already have.
+  listKnowledgeSources: () => request('/knowledge/sources'),
+  uploadKnowledge: (file, docType = 'policy') =>
+    upload('/knowledge/upload', file, { doc_type: docType }),
+  deleteKnowledgeSource: (source) =>
+    request(`/knowledge/sources?source=${encodeURIComponent(source)}`, { method: 'DELETE' }),
 
   // ------------------------------- misc ---------------------------------
   stats: () => request('/stats'),
