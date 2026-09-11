@@ -12,6 +12,8 @@ export default {
         ink: 'var(--ink)',
         dim: 'var(--ink-dim)',
         faint: 'var(--ink-faint)',
+        platinum: 'var(--platinum)',
+        'platinum-dim': 'var(--platinum-dim)',
         accent: 'var(--accent)',
         'accent-deep': 'var(--accent-deep)',
         customer: 'var(--customer)',
@@ -26,7 +28,10 @@ export default {
         '2xs': ['0.6875rem', { lineHeight: '1rem' }],
       },
       boxShadow: {
-        lift: '0 10px 30px -12px rgba(0, 0, 0, 0.7)',
+        lift: '0 10px 30px -12px rgba(0, 0, 0, 0.85)',
+        // A raised surface on black is described by light along its top edge,
+        // not by a shadow underneath it.
+        rim: 'inset 0 1px 0 rgba(255, 255, 255, 0.06)',
       },
     },
   },

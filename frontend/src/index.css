@@ -4,24 +4,37 @@
 @tailwind components;
 @tailwind utilities;
 
-/* PingPulse operations console — a deliberately single-theme dark surface.
-   Every colour is painted explicitly so the page never borrows a host ground. */
+/* PingPulse operations console — a deliberately single-theme black surface.
+   Every colour is painted explicitly so the page never borrows a host ground.
+
+   Black, not near-black: the ground is #000 so the console reads as one
+   continuous surface on an OLED panel and the panels sit *on* it rather than
+   floating in a slightly different grey. Depth comes from the hairline borders
+   and a single inset highlight, not from stacking ever-lighter greys.
+
+   Colour is spent sparingly, which is what keeps it feeling expensive. Platinum
+   carries the brand mark and the chrome; emerald is the one live accent and
+   means "working"; blue, amber and red are states, never decoration. */
 :root {
-  --bg: #080d12;
-  --panel: #0e151d;
-  --panel-2: #141d27;
-  --edge: #1e2a36;
-  --edge-hi: #2c3d4d;
+  --bg: #000000;
+  --panel: #0a0b0d;
+  --panel-2: #121418;
+  --edge: #1d2027;
+  --edge-hi: #2f343d;
 
-  --ink: #e9f0f4;
-  --ink-dim: #8fa3b0;
-  --ink-faint: #5a6c7a;
+  --ink: #f3f5f8;
+  --ink-dim: #99a1ad;
+  --ink-faint: #626a77;
 
-  --accent: #2fd8a8;
-  --accent-deep: #1b8a6c;
-  --customer: #5aa9f0;
-  --warn: #e8a33d;
-  --crit: #ef5f6b;
+  /* The brand mark is brushed silver, so the chrome that frames it is too. */
+  --platinum: #cbd2dc;
+  --platinum-dim: #8d95a2;
+
+  --accent: #3ae3ae;
+  --accent-deep: #0f7f62;
+  --customer: #6aa8ff;
+  --warn: #f2b23e;
+  --crit: #ff6b72;
 
   color-scheme: dark;
 }
@@ -46,15 +59,22 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Subtle depth: a single wash behind the console, not a gradient hero. */
+/* Subtle depth: a single wash behind the console, not a gradient hero. Kept
+   far dimmer than it was — on a black ground the same values read as a stain
+   rather than as light. */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(900px 420px at 18% -8%, rgba(47, 216, 168, 0.07), transparent 70%),
-    radial-gradient(760px 380px at 88% 4%, rgba(90, 169, 240, 0.05), transparent 70%);
+    radial-gradient(1100px 500px at 16% -12%, rgba(58, 227, 174, 0.045), transparent 72%),
+    radial-gradient(900px 420px at 92% 0%, rgba(106, 168, 255, 0.03), transparent 72%);
+}
+
+::selection {
+  background: rgba(58, 227, 174, 0.26);
+  color: var(--ink);
 }
 
 ::-webkit-scrollbar {
@@ -83,9 +103,22 @@ body::before {
   }
   .panel {
     @apply flex min-h-0 flex-col rounded-xl border border-edge bg-panel;
+    /* One hairline of light along the top edge. On black this is what makes a
+       panel read as a raised surface; a drop shadow would not, since there is
+       nothing darker than the ground for it to fall on. */
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.045),
+      0 1px 2px rgba(0, 0, 0, 0.6);
   }
   .panel-head {
     @apply flex shrink-0 items-center gap-2 border-b border-edge px-4 py-2.5;
+  }
+  /* The brand mark, and anything that should feel like the same metal. */
+  .platinum {
+    background: linear-gradient(160deg, #ffffff 0%, var(--platinum) 42%, #7f8794 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { LogOut, Radio } from 'lucide-react'
+import { LogOut } from 'lucide-react'
 import useMonitorSocket from './useMonitorSocket.js'
 import { api, auth } from './api.js'
 import SignIn from './components/SignIn.jsx'
@@ -9,6 +9,7 @@ import PipelineBoard from './components/PipelineBoard.jsx'
 import MetricStrip from './components/MetricStrip.jsx'
 import OrgSelector from './components/OrgSelector.jsx'
 import PulseLine from './components/PulseLine.jsx'
+import BrandMark from './components/BrandMark.jsx'
 
 /**
  * Pane switcher, phones only.
@@ -271,17 +272,7 @@ function Dashboard({ onSignedOut }) {
   return (
     <div className="relative flex h-full flex-col gap-2 p-2 sm:gap-3 sm:p-3">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-edge bg-panel px-3 py-2.5 sm:gap-x-4 sm:px-4 sm:py-3">
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 place-items-center rounded-lg bg-accent/12 ring-1 ring-inset ring-accent/25">
-            <Radio size={17} className="text-accent" />
-          </span>
-          <div>
-            <h1 className="text-[15px] font-bold leading-none tracking-tight text-ink">PingPulse</h1>
-            <p className="mt-1 hidden text-[10px] uppercase tracking-[0.16em] text-faint sm:block">
-              WhatsApp sales agent
-            </p>
-          </div>
-        </div>
+        <BrandMark size={34} />
 
         <div className="hidden items-center gap-3 border-l border-edge pl-4 md:flex">
           <PulseLine beat={events.length} />

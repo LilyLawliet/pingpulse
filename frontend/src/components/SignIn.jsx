@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { KeyRound, Radio } from 'lucide-react'
+import BrandMark from './BrandMark.jsx'
+import { KeyRound } from 'lucide-react'
 import { api, auth } from '../api.js'
 
 /**
@@ -37,17 +38,7 @@ export default function SignIn({ onSignedIn }) {
   return (
     <div className="grid h-full place-items-center p-6">
       <form onSubmit={submit} className="w-full max-w-sm">
-        <div className="mb-7 flex items-center gap-2.5">
-          <span className="grid h-9 w-9 place-items-center rounded-lg bg-accent/12 ring-1 ring-inset ring-accent/25">
-            <Radio size={17} className="text-accent" />
-          </span>
-          <div>
-            <h1 className="text-[15px] font-bold leading-none tracking-tight text-ink">PingPulse</h1>
-            <p className="mt-1 text-[10px] uppercase tracking-[0.16em] text-faint">
-              WhatsApp sales agent
-            </p>
-          </div>
-        </div>
+        <BrandMark size={56} className="mb-7" />
 
         <h2 className="text-lg font-semibold text-ink">Enter your access token</h2>
         <p className="mb-5 mt-1 text-xs text-dim">
