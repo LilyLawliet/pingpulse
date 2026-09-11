@@ -233,3 +233,26 @@ def offline_by_default(monkeypatch):
 
     # No Redis in unit tests; queuing is covered by the live suite.
     monkeypatch.setattr(settings, "followups_enabled", False)
+
+
+@pytest.fixture(autouse=True)
+def events_stay_local(monkeypatch, request):
+    """Keep the cross-process publish out of tests that are not about it.
+
+    `broadcast` now also publishes to Redis so other processes see the event.
+    There is no Redis here, so left alone every broadcast in the suite would
+    wait out a connection timeout. The publish itself is covered directly in
+    test_event_bridge.py, which opts out of this by asking for `real_publish`.
+    """
+    if "real_publish" in request.keywords:
+        return
+
+    from app.services import ws_manager
+
+    published: list[dict] = []
+
+    async def capture(event):
+        published.append(event)
+
+    monkeypatch.setattr(ws_manager, "_publish", capture)
+    return published

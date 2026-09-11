@@ -255,3 +255,139 @@ def test_a_manual_nudge_uses_the_wording_it_was_given(monkeypatch):
     assert outcome == "sent"
     assert seen["body"] == "Any thoughts on the black pair?"
     assert seen["manual"] is True
+
+
+async def test_a_sent_followup_is_put_on_the_operators_screen(monkeypatch):
+    """Sending it and storing it is not the same as showing it.
+
+    The worker did both and the conversation on screen stayed empty, because
+    announcing was the one step nobody had written. Two events, because the
+    dashboard uses them differently: `outbound_message` puts the bubble in the
+    open thread, `sync` refreshes the list and the counts.
+    """
+    import uuid as _uuid
+
+    from app import tasks
+    from app.services.ws_manager import manager
+
+    seen = []
+
+    async def capture(event_type, payload=None):
+        seen.append((event_type, payload or {}))
+
+    monkeypatch.setattr(manager, "broadcast", capture)
+
+    contact = type("C", (), {"id": _uuid.uuid4(), "organization_id": _uuid.uuid4()})()
+    nudge = type("M", (), {"id": _uuid.uuid4(), "twilio_sid": "SM1", "delivery_status": "SENT"})()
+
+    await tasks._announce(contact, nudge, "Still thinking about those shoes?")
+
+    assert [name for name, _ in seen] == ["outbound_message", "sync"]
+
+    payload = seen[0][1]
+    assert payload["contact_id"] == str(contact.id), "the thread it belongs to"
+    assert payload["content"] == "Still thinking about those shoes?"
+    assert payload["message_id"] == str(nudge.id), "so a later re-read does not double it"
+    assert payload["delivery_status"] == "SENT"
+
+
+async def test_a_broken_socket_never_costs_a_delivered_followup(monkeypatch):
+    """The message is already on the customer's phone by this point."""
+    import uuid as _uuid
+
+    from app import tasks
+    from app.services.ws_manager import manager
+
+    async def explode(*_a, **_k):
+        raise RuntimeError("no dashboards, no redis, nothing")
+
+    monkeypatch.setattr(manager, "broadcast", explode)
+
+    contact = type("C", (), {"id": _uuid.uuid4(), "organization_id": _uuid.uuid4()})()
+    nudge = type("M", (), {"id": _uuid.uuid4(), "twilio_sid": None, "delivery_status": "SENT"})()
+
+    await tasks._announce(contact, nudge, "nudge")  # must not raise
+
+
+async def test_the_worker_stores_the_nudge_and_announces_it(tmp_path, monkeypatch):
+    """The whole worker path, on its own database, as it runs in production.
+
+    Worth the setup because this is the path that failed silently. The worker
+    opens its own engine — it has no FastAPI lifespan and no request session —
+    so nothing above this test exercised it, and the nudge reaching WhatsApp
+    while the dashboard stayed empty looked like a delivery problem when it was
+    a reporting one.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app import tasks
+    from app.config import settings
+    from app.database import Base
+    from app.models import ChannelConfig, CRMContact, Message, Organization
+    from app.services import outbox, whatsapp
+    from app.services.ws_manager import manager
+
+    url = f"sqlite+aiosqlite:///{tmp_path.as_posix()}/worker.db"
+    monkeypatch.setattr(settings, "database_url", url)
+
+    engine = create_async_engine(url)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    token = tasks.new_token()
+    async with factory() as setup:
+        organization = Organization(name="Worker Co", sales_prompt="Sell things.")
+        setup.add(organization)
+        await setup.flush()
+        setup.add(
+            ChannelConfig(
+                organization_id=organization.id,
+                channel="whatsapp",
+                provider="twilio",
+                phone_number="+14155554444",
+            )
+        )
+        contact = CRMContact(
+            organization_id=organization.id,
+            phone_number="+971500001111",
+            pipeline_stage="LEAD",
+            sales_stage="NEW",
+            tags=[],
+            contact_metadata={"followup_token": token},
+        )
+        setup.add(contact)
+        await setup.commit()
+        contact_id, organization_id = str(contact.id), str(organization.id)
+
+    async def delivered(*_a, **_k):
+        return outbox.Delivery(outbox.SENT, "SM-nudge", "delivered")
+
+    monkeypatch.setattr(outbox, "deliver", delivered)
+
+    announced = []
+
+    async def capture(event_type, payload=None):
+        announced.append((event_type, payload or {}))
+
+    monkeypatch.setattr(manager, "broadcast", capture)
+
+    outcome = await tasks._run_followup(
+        contact_id, organization_id, token, attempt=1,
+        body_override="Still thinking about those shoes?", manual=True,
+    )
+
+    assert outcome == "sent"
+
+    async with factory() as check:
+        stored = (await check.execute(select(Message))).scalars().all()
+        assert len(stored) == 1, "the operator has nothing to catch up on"
+        assert stored[0].content == "Still thinking about those shoes?"
+        assert stored[0].delivery_status == outbox.SENT
+
+    assert [name for name, _ in announced] == ["outbound_message", "sync"], (
+        "stored but never announced — the dashboard stays empty, which is the bug"
+    )
+    assert announced[0][1]["message_id"] == str(stored[0].id)
+
+    await engine.dispose()

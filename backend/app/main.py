@@ -26,7 +26,7 @@ from app.config import settings
 from app.database import SessionLocal, engine
 from app.deps import resolve_token
 from app.schemas import ComponentHealth, HealthResponse
-from app.services import outbox
+from app.services import outbox, ws_manager
 from app.services.llm_service import probe_gemini, probe_groq
 from app.services.twilio_service import twilio_service
 from app.services.ws_manager import manager
@@ -86,14 +86,22 @@ async def lifespan(app: FastAPI):
     stop_drainer = asyncio.Event()
     drainer = asyncio.create_task(outbox.run_drainer(stop_drainer))
 
+    # Dashboard sockets live in this process, but work happens in others — a
+    # scheduled follow-up is sent by the Celery worker. Without this, that
+    # message reached the customer and never appeared on screen.
+    stop_bridge = asyncio.Event()
+    bridge = asyncio.create_task(ws_manager.run_event_bridge(stop_bridge))
+
     yield
 
     stop_drainer.set()
-    drainer.cancel()
-    try:
-        await drainer
-    except (asyncio.CancelledError, Exception):  # noqa: BLE001
-        pass
+    stop_bridge.set()
+    for task in (drainer, bridge):
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
     await engine.dispose()
     logger.info("shutdown complete")
 

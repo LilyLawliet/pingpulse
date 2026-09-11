@@ -137,6 +137,43 @@ def schedule_followups(contact, delays: tuple[float, ...] | None = None) -> str 
     return token
 
 
+async def _announce(contact, nudge, body: str) -> None:
+    """Put a sent follow-up on the operator's screen. Never raises.
+
+    Two events, matching what a live reply emits, because the dashboard uses
+    them for different things: `outbound_message` puts the bubble in the open
+    thread straight away, and `sync` refreshes the contact list and the stats
+    that now count it. A follow-up that reached the customer must not be lost
+    because a socket was busy, so failure here is logged and swallowed.
+    """
+    from app.services import ws_manager
+    from app.services.ws_manager import manager
+
+    try:
+        await manager.broadcast(
+            ws_manager.EVENT_OUTBOUND,
+            {
+                "contact_id": str(contact.id),
+                "organization_id": str(contact.organization_id),
+                "message_id": str(nudge.id),
+                "content": body,
+                "twilio_sid": nudge.twilio_sid,
+                "delivery_status": nudge.delivery_status,
+                "media_urls": [],
+                "followup": True,
+            },
+        )
+        await manager.broadcast(
+            ws_manager.EVENT_SYNC,
+            {
+                "contact_id": str(contact.id),
+                "organization_id": str(contact.organization_id),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - the message is already delivered
+        logger.warning("could not announce the follow-up for %s: %s", contact.id, exc)
+
+
 async def _run_followup(
     contact_id: str,
     organization_id: str,
@@ -220,6 +257,15 @@ async def _run_followup(
             contact.contact_metadata = metadata
 
             await session.commit()
+
+            # Tell the dashboards. This runs in the Celery worker, which holds
+            # no sockets of its own, so it reaches the operator's screen over
+            # the Redis bridge in ws_manager. Without it the nudge arrived on
+            # the customer's phone and the conversation on screen showed
+            # nothing — the one part of a follow-up an operator can actually
+            # check is that it went out.
+            await _announce(contact, nudge, body)
+
             if delivery.queued:
                 return "queued for retry"
             return "sent" if sent else f"send failed: {delivery.detail}"
