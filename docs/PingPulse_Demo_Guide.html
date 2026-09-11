@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html { color-scheme: light dark; }
+  body { margin: 0; font: 14px system-ui, sans-serif; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<title>PingPulse Demo Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Karla:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap">
+<style>
+  :root {
+    --paper:      #F6F8F6;
+    --surface:    #FFFFFF;
+    --surface-2:  #EEF3F0;
+    --ink:        #101E1B;
+    --muted:      #566862;
+    --line:       #DCE5E0;
+    --line-soft:  #E8EEEB;
+    --accent:     #0E6B57;
+    --accent-ink: #0A4F40;
+    --accent-soft:#DCEDE6;
+    --amber:      #8A5B0F;
+    --amber-soft: #F6EBD6;
+    --alert:      #9B2C24;
+
+    --display: "Fraunces", "Iowan Old Style", Georgia, serif;
+    --body: "Karla", "Helvetica Neue", Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+    --col: 66ch;
+    --r: 3px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0B1312;
+      --surface:    #121D1A;
+      --surface-2:  #17241F;
+      --ink:        #E7EFEA;
+      --muted:      #9AACA5;
+      --line:       #26352F;
+      --line-soft:  #1D2A26;
+      --accent:     #57C3A4;
+      --accent-ink: #8FDCC3;
+      --accent-soft:#16332B;
+      --amber:      #DDA94F;
+      --amber-soft: #2E2415;
+      --alert:      #E08078;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #0B1312;
+    --surface:    #121D1A;
+    --surface-2:  #17241F;
+    --ink:        #E7EFEA;
+    --muted:      #9AACA5;
+    --line:       #26352F;
+    --line-soft:  #1D2A26;
+    --accent:     #57C3A4;
+    --accent-ink: #8FDCC3;
+    --accent-soft:#16332B;
+    --amber:      #DDA94F;
+    --amber-soft: #2E2415;
+    --alert:      #E08078;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 780px;
+    margin: 0 auto;
+    padding-inline: 24px;
+    padding-block: 0 96px;
+  }
+
+  /* ---------------------------------------------------------- masthead */
+  .masthead {
+    border-bottom: 1px solid var(--line);
+    padding-block: 56px 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .wordmark {
+    font-family: var(--display);
+    font-optical-sizing: auto;
+    font-weight: 700;
+    font-size: clamp(38px, 7vw, 56px);
+    line-height: 1;
+    letter-spacing: -0.022em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .wordmark .pulse { color: var(--accent); }
+
+  .standfirst {
+    font-size: 19px;
+    color: var(--muted);
+    margin: 0;
+    max-width: 54ch;
+    text-wrap: pretty;
+  }
+
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 28px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    color: var(--muted);
+    padding-top: 4px;
+  }
+
+  .facts b {
+    color: var(--ink);
+    font-weight: 700;
+  }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: var(--amber-soft);
+    color: var(--amber);
+    border-radius: 100px;
+    padding: 4px 12px 4px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    width: fit-content;
+  }
+
+  .tag::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  /* ----------------------------------------------------------- typography */
+  section { padding-block: 44px 0; }
+
+  h2 {
+    font-family: var(--display);
+    font-optical-sizing: auto;
+    font-weight: 700;
+    font-size: 28px;
+    line-height: 1.18;
+    letter-spacing: -0.014em;
+    margin: 0 0 16px;
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-family: var(--body);
+    font-weight: 700;
+    font-size: 17px;
+    margin: 0 0 6px;
+    letter-spacing: -0.005em;
+  }
+
+  p { margin: 0 0 16px; max-width: var(--col); text-wrap: pretty; }
+  p:last-child { margin-bottom: 0; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+
+  a { color: var(--accent-ink); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: var(--surface-2);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--r);
+    padding: 1px 5px;
+  }
+
+  strong { font-weight: 700; }
+
+  /* ------------------------------------------------------------- steps */
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 2px;
+    background: var(--line-soft);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    overflow: hidden;
+  }
+
+  .steps > li {
+    background: var(--surface);
+    padding: 22px 24px;
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    gap: 4px 16px;
+  }
+
+  /* The number owns column one; everything else stacks in column two,
+     however many paragraphs a step happens to have. Without this a third
+     child auto-places under the number and wraps one word per line. */
+  .steps > li > :not(.n) { grid-column: 2; }
+
+  .steps .n {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    padding-top: 4px;
+  }
+
+  .steps p { margin: 0; max-width: 58ch; }
+  .steps p + p { margin-top: 10px; }
+
+  /* ------------------------------------------------------------- split */
+  .split {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    margin-top: 18px;
+  }
+
+  .option {
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    background: var(--surface);
+    padding: 20px 20px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .option .lead {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .option p { margin: 0; font-size: 15.5px; }
+
+  .note {
+    border-left: 2px solid var(--accent);
+    padding: 2px 0 2px 18px;
+    margin-top: 20px;
+    color: var(--muted);
+    max-width: var(--col);
+  }
+
+  .note p { margin: 0; }
+
+  /* ------------------------------------------------------------ table */
+  .scroll { overflow-x: auto; margin-top: 18px; border: 1px solid var(--line); border-radius: var(--r); }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 440px;
+    background: var(--surface);
+    font-size: 15px;
+  }
+
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line-soft); }
+  tbody tr:last-child td { border-bottom: 0; }
+
+  th {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface-2);
+    border-bottom-color: var(--line);
+  }
+
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.low { color: var(--amber); }
+
+  /* ------------------------------------------------------------- chat */
+  .try {
+    margin-top: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: var(--col);
+  }
+
+  .bubble {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px 14px 14px 4px;
+    padding: 11px 16px;
+    font-size: 15.5px;
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  .bubble + .why {
+    margin: -4px 0 6px 10px;
+    font-size: 14px;
+    color: var(--muted);
+    max-width: 52ch;
+  }
+
+  /* ------------------------------------------------------------ ticks */
+  .ticks { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 1px; background: var(--line-soft); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+  .ticks li { background: var(--surface); padding: 15px 20px; display: grid; grid-template-columns: 92px 1fr; gap: 4px 16px; align-items: baseline; }
+  .ticks .state { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+  .ticks .sent   { color: var(--accent); }
+  .ticks .queued { color: var(--amber); }
+  .ticks .failed { color: var(--alert); }
+  .ticks p { margin: 0; font-size: 15.5px; max-width: 52ch; }
+
+  /* ------------------------------------------------------- improvements */
+  .gains { list-style: none; margin: 18px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); gap: 24px 32px; }
+  .gains li { display: flex; flex-direction: column; gap: 5px; }
+  .gains p { margin: 0; font-size: 15.5px; color: var(--muted); max-width: 42ch; }
+
+  /* --------------------------------------------------------- package */
+  .package {
+    margin-top: 20px;
+    border: 1px solid var(--accent);
+    border-radius: var(--r);
+    background: var(--accent-soft);
+    padding: 26px 26px 28px;
+  }
+
+  .package h2 { margin-bottom: 10px; }
+  .package p { color: var(--ink); }
+
+  .package ul { margin: 16px 0 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+  .package li { display: grid; grid-template-columns: 16px 1fr; gap: 12px; font-size: 15.5px; align-items: start; }
+  .package li::before { content: "—"; color: var(--accent); font-family: var(--mono); line-height: 1.6; }
+
+  /* ------------------------------------------------------------ close */
+  .close {
+    margin-top: 52px;
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 15.5px;
+  }
+
+  @media (max-width: 520px) {
+    body { font-size: 16.5px; }
+    .steps > li { grid-template-columns: 22px 1fr; padding: 18px 18px; gap: 4px 12px; }
+    .ticks li { grid-template-columns: 1fr; gap: 2px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <span class="tag">Demo build</span>
+    <h1 class="wordmark">Ping<span class="pulse">Pulse</span></h1>
+    <p class="standfirst">A WhatsApp sales agent that answers your customers in your shop's voice, around the clock, and keeps every conversation in one place.</p>
+    <div class="facts">
+      <span>Workspace <b>ready</b></span>
+      <span>Catalogue <b>10 items loaded</b></span>
+      <span>Access until <b>6 Sep 2027</b></span>
+    </div>
+  </header>
+
+  <section>
+    <p class="eyebrow">Start here</p>
+    <h2>Three steps, about five minutes</h2>
+    <p>Everything is set up and waiting. The only thing left is telling it which WhatsApp number to answer on — that choice is yours, and you can change it whenever you like.</p>
+
+    <ol class="steps">
+      <li>
+        <span class="n">01</span>
+        <h3>Open your dashboard</h3>
+        <p>Go to <a href="https://pingpulse.duckdns.org/app/">pingpulse.duckdns.org/app</a> in any browser and paste the access token we sent you alongside this page. That works on a Mac, a PC, a tablet — anything. On Windows there is also a desktop app, which keeps itself updated and never asks you to reinstall.</p>
+      </li>
+      <li>
+        <span class="n">02</span>
+        <h3>Connect one WhatsApp channel</h3>
+        <p>In Settings, pick the way you want your customers to reach you.</p>
+      </li>
+      <li>
+        <span class="n">03</span>
+        <h3>Message it from a different phone</h3>
+        <p>This part matters: send the first message from <strong>another number</strong>, not the phone you connected. A phone cannot hold a conversation with itself, so borrow a colleague's handset or use a second line.</p>
+        <p>Watch the reply arrive on the phone and in your dashboard at the same time.</p>
+      </li>
+    </ol>
+
+    <div class="split">
+      <div class="option">
+        <span class="lead">Option A · fastest</span>
+        <h3>WhatsApp Web</h3>
+        <p>Scan a QR code with the phone you already sell from. Your existing number, your existing chats, nothing to sign up for.</p>
+      </div>
+      <div class="option">
+        <span class="lead">Option B</span>
+        <h3>Twilio</h3>
+        <p>Use your own Twilio account and business number. Better if you want the agent on a separate line from your personal one.</p>
+      </div>
+    </div>
+
+    <div class="note">
+      <p>Connecting one disconnects the other, on purpose. Replies then always go out on one known number, so there is never a question of which number a customer is talking to.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">What it already knows</p>
+    <h2>A demo shop, stocked and ready</h2>
+    <p>We loaded a sample catalogue and the policies around it, so the agent has something real to sell from the moment you connect. Prices, stock counts, delivery, payment and returns are all in there.</p>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th scope="col">Item</th><th scope="col">Price</th><th scope="col">Stock</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Aurora SoundPods Pro</td><td class="num">$89</td><td class="num">42</td></tr>
+          <tr><td>Aurora SoundPods Lite</td><td class="num">$45</td><td class="num">110</td></tr>
+          <tr><td>Nomad 20000mAh Power Bank</td><td class="num">$35</td><td class="num">76</td></tr>
+          <tr><td>Halo Smart Desk Lamp</td><td class="num">$59</td><td class="num">18</td></tr>
+          <tr><td>Drift Ceramic Coffee Set</td><td class="num">$42</td><td class="num">33</td></tr>
+          <tr><td>Aurora Trail Backpack 28L</td><td class="num">$69</td><td class="num low">6 · low</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <p>The agent is instructed never to invent a price, a size or a stock level. Ask it for something that isn't on this list and it will tell you it doesn't have it rather than making something up — that restraint is deliberate, and worth testing.</p>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">What to try</p>
+    <h2>Things worth sending it</h2>
+
+    <div class="try">
+      <div class="bubble">do you have wireless earbuds?</div>
+      <p class="why">It should offer both SoundPods and quote the real difference between them.</p>
+
+      <div class="bubble">what's the difference between the Pro and the Lite?</div>
+      <p class="why">Battery life, water resistance, warranty — from the catalogue, not guesswork.</p>
+
+      <div class="bubble">how long does delivery take, and can I pay cash?</div>
+      <p class="why">Two questions in one message, which is how people actually write.</p>
+
+      <div class="bubble">do you sell washing machines?</div>
+      <p class="why">The interesting one. It should say no rather than invent a product.</p>
+    </div>
+
+    <p style="margin-top:20px">Then stop replying for a moment and schedule a follow-up on that conversation from the dashboard — pick two minutes, and watch the nudge arrive on the phone. If the customer writes back first, the follow-up cancels itself.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Reading the dashboard</p>
+    <h2>Every message carries its own status</h2>
+    <p>You never have to wonder whether something actually reached the customer. Each reply the agent sends shows one of three states, live.</p>
+
+    <ul class="ticks">
+      <li><span class="state sent">Sent</span><p>It reached WhatsApp. This is the normal case.</p></li>
+      <li><span class="state queued">Queued</span><p>WhatsApp was briefly unreachable, so the message is held and retried automatically. It is not lost, and nothing is presented as delivered when it isn't.</p></li>
+      <li><span class="state failed">Failed</span><p>It could not be delivered and will not be retried — for example a number that WhatsApp refuses. Rare, and always visible rather than silent.</p></li>
+    </ul>
+  </section>
+
+  <section>
+    <p class="eyebrow">Since the last time you saw it</p>
+    <h2>What we improved</h2>
+
+    <ul class="gains">
+      <li><h3>Nothing gets lost</h3><p>If WhatsApp drops for a few seconds, replies queue and go out by themselves instead of disappearing.</p></li>
+      <li><h3>Messages reach the right chat</h3><p>We fixed an addressing fault where a reply looked sent on our side but never arrived on the customer's phone.</p></li>
+      <li><h3>The dashboard keeps up</h3><p>Replies, follow-ups and delivery states all appear the moment they happen, without refreshing.</p></li>
+      <li><h3>Scheduled follow-ups</h3><p>Nudge a quiet conversation in your own words, at a time you choose — and it cancels if they write back.</p></li>
+      <li><h3>Works on a Mac</h3><p>The full dashboard now runs in a browser, identical to the desktop app rather than a cut-down version.</p></li>
+      <li><h3>Updates arrive on their own</h3><p>The desktop app updates itself on launch. No reinstalling, no downloading anything twice.</p></li>
+      <li><h3>One number, no ambiguity</h3><p>Connecting a WhatsApp method disconnects the other, so replies always go out on the number you chose.</p></li>
+      <li><h3>Your workspace is yours</h3><p>Your conversations and catalogue are separate from every other account on the system, enforced at the server.</p></li>
+    </ul>
+  </section>
+
+  <section>
+    <p class="eyebrow">We want to hear it</p>
+    <h2>Found something broken?</h2>
+    <p>Please tell us — genuinely. This is a demo precisely so you can push at it before it matters, and an odd reply or a message that lands strangely is useful to us.</p>
+    <p>Send us the conversation, or just the time it happened and roughly what you asked. We read the real exchange, fix what went wrong, and use that context to make the agent better at your kind of customer.</p>
+  </section>
+
+  <div class="package">
+    <p class="eyebrow">Beyond the demo</p>
+    <h2>What a full setup includes</h2>
+    <p>What you have here is deliberately a sample shop, so you can judge the conversation. A full engagement is built around your actual business:</p>
+    <ul>
+      <li>Your complete business profile, set up with you</li>
+      <li>Prompting tuned to how you sell, not a template</li>
+      <li>Your real product catalogue, prices and stock</li>
+      <li>Your tone of voice, matched properly</li>
+      <li>Full WhatsApp access across your conversations — not only the number that happened to message us</li>
+      <li>A personalised website for your business</li>
+      <li>Social media presence, plus marketing AI that works your channels</li>
+    </ul>
+    <p style="margin-top:18px">All of it bundled together, so the agent, the site and the marketing are telling your customers the same story.</p>
+  </div>
+
+  <p class="close">Connect a channel, message it from another phone, and see how it handles your customers. Anything at all feels off — tell us, and we'll fix it.</p>
+
+</div>
+
+</body>
+</html>
