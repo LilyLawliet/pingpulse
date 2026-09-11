@@ -58,7 +58,7 @@ from app.models import (  # noqa: E402
     User,
 )
 from app.security import generate_token  # noqa: E402
-from app.services import retrieval  # noqa: E402
+from app.services import documents, retrieval  # noqa: E402
 
 DEFAULT_PROMPT = """You are the sales assistant for {name}.
 
@@ -191,25 +191,42 @@ async def load_knowledge(session, organization: Organization, folder: str) -> in
 
     files = sorted(
         f for f in path.rglob("*")
-        if f.is_file() and f.suffix.lower() in {".txt", ".md"}
+        if f.is_file() and f.suffix.lower() in set(documents.SUPPORTED)
     )
     if not files:
-        note(f"no .txt or .md files found in {folder}")
+        note(f"no {', '.join(documents.SUPPORTED)} files found in {folder}")
         return 0
 
+    indexed = 0
     for document in files:
-        stored = await retrieval.index_document(
-            session,
-            organization_id=organization.id,
-            title=document.stem.replace("-", " ").replace("_", " ").title(),
-            content=document.read_text(encoding="utf-8", errors="replace"),
-            source=str(document.name),
-        )
-        stored.doc_type = "policy"
-        ok(f"indexed {document.name}")
+        # A client's catalogue arrives as whatever they already have. Reading
+        # it here is the difference between onboarding them this afternoon and
+        # asking them to retype a price list.
+        try:
+            extracted = documents.extract(document.name, document.read_bytes())
+        except (documents.UnsupportedDocument, documents.UnreadableDocument) as exc:
+            note(f"skipped {document.name}: {exc}")
+            continue
+
+        passages = documents.chunk(extracted.text)
+        for index, passage in enumerate(passages):
+            stored = await retrieval.index_document(
+                session,
+                organization_id=organization.id,
+                title=documents.title_for(document.name, index, len(passages)),
+                content=passage,
+                source=str(document.name),
+            )
+            stored.doc_type = "policy"
+
+        indexed += 1
+        detail = f"{len(passages)} passage(s)"
+        if extracted.tables:
+            detail += f", {extracted.tables} table(s)"
+        ok(f"indexed {document.name} — {detail}")
 
     await session.flush()
-    return len(files)
+    return indexed
 
 
 async def issue_token(session, organization: Organization, args) -> tuple[str, datetime]:
