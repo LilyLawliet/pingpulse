@@ -7,6 +7,7 @@ active organization. Rows are never addressed by primary key alone.
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     CHAR,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -260,6 +262,12 @@ class Organization(Base):
     # one of these is injected into the prompt rather than branched on in code.
     agent_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
+    # Who to interrupt, and about what. {"events": [...], "email": "..."}.
+    # Separate from agent_config because that shapes what the agent says to
+    # customers and this shapes what the shop hears about - two settings that
+    # get edited by different people for different reasons.
+    notify_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
     # IANA name. Needed before the agent can offer an appointment time or
     # honour business hours - "9am" is meaningless without it, and the server
     # runs in UTC.
@@ -477,6 +485,15 @@ class CRMContact(Base):
     service_requested: Mapped[str | None] = mapped_column(String(255))
     project_address: Mapped[str | None] = mapped_column(Text)
     budget: Mapped[str | None] = mapped_column(String(120))
+
+    # What this job is actually worth, once somebody knows. Deliberately not
+    # `budget`, which is free text holding whatever the customer said ("under
+    # 5k-ish"), and deliberately never written by the model: a revenue figure
+    # on a dashboard is acted on, and an inferred one is a guess wearing a
+    # number's clothes. A person types this in.
+    #
+    # In the organization's own currency. A shop trades in one.
+    deal_value: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     timeline: Mapped[str | None] = mapped_column(String(120))
     source: Mapped[str | None] = mapped_column(String(80))
     photo_urls: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
@@ -774,3 +791,103 @@ STAGE_AGENT = "agent"
 STAGE_OPERATOR = "operator"
 STAGE_SYSTEM = "system"
 STAGE_SOURCES = (STAGE_AGENT, STAGE_OPERATOR, STAGE_SYSTEM)
+
+
+# ============================ Notifications ===============================
+class PushSubscription(Base):
+    """One browser that has agreed to be interrupted.
+
+    A push subscription is issued by the browser's own push service and is
+    useless to anyone else, but it is still a durable handle on a person's
+    device, so it is scoped to an organization and deleted the moment that
+    service says it has expired.
+
+    `endpoint` is unique rather than (organization, endpoint): the same browser
+    resubscribing must replace its old row, not accumulate them, or one
+    escalation arrives four times.
+    """
+
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (
+        UniqueConstraint("endpoint", name="uq_push_endpoint"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    p256dh: Mapped[str] = mapped_column(String(255), nullable=False)
+    auth: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Only so a person can tell two of their own devices apart when revoking.
+    label: Mapped[str | None] = mapped_column(String(120))
+
+    # Consecutive failures. A push service that says "gone" deletes the row
+    # outright; this catches the slower kind of death, where a device stops
+    # accepting anything without ever being declared dead.
+    failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _now_column()
+
+
+class Notification(Base):
+    """Something worth interrupting somebody over, and whether it got through.
+
+    Written before it is sent rather than after. The row is what the delivery
+    task reads, so a broker that is down means a notification that goes out
+    late rather than one that is lost - and the same row is what stops the
+    second, third and fourth copy of the same alert from being sent, because
+    "have we already told them about this contact" is a question with an
+    answer in the database rather than in some worker's memory.
+    """
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        Index("ix_notifications_org_event_at", "organization_id", "event", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("crm_contacts.id", ondelete="CASCADE"), index=True
+    )
+
+    # One of NOTIFY_EVENTS.
+    event: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # What happened on each channel: {"push": "2 of 2", "email": "skipped"}.
+    # Kept because "I never got told" is the complaint, and without this there
+    # is no way to tell a failed send from a notification nobody looked at.
+    delivery: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _now_column()
+
+
+# What a shop can be told about. The doc asked for hot leads, appointment
+# requests, angry customers and unhandled queries; the rest are the
+# operational ones a client cannot otherwise find out about at all.
+#
+# Defaults lean quiet. A notification channel that cries wolf is turned off
+# within a week and then the escalation that mattered is missed too, so only
+# the events a person would actually want their evening interrupted for are
+# on to begin with.
+NOTIFY_EVENTS: tuple[tuple[str, str, bool], ...] = (
+    # key, what it means, on by default
+    ("escalation", "Somebody asked for a person, or complained", True),
+    ("booking", "Somebody wants to book a time", True),
+    ("delivery_failure", "A message could not be delivered", True),
+    ("opt_out", "Somebody asked to stop being messaged", True),
+    ("new_lead", "A new person messaged for the first time", False),
+    ("unanswered", "The agent could not answer something", False),
+)
+NOTIFY_KEYS = tuple(key for key, _, _ in NOTIFY_EVENTS)

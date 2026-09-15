@@ -310,12 +310,14 @@ async def funnel(db, organization_id, start: datetime | None, until: datetime | 
     current = Counter(stage for _, stage in rows)
     won_keys = [stage.key for stage in stages if stage.outcome == "won"]
     converted = sum(current.get(key, 0) for key in won_keys)
+    money = await revenue(db, organization_id, start, until, won_keys)
 
     return {
         "stages": rungs,
         "entered": entered,
         "converted": converted,
         "conversion_rate": round(converted / entered, 4) if entered else None,
+        **money,
         "exits": [
             {
                 "key": stage.key,
@@ -325,6 +327,56 @@ async def funnel(db, organization_id, start: datetime | None, until: datetime | 
             }
             for stage in exits
         ],
+    }
+
+
+async def revenue(
+    db, organization_id, start: datetime | None, until: datetime | None, won_keys: list[str]
+) -> dict:
+    """What the won deals in this cohort are worth, and what is still open.
+
+    Only leads somebody has actually put a figure on are counted, and the
+    count of those is returned alongside the total. A shop that has priced
+    three of its forty deals should see "three of forty", not a revenue
+    number that looks like the whole picture - an under-reported total that
+    presents itself as complete is worse than no total at all.
+
+    `open_value` deliberately excludes the exits. Money in a lost deal is not
+    pipeline, it is a story about what nearly happened.
+    """
+    base = _window(
+        select(CRMContact.pipeline_stage, CRMContact.deal_value).where(
+            CRMContact.organization_id == organization_id,
+            CRMContact.deal_value.is_not(None),
+        ),
+        CRMContact.created_at,
+        start,
+        until,
+    )
+    rows = (await db.execute(base)).all()
+    if not rows:
+        return {"revenue": None, "open_value": None, "priced": 0, "average_deal": None}
+
+    stages = await pipelines.stages_for(db, organization_id)
+    exit_keys = {stage.key for stage in stages if stage.outcome in EXIT_OUTCOMES}
+    won = {key for key in won_keys}
+
+    earned = 0.0
+    open_value = 0.0
+    won_count = 0
+    for stage, value in rows:
+        amount = float(value or 0)
+        if stage in won:
+            earned += amount
+            won_count += 1
+        elif stage not in exit_keys:
+            open_value += amount
+
+    return {
+        "revenue": round(earned, 2),
+        "open_value": round(open_value, 2),
+        "priced": len(rows),
+        "average_deal": round(earned / won_count, 2) if won_count else None,
     }
 
 

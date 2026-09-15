@@ -44,7 +44,7 @@ from app.services import (
     vision,
     ws_manager,
 )
-from app.services import analytics, oplog, outbox, pipelines, whatsapp
+from app.services import analytics, notifications, oplog, outbox, pipelines, whatsapp
 from app.services.twilio_service import (
     Sender,
     signature_url,
@@ -422,6 +422,18 @@ async def process_inbound_message(
             ws_manager.EVENT_SYNC,
             {"contact_id": str(contact.id), "organization_id": str(organization.id)},
         )
+        # Worth telling somebody about even though nothing is broken: a shop
+        # usually wants to know which customer has just gone quiet on purpose.
+        await notifications.raise_and_send(
+            db,
+            organization,
+            "opt_out",
+            "Someone opted out",
+            f"{contact.name or phone_number} asked to stop being messaged. "
+            "Nothing further will be sent to them.",
+            contact_id=contact.id,
+        )
+        await db.commit()
         logger.info("inbound from %s was an opt-out; nothing will be sent", phone_number)
         return {"status": "opted_out", "contact_id": str(contact.id)}
 
@@ -450,6 +462,20 @@ async def process_inbound_message(
             ws_manager.EVENT_SYNC,
             {"contact_id": str(contact.id), "organization_id": str(organization.id)},
         )
+        # The reason this whole subsystem exists. The agent has just switched
+        # itself off for this conversation, and until now the only way to find
+        # that out was to have the dashboard open at the time.
+        await notifications.raise_and_send(
+            db,
+            organization,
+            "escalation",
+            "Someone needs a person",
+            f"{contact.name or phone_number} said: {body.strip()[:200]}"
+            "\n\nThe agent has stopped replying to them and is waiting for you.",
+            contact_id=contact.id,
+        )
+        await db.commit()
+
         logger.info("handed %s to a person after %r", phone_number, escalation)
         return {
             "status": "escalated",
@@ -658,6 +684,15 @@ async def process_inbound_message(
         logger.info("reply to %s parked for retry: %s", phone_number, delivery.detail)
     elif not sent:
         logger.warning("outbound dispatch failed: %s", delivery.detail)
+        await notifications.raise_and_send(
+            db,
+            organization,
+            "delivery_failure",
+            "A message could not be delivered",
+            f"The reply to {contact.name or phone_number} did not go out: "
+            f"{(delivery.detail or 'no reason given')[:200]}",
+            contact_id=contact.id,
+        )
         await manager.broadcast(
             ws_manager.EVENT_ERROR,
             {"contact_id": str(contact.id), "stage": "dispatch", "detail": delivery.detail},
@@ -780,6 +815,34 @@ async def process_inbound_message(
             contact.contact_metadata = metadata
     except Exception as exc:  # noqa: BLE001 - a broker outage must not cost a reply
         logger.warning("follow-up scheduling unavailable: %s", exc)
+
+    # Raised after the reply has been composed and sent, never before it. The
+    # customer's answer is the thing on the critical path; being told about it
+    # is not.
+    who = contact.name or phone_number
+    if created:
+        await notifications.raise_and_send(
+            db, organization, "new_lead", "A new lead",
+            f"{who} messaged for the first time: {body.strip()[:200]}",
+            contact_id=contact.id,
+        )
+    if analysis.get("intent") == "book_call":
+        await notifications.raise_and_send(
+            db, organization, "booking", "Someone wants to book",
+            f"{who} asked to book a time. The agent has replied, but a booking "
+            "usually wants a person to confirm it.",
+            contact_id=contact.id,
+        )
+    if generation.provider == "none":
+        # Both providers failed, so what went out was the holding reply rather
+        # than an answer. The customer has been left waiting without being
+        # told they are waiting.
+        await notifications.raise_and_send(
+            db, organization, "unanswered", "The agent could not answer",
+            f"{who} asked: {body.strip()[:200]}"
+            "\n\nBoth AI providers failed, so they got a holding reply.",
+            contact_id=contact.id,
+        )
 
     await db.commit()
 

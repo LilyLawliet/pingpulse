@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from datetime import datetime
 from typing import Annotated, Literal
 
@@ -164,6 +165,10 @@ class CRMContactUpdate(BaseModel):
     service_requested: str | None = Field(default=None, max_length=255)
     project_address: str | None = None
     budget: str | None = Field(default=None, max_length=120)
+    # What the job is worth, in the organization's own currency. Typed in by a
+    # person; the agent never writes this. Capped well above any plausible job
+    # so a mis-key cannot make one lead outweigh a whole year on the chart.
+    deal_value: Decimal | None = Field(default=None, ge=0, le=10_000_000_000)
     timeline: str | None = Field(default=None, max_length=120)
     source: str | None = Field(default=None, max_length=80)
     custom_fields: dict | None = None
@@ -210,6 +215,7 @@ class CRMContactOut(BaseModel):
     service_requested: str | None = None
     project_address: str | None = None
     budget: str | None = None
+    deal_value: Decimal | None = None
     timeline: str | None = None
     source: str | None = None
     photo_urls: list[str] = Field(default_factory=list)

@@ -17,6 +17,12 @@ twilio==9.4.1
 # LLM providers are called over their REST APIs with httpx (no vendor SDKs):
 #   Groq   -> https://api.groq.com/openai/v1/chat/completions
 #   Gemini -> https://generativelanguage.googleapis.com/v1beta
+# Browser push and email alerts, so the agent can reach somebody with the
+# dashboard closed. pywebpush brings py-vapid and http-ece with it; both halves
+# of Web Push are fiddly enough that hand-rolling the crypto would be the wrong
+# kind of clever.
+pywebpush==2.0.0
+aiosmtplib==3.0.2
 celery==5.4.0
 redis==5.2.1
 websockets==14.1

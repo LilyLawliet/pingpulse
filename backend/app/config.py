@@ -107,6 +107,37 @@ class Settings(BaseSettings):
     # Follow-ups (Celery + Redis)
     redis_url: str = "redis://redis:6379/0"
 
+    # ------------------------------------------------------------ alerts
+    # Browser push. VAPID keys are self-signed and self-hosted - there is no
+    # account to open and no third party to pay, which is why this is the one
+    # alerting channel that works without the client arranging anything.
+    #
+    # Empty keys mean push is simply off: subscribing returns "not configured"
+    # rather than failing, so a deployment without keys is a deployment with
+    # one fewer channel rather than a broken settings page.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    # Where a push service should complain to. Must be a mailto: or https URL.
+    vapid_subject: str = "mailto:support@pingpulse.app"
+
+    # Email, for the same alerts when a browser is closed. Also optional, and
+    # deliberately plain SMTP rather than a vendor SDK: any mailbox works.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+
+    # Where a notification should send somebody when they tap it.
+    dashboard_url: str = "https://pingpulse.duckdns.org/app/"
+
+    # Two alerts about the same contact and the same kind of event inside this
+    # window collapse into one. A customer sending four angry messages in a row
+    # is one situation, not four, and four buzzes is how a person learns to
+    # ignore the buzz.
+    notify_cooloff_minutes: int = 30
+
     # How often the outbound retry queue is walked. Short enough that a reply
     # parked during a container restart goes out while the customer is still
     # looking at the chat.

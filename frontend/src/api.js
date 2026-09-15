@@ -253,6 +253,23 @@ export const api = {
   // One call rather than one per panel. The whole screen opens at once, and
   // a funnel counted at one instant beside traffic counted a moment later
   // disagree in ways that always read as a bug in the numbers.
+  // ------------------------------------------------------------- alerts
+  notificationSettings: () => request('/notifications/settings'),
+  saveNotificationSettings: (body) =>
+    request('/notifications/settings', { method: 'PUT', body: JSON.stringify(body) }),
+  subscribePush: (subscription) =>
+    request('/notifications/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(subscription),
+    }),
+  unsubscribePush: (endpoint) =>
+    request('/notifications/unsubscribe', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint }),
+    }),
+  testNotification: () => request('/notifications/test', { method: 'POST' }),
+  recentNotifications: (days = 7) => request(`/notifications?days=${days}`),
+
   analytics: (window = '30d') =>
     request(`/analytics?window=${encodeURIComponent(window)}`),
 }

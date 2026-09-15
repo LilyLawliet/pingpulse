@@ -133,6 +133,10 @@ export default function Analytics({ onClose }) {
                 wonLabel={wonLabel}
               />
 
+              {funnel?.revenue != null && (
+                <Revenue funnel={funnel} entered={funnel.entered} />
+              )}
+
               <Funnel funnel={funnel} />
 
               <Traffic traffic={traffic} />
@@ -176,6 +180,39 @@ function Headline({ entered, converted, rate, median, wonLabel }) {
         hint="half are faster than this"
       />
     </div>
+  )
+}
+
+/**
+ * Money, and how much of it is actually known.
+ *
+ * Only leads somebody has put a figure on are counted, so the count of those
+ * is shown next to the total rather than buried. A shop that has priced three
+ * of its forty deals should read "3 of 40 have a value", not a revenue number
+ * that presents itself as the whole picture — an under-reported total that
+ * looks complete is worse than no total at all.
+ *
+ * The panel is hidden entirely until somebody prices their first lead. An
+ * empty revenue tile reading a confident zero is the exact thing this is
+ * trying to avoid.
+ */
+function Revenue({ funnel, entered }) {
+  const money = (value) =>
+    value == null ? '—' : Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })
+
+  return (
+    <Section
+      title="Money"
+      hint={`${funnel.priced} of ${entered} ${
+        entered === 1 ? 'lead has' : 'leads have'
+      } a value on them. Nothing else is counted here.`}
+    >
+      <div className="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-edge bg-edge">
+        <Stat label="Won" value={money(funnel.revenue)} />
+        <Stat label="Still open" value={money(funnel.open_value)} hint="not lost yet" />
+        <Stat label="Average won deal" value={money(funnel.average_deal)} />
+      </div>
+    </Section>
   )
 }
 

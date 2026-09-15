@@ -12,6 +12,44 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.3.4',
+    date: '16 September 2026',
+    items: [
+      {
+        title: 'It can reach you with this closed',
+        body:
+          'Your agent has always kept working whether or not this page is open — that is ' +
+          'the point of it. The catch was that the moments it cannot handle were exactly ' +
+          'the moments nobody heard about: somebody demanding a manager at nine at night, ' +
+          'a reply that never went out. Turn on alerts in your business settings and those ' +
+          'reach your browser and your email instead of waiting for you to look.',
+      },
+      {
+        title: 'It will not pester you',
+        body:
+          'The same thing happening twice in half an hour only tells you once. Four buzzes ' +
+          'about one angry customer is how people learn to ignore the buzz, and the next one ' +
+          'they ignore is the one that mattered. Only the urgent ones are on to begin with — ' +
+          'the rest you switch on yourself.',
+      },
+      {
+        title: 'Your board, as a board',
+        body:
+          'A new button in the top bar opens your pipeline with every stage side by side. ' +
+          'Drag a lead from one column to the next, or use the small menu on the card if you ' +
+          'are on a phone. The narrow list down the right is still there and unchanged.',
+      },
+      {
+        title: 'What a job is worth',
+        body:
+          'Leads now have a value you can fill in, and the analytics screen adds what you ' +
+          'have won, what is still open, and your average deal. Only what you type counts — ' +
+          'the agent never guesses a number here, because a figure on a dashboard gets acted ' +
+          'on and a guessed one is still a guess.',
+      },
+    ],
+  },
+  {
     version: '1.3.3',
     date: '16 September 2026',
     items: [

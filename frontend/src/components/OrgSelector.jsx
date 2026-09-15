@@ -7,6 +7,7 @@ import LearningSettings from './LearningSettings.jsx'
 import AgentSettings from './AgentSettings.jsx'
 import PipelineEditor from './PipelineEditor.jsx'
 import ErrorLog from './ErrorLog.jsx'
+import NotificationSettings from './NotificationSettings.jsx'
 
 const EMPTY = {
   name: '',
@@ -240,6 +241,11 @@ export default function OrgSelector({ organizations, selectedId, onSelect, onSav
               {editingId && (
                 <div className="border-t border-edge pt-4">
                   <WhatsAppSettings />
+                </div>
+              )}
+              {editingId && (
+                <div className="border-t border-edge pt-4">
+                  <NotificationSettings />
                 </div>
               )}
               {editingId && (

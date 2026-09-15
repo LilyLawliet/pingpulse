@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChartNoAxesColumn, FlaskConical, Inbox, LogOut, Sparkles } from 'lucide-react'
+import { ChartNoAxesColumn, Columns3, FlaskConical, Inbox, LogOut, Sparkles } from 'lucide-react'
 import useMonitorSocket from './useMonitorSocket.js'
 import { api, auth } from './api.js'
 import { DEFAULT_STAGES } from './format.js'
@@ -19,6 +19,7 @@ import ConnectionStatus from './components/ConnectionStatus.jsx'
 import AgentSandbox from './components/AgentSandbox.jsx'
 import InboxFilters from './components/InboxFilters.jsx'
 import Analytics from './components/Analytics.jsx'
+import KanbanBoard from './components/KanbanBoard.jsx'
 
 /**
  * Pane switcher, phones only.
@@ -106,6 +107,7 @@ function Dashboard({ onSignedOut }) {
   const [showUpgrades, setShowUpgrades] = useState(false)
   const [showProspects, setShowProspects] = useState(false)
   const [showAnalytics, setShowAnalytics] = useState(false)
+  const [showBoard, setShowBoard] = useState(false)
   // Only shown once there is something to act on — a button offering an empty
   // list is a button that teaches people to ignore it.
   const [waiting, setWaiting] = useState(0)
@@ -394,6 +396,14 @@ function Dashboard({ onSignedOut }) {
           <ConnectionStatus />
 
           <button
+            onClick={() => setShowBoard(true)}
+            title="Your board"
+            className="rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
+          >
+            <Columns3 size={13} />
+          </button>
+
+          <button
             onClick={() => setShowAnalytics(true)}
             title="How it is going"
             className="rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
@@ -496,6 +506,19 @@ function Dashboard({ onSignedOut }) {
       {showUpgrades && <WhatsNew onClose={() => setShowUpgrades(false)} />}
       {showSandbox && <AgentSandbox onClose={() => setShowSandbox(false)} />}
       {showAnalytics && <Analytics onClose={() => setShowAnalytics(false)} />}
+      {showBoard && (
+        <KanbanBoard
+          contacts={contacts}
+          stages={stages}
+          onClose={() => setShowBoard(false)}
+          onChanged={loadContacts}
+          onOpen={(id) => {
+            setSelectedContact(id)
+            setShowBoard(false)
+            setMobilePane('thread')
+          }}
+        />
+      )}
       {showDrawer && activeContact && (
         <LeadProfileDrawer
           contact={activeContact}

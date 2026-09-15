@@ -363,6 +363,69 @@ def schedule_customer_followup(
         raise self.retry(exc=exc, countdown=300)
 
 
+async def _run_notification(notification_id: str) -> str:
+    """Deliver one recorded notification, inside the worker's own loop."""
+    from app.models import Notification, Organization
+    from app.services import notifications
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    try:
+        async with factory() as session:
+            row = await session.get(Notification, uuid.UUID(notification_id))
+            if row is None:
+                return "gone"
+            # Already delivered. A retry after a partial failure would send a
+            # second copy of something the person has already been buzzed for.
+            if row.sent_at is not None:
+                return "already sent"
+
+            organization = await session.get(Organization, row.organization_id)
+            if organization is None:
+                return "organization gone"
+
+            result = await notifications.deliver(session, organization, row)
+            await session.commit()
+            return f"push={result['push']} email={result['email']}"
+    finally:
+        await engine.dispose()
+
+
+@celery_app.task(name="pingpulse.deliver_notification", bind=True, max_retries=2)
+def deliver_notification(self, notification_id: str) -> str:
+    """Send one alert to push and email.
+
+    Out of band on purpose. A push round-trip to a sleeping phone can take the
+    full timeout, and the alternative is a customer waiting on their reply
+    while somebody's handset is woken up.
+    """
+    try:
+        outcome = asyncio.run(_run_notification(notification_id))
+        logger.info("notification %s: %s", notification_id, outcome)
+        return outcome
+    except Exception as exc:  # noqa: BLE001
+        logger.error("notification %s failed: %s", notification_id, exc)
+        raise self.retry(exc=exc, countdown=120)
+
+
+def queue_notification(notification_id) -> bool:
+    """Hand a recorded notification to the worker.
+
+    Returns whether it was queued. A broker that is down leaves the row
+    written and undelivered rather than raising into the reply path - the
+    same trade the follow-up scheduler makes, for the same reason.
+    """
+    try:
+        deliver_notification.delay(str(notification_id))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not queue notification %s: %s", notification_id, exc)
+        return False
+
+
 @celery_app.task(name="pingpulse.ping")
 def ping() -> str:
     """Liveness probe for the worker."""

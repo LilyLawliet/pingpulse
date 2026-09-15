@@ -56,6 +56,9 @@ export default function LeadProfileDrawer({ contact, stages = DEFAULT_STAGES, on
     })
     next.name = contact.name || ''
     next.notes = contact.notes || ''
+    // Arrives as a string, because a decimal that round-trips through a float
+    // is a decimal that eventually loses a penny.
+    next.deal_value = contact.deal_value == null ? '' : String(contact.deal_value)
     next.pipeline_stage = contact.pipeline_stage
     setDraft(next)
     setError(null)
@@ -268,6 +271,24 @@ export default function LeadProfileDrawer({ contact, stages = DEFAULT_STAGES, on
                 />
               </label>
             ))}
+
+            <label className="block">
+              <span className="mb-1 block text-2xs text-faint">What it is worth</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                value={draft.deal_value ?? ''}
+                onChange={(e) => setDraft({ ...draft, deal_value: e.target.value })}
+                className="w-full rounded-lg border border-edge bg-bg px-3 py-2 text-xs text-ink focus:border-accent/60"
+              />
+              <span className="mt-1 block text-2xs leading-relaxed text-faint">
+                In your own currency. Only what you put here counts towards the revenue
+                figures — the agent never guesses this, because a number on a dashboard
+                gets acted on.
+              </span>
+            </label>
 
             <label className="block">
               <span className="mb-1 block text-2xs text-faint">Notes</span>
