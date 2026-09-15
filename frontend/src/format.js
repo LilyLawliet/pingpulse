@@ -127,6 +127,10 @@ export function seconds(ms) {
  */
 export function duration(value) {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  // Under ten seconds, a whole number throws away the part that matters. A
+  // median of 0.86s is the agent's best answer to "is this fast enough"; as
+  // "1s" it reads as a rounding of something slower.
+  if (value < 10) return `${Math.round(value * 10) / 10}s`
   const total = Math.round(value)
   if (total < 60) return `${total}s`
   if (total < 3600) {
