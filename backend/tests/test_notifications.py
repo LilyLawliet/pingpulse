@@ -755,3 +755,93 @@ async def test_the_watcher_never_raises(db_session):
             raise RuntimeError("the database is gone")
 
     assert await notifications.watch_connections(Broken()) == 0
+
+
+# ------------------------------------------------- reaching them without a click
+@pytest.mark.asyncio
+async def test_the_settings_offer_the_accounts_own_address(client, org_a):
+    """An empty box is the difference between email working and never working.
+
+    Somebody who will not read a browser prompt will not type an address in
+    either. Their own account address is nearly always the right answer, so it
+    is offered rather than waited for.
+    """
+    response = await client.get("/api/v1/notifications/settings", headers=org_a.headers)
+
+    assert response.json()["suggested_email"] == "owner-a@example.com"
+
+
+@pytest.mark.asyncio
+async def test_a_browser_that_already_said_yes_is_resubscribed_silently(
+    client, org_a, monkeypatch
+):
+    """The half of "no click needed" that browsers actually permit.
+
+    Permission cannot be requested without a gesture, but a browser that has
+    already granted it can be resubscribed on every load - after a new tab, a
+    cleared service worker, or a subscription the push service rotated. The
+    server has to treat that repeat as a replacement rather than a second
+    device, or one alert arrives twice.
+    """
+    monkeypatch.setattr(settings, "vapid_public_key", "pub")
+    monkeypatch.setattr(settings, "vapid_private_key", "priv")
+
+    payload = {
+        "endpoint": "https://push.example/quiet",
+        "keys": {"p256dh": "k", "auth": "a"},
+        "label": "Chrome on Windows",
+    }
+    for _ in range(4):
+        response = await client.post(
+            "/api/v1/notifications/subscribe", headers=org_a.headers, json=payload
+        )
+        assert response.status_code in (200, 201), response.text
+
+    after = await client.get("/api/v1/notifications/settings", headers=org_a.headers)
+    assert after.json()["devices"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_dashboard_can_tell_whether_anything_can_reach_them(client, org_a):
+    """What the "Alerts off" warning in the header is reading.
+
+    No devices and no address means every alert this system raises is written
+    down and delivered to nobody, which looks identical to working.
+    """
+    before = (await client.get("/api/v1/notifications/settings", headers=org_a.headers)).json()
+    assert before["devices"] == 0 and before["email"] == ""
+
+    await client.put(
+        "/api/v1/notifications/settings",
+        headers=org_a.headers,
+        json={"events": {"escalation": True}, "email": "owner@shop.com"},
+    )
+
+    after = (await client.get("/api/v1/notifications/settings", headers=org_a.headers)).json()
+    assert after["email"] == "owner@shop.com"
+
+
+def test_a_half_finished_mail_setup_is_not_offered(monkeypatch):
+    """Host and address filled in, the app password still to come.
+
+    Offering the switch anyway would mean every alert failing at send time,
+    which is precisely what this module exists to never do.
+    """
+    monkeypatch.setattr(settings, "smtp_host", "smtp.gmail.com")
+    monkeypatch.setattr(settings, "smtp_from", "shop@gmail.com")
+    monkeypatch.setattr(settings, "smtp_user", "shop@gmail.com")
+    monkeypatch.setattr(settings, "smtp_password", "")
+
+    assert notifications.email_available() is False
+
+    monkeypatch.setattr(settings, "smtp_password", "an app password")
+    assert notifications.email_available() is True
+
+
+def test_a_relay_that_needs_no_login_still_counts(monkeypatch):
+    monkeypatch.setattr(settings, "smtp_host", "localhost")
+    monkeypatch.setattr(settings, "smtp_from", "bot@shop.local")
+    monkeypatch.setattr(settings, "smtp_user", "")
+    monkeypatch.setattr(settings, "smtp_password", "")
+
+    assert notifications.email_available() is True

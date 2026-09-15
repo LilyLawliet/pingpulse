@@ -25,6 +25,15 @@ const RELEASES = [
           'reach your browser and your email instead of waiting for you to look.',
       },
       {
+        title: 'You only have to say yes once',
+        body:
+          'Once you have allowed alerts on a device, it stays set up by itself — a new tab, ' +
+          'a cleared browser or an update will not quietly stop them. Your browser will not ' +
+          'let any website turn notifications on without you clicking, so the first yes is ' +
+          'yours to give; email needs no permission at all, which is why the settings page ' +
+          'offers to fill in your address for you.',
+      },
+      {
         title: 'It will not pester you',
         body:
           'The same thing happening twice in half an hour only tells you once. Four buzzes ' +

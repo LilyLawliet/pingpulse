@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChartNoAxesColumn, Columns3, FlaskConical, Inbox, LogOut, Sparkles } from 'lucide-react'
+import {
+  BellOff,
+  ChartNoAxesColumn,
+  Columns3,
+  FlaskConical,
+  Inbox,
+  LogOut,
+  Sparkles,
+} from 'lucide-react'
 import useMonitorSocket from './useMonitorSocket.js'
 import { api, auth } from './api.js'
+import { subscribeQuietly } from './alerts.js'
 import { DEFAULT_STAGES } from './format.js'
 import SignIn from './components/SignIn.jsx'
 import ConversationList from './components/ConversationList.jsx'
@@ -108,6 +117,9 @@ function Dashboard({ onSignedOut }) {
   const [showProspects, setShowProspects] = useState(false)
   const [showAnalytics, setShowAnalytics] = useState(false)
   const [showBoard, setShowBoard] = useState(false)
+  // Null until we know. Shown only once we are sure nothing can reach
+  // them, so the warning never flashes up during a normal load.
+  const [alertsReach, setAlertsReach] = useState(null)
   // Only shown once there is something to act on — a button offering an empty
   // list is a button that teaches people to ignore it.
   const [waiting, setWaiting] = useState(0)
@@ -170,6 +182,36 @@ function Dashboard({ onSignedOut }) {
     loadStats()
     loadPipeline()
   }, [loadOrganizations, loadStats, loadPipeline])
+
+  /**
+   * Keep this browser subscribed, without ever asking.
+   *
+   * No permission prompt happens here and none can: every browser refuses to
+   * ask without a click, and an unprompted request is answered with a block
+   * that then sticks. What this does is resubscribe a browser that has
+   * already said yes — after a new tab, a cleared worker, or a subscription
+   * the push service rotated — so one click years ago keeps working.
+   *
+   * It also settles whether anything can currently reach this shop at all,
+   * which is what the warning in the header is for.
+   */
+  const checkAlerts = useCallback(async () => {
+    try {
+      const settings = await api.notificationSettings()
+      await subscribeQuietly(settings)
+      const after = await api.notificationSettings()
+      setAlertsReach(after.devices > 0 || Boolean(after.email))
+    } catch {
+      // Never a visible failure. An older deployment has no such endpoint,
+      // and a dashboard that will not load because alerts could not be
+      // checked would be a poor trade.
+      setAlertsReach(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    checkAlerts()
+  }, [checkAlerts, selectedOrg])
 
   const countWaiting = useCallback(async () => {
     try {
@@ -390,6 +432,17 @@ function Dashboard({ onSignedOut }) {
             >
               <Inbox size={12} />
               {waiting} waiting
+            </button>
+          )}
+
+          {alertsReach === false && (
+            <button
+              onClick={() => document.getElementById('pp-settings')?.click()}
+              title="Nothing can reach you when this page is closed"
+              className="flex items-center gap-1.5 rounded-full border border-warn/25 bg-warn/10 px-3 py-1.5 text-[11px] font-semibold text-warn transition-colors hover:bg-warn/15"
+            >
+              <BellOff size={12} />
+              <span className="hidden sm:inline">Alerts off</span>
             </button>
           )}
 

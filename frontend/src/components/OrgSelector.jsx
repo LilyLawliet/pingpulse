@@ -112,6 +112,11 @@ export default function OrgSelector({ organizations, selectedId, onSelect, onSav
         </div>
 
         <button
+          // Two other places open this sheet by clicking it: the setup
+          // checklist on an empty dashboard, and the alerts warning in the
+          // header. Both looked for this id and found nothing, so both were
+          // buttons that did nothing at all.
+          id="pp-settings"
           onClick={openEdit}
           disabled={!selectedId}
           className="rounded-lg border border-edge px-2.5 py-1.5 text-xs text-dim transition-colors hover:border-edge-hi hover:text-ink disabled:opacity-40"

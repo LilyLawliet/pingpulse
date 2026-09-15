@@ -136,7 +136,19 @@ def push_available() -> bool:
 
 
 def email_available() -> bool:
-    return bool(settings.smtp_host and settings.smtp_from)
+    """Can this deployment actually put an email on the wire?
+
+    A username with no password is the shape a half-finished setup takes -
+    Gmail's host and address filled in, the app password still to come. Left
+    unchecked, the settings page would offer a working email channel and every
+    alert would fail at send time, which is the one thing this module is
+    supposed to never do.
+    """
+    if not (settings.smtp_host and settings.smtp_from):
+        return False
+    if settings.smtp_user and not settings.smtp_password:
+        return False
+    return True
 
 
 # -------------------------------------------------------------------- record

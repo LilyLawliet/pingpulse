@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Bell, BellOff, Check, Loader2, Send, TriangleAlert } from 'lucide-react'
 import { api } from '../api.js'
+import {
+  alertsDeclined,
+  subscribeWithPrompt,
+  unsubscribe as unsubscribeDevice,
+} from '../alerts.js'
 
 /**
  * Getting told when the dashboard is closed.
@@ -70,54 +75,12 @@ export default function NotificationSettings() {
     setBusy(false)
   }
 
-  /**
-   * Ask the browser, register the worker, hand the subscription to the server.
-   *
-   * Every step of this can fail in a way that is nobody's fault — permission
-   * refused, a browser that has no push service, a private window — so each
-   * one reports what actually happened rather than a generic failure.
-   */
   const enablePush = async () => {
     setBusy(true)
     setError(null)
     setNote(null)
     try {
-      if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) {
-        throw new Error('This browser cannot show alerts. Try Chrome, Edge or Firefox.')
-      }
-      if (!state.vapid_public_key) {
-        throw new Error('Alerts are not set up on the server yet.')
-      }
-
-      const granted = await Notification.requestPermission()
-      setPermission(granted)
-      if (granted !== 'granted') {
-        throw new Error(
-          'Your browser blocked alerts. Allow notifications for this site and try again.',
-        )
-      }
-
-      const registration = await navigator.serviceWorker.register(
-        new URL('sw.js', window.location.href),
-        { scope: './' },
-      )
-      await navigator.serviceWorker.ready
-
-      // Reuse whatever this browser already has. Subscribing again with a
-      // different key silently fails in some browsers and produces a second
-      // endpoint in others.
-      const existing = await registration.pushManager.getSubscription()
-      const subscription =
-        existing ||
-        (await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(state.vapid_public_key),
-        }))
-
-      await api.subscribePush({
-        ...subscription.toJSON(),
-        label: shortBrowserName(),
-      })
+      await subscribeWithPrompt(state)
       setNote('This device will now be alerted.')
       await load()
     } catch (err) {
@@ -131,12 +94,7 @@ export default function NotificationSettings() {
     setError(null)
     setNote(null)
     try {
-      const registration = await navigator.serviceWorker?.getRegistration()
-      const subscription = await registration?.pushManager?.getSubscription()
-      if (subscription) {
-        await api.unsubscribePush(subscription.endpoint)
-        await subscription.unsubscribe()
-      }
+      await unsubscribeDevice()
       setNote('This device will no longer be alerted.')
       await load()
     } catch (err) {
@@ -161,6 +119,11 @@ export default function NotificationSettings() {
   }
 
   const canPush = state.push_available && permission !== 'unsupported'
+  // Granted-and-not-deliberately-turned-off is what "this device is set
+  // up" actually means. Permission alone stays granted after somebody
+  // switches it off, so the button would offer to stop something that
+  // had already stopped.
+  const deviceOn = permission === 'granted' && !alertsDeclined()
 
   return (
     <section className="space-y-3">
@@ -220,17 +183,28 @@ export default function NotificationSettings() {
         <span className="eyebrow mb-1 block">Email them to</span>
         <input
           type="email"
-          value={state.email || ''}
+          value={state.email ?? ''}
           onChange={(e) => setState({ ...state, email: e.target.value })}
-          placeholder="you@yourbusiness.com"
+          placeholder={state.suggested_email || 'you@yourbusiness.com'}
           disabled={!state.email_available}
           className="w-full rounded-lg border border-edge bg-bg px-3 py-2 text-2xs text-ink placeholder:text-faint focus:border-accent/60 disabled:opacity-40"
         />
         <span className="mt-1 block text-2xs leading-relaxed text-faint">
           {state.email_available
-            ? 'Leave it empty for no email.'
+            ? 'Leave it empty for no email. Email needs nothing installed and no ' +
+              'permission — it is the one that reaches you on a machine you have ' +
+              'never opened this on.'
             : 'Email is not set up on this server, so this does nothing yet.'}
         </span>
+        {state.email_available && !state.email && state.suggested_email && (
+          <button
+            type="button"
+            onClick={() => setState({ ...state, email: state.suggested_email })}
+            className="mt-1 text-2xs text-accent underline-offset-2 hover:underline"
+          >
+            Use {state.suggested_email}
+          </button>
+        )}
       </label>
 
       <div className="rounded-lg border border-edge bg-panel-2/40 p-2.5">
@@ -249,17 +223,17 @@ export default function NotificationSettings() {
           <button
             type="button"
             disabled={busy || !canPush}
-            onClick={permission === 'granted' ? disablePush : enablePush}
+            onClick={deviceOn ? disablePush : enablePush}
             className="flex items-center gap-1.5 rounded-lg border border-edge px-2.5 py-1.5 text-2xs text-ink transition-colors hover:bg-panel-2 disabled:opacity-40"
           >
             {busy ? (
               <Loader2 size={12} className="animate-spin" />
-            ) : permission === 'granted' ? (
+            ) : deviceOn ? (
               <BellOff size={12} />
             ) : (
               <Bell size={12} />
             )}
-            {permission === 'granted' ? 'Stop alerting this device' : 'Alert this device'}
+            {deviceOn ? 'Stop alerting this device' : 'Alert this device'}
           </button>
           <button
             type="button"
@@ -285,32 +259,3 @@ export default function NotificationSettings() {
   )
 }
 
-/**
- * The VAPID key crosses the wire base64url-encoded, and `subscribe` wants
- * raw bytes. Browsers will not do this conversion for you, and a key that is
- * one padding character wrong fails as an opaque InvalidCharacterError.
- */
-function urlBase64ToUint8Array(base64) {
-  const padding = '='.repeat((4 - (base64.length % 4)) % 4)
-  const normalised = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const raw = window.atob(normalised)
-  return Uint8Array.from([...raw].map((char) => char.charCodeAt(0)))
-}
-
-/** Just enough to tell two of your own devices apart in the list. */
-function shortBrowserName() {
-  const agent = navigator.userAgent || ''
-  const browser =
-    /Edg\//.test(agent) ? 'Edge'
-    : /Firefox\//.test(agent) ? 'Firefox'
-    : /Chrome\//.test(agent) ? 'Chrome'
-    : /Safari\//.test(agent) ? 'Safari'
-    : 'Browser'
-  const platform =
-    /Android/.test(agent) ? 'Android'
-    : /iPhone|iPad/.test(agent) ? 'iOS'
-    : /Mac/.test(agent) ? 'Mac'
-    : /Windows/.test(agent) ? 'Windows'
-    : ''
-  return [browser, platform].filter(Boolean).join(' on ')
-}

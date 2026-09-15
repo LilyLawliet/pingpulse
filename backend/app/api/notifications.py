@@ -56,6 +56,11 @@ async def get_settings(
             for key, description, on in NOTIFY_EVENTS
         ],
         "email": notifications.email_for(organization),
+        # What to put in the box for a shop that has not filled it in. The
+        # account's own address is nearly always the right answer, and an
+        # empty field is the difference between email alerts working on day
+        # one and never being switched on at all.
+        "suggested_email": getattr(tenant.user, "email", None) or "",
         "devices": devices or 0,
         # What this deployment can actually do. A settings page offering email
         # on a server with no mail account configured is a promise it cannot
