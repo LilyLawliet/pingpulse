@@ -12,15 +12,16 @@ Two rules hold everything together:
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import Depends, Header, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from sqlalchemy import func
 
 from app.models import (
     AccessToken,
@@ -29,6 +30,8 @@ from app.models import (
     TokenDevice,
     User,
 )
+
+logger = logging.getLogger(__name__)
 
 WRITE_ROLES = ("OWNER", "ADMIN", "AGENT")
 ADMIN_ROLES = ("OWNER", "ADMIN")
@@ -113,13 +116,29 @@ async def claim_seat(db: AsyncSession, token: AccessToken, device_id: str) -> No
             ),
         )
 
-    db.add(
-        TokenDevice(
-            token=token.token,
-            device_id=device_id,
-            last_seen_at=datetime.now(timezone.utc),
-        )
-    )
+    try:
+        # A savepoint rather than a bare flush. Two requests from the same new
+        # machine race for this seat and both get past the check above, and
+        # that is the ordinary case rather than an edge one: the dashboard
+        # fires several calls in parallel the moment it loads, so every first
+        # visit from a new device runs this race and one of them used to come
+        # back as a 500.
+        #
+        # Rolling the whole session back instead would discard the caller's
+        # transaction and expire the objects already loaded on it - including
+        # the token being authenticated - so only this insert is undone.
+        async with db.begin_nested():
+            db.add(
+                TokenDevice(
+                    token=token.token,
+                    device_id=device_id,
+                    last_seen_at=datetime.now(timezone.utc),
+                )
+            )
+    except IntegrityError:
+        # The loser has nothing to fix: the seat it wanted now exists and
+        # belongs to this machine, so the claim is satisfied, not failed.
+        logger.debug("device %s claimed its seat on a parallel request", device_id[:8])
 
 
 async def current_token(

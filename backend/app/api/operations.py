@@ -16,13 +16,29 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
-from app.models import PIPELINE_OUTCOMES, CRMContact, Organization, SystemError, TenantPipeline
-from app.services import agent_config, oplog, pipelines, ws_manager
+from app.models import (
+    PIPELINE_OUTCOMES,
+    SENDER_CUSTOMER,
+    CRMContact,
+    Message,
+    Organization,
+    SystemError,
+    TenantPipeline,
+)
+from app.services import (
+    agent_config,
+    llm_service,
+    oplog,
+    pipelines,
+    retrieval,
+    whatsapp,
+    ws_manager,
+)
 from app.services.ws_manager import manager
 
 logger = logging.getLogger(__name__)
@@ -295,6 +311,169 @@ async def mark_read(
     contact.last_read_at = datetime.now(timezone.utc)
     await db.flush()
     return {"contact_id": str(contact.id), "last_read_at": contact.last_read_at}
+
+
+# ------------------------------------------------------------ system status
+@router.get("/whatsapp/status")
+async def whatsapp_status(
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Is this shop actually connected, and when did anything last happen?
+
+    Answers the question an operator asks first when replies stop, in one
+    place: which number, over which transport, still authenticated, and when a
+    message last moved in either direction. Every part degrades on its own -
+    an unreachable bridge reports the number and the last message from the
+    database rather than failing the whole call, because "we cannot tell you
+    anything" is the least useful answer to "is it working".
+    """
+    channel = await whatsapp.active_channel(db, tenant.id)
+    if channel is None:
+        return {
+            "connected": False,
+            "provider": None,
+            "reason": "No WhatsApp number is connected yet.",
+        }
+
+    provider = whatsapp.provider_of(channel)
+    last_inbound = await db.scalar(
+        select(func.max(Message.created_at)).where(
+            Message.organization_id == tenant.id, Message.sender == SENDER_CUSTOMER
+        )
+    )
+    last_outbound = await db.scalar(
+        select(func.max(Message.created_at)).where(
+            Message.organization_id == tenant.id, Message.sender != SENDER_CUSTOMER
+        )
+    )
+    failed = await db.scalar(
+        select(func.count(Message.id)).where(
+            Message.organization_id == tenant.id,
+            Message.delivery_status == "FAILED",
+            Message.created_at >= datetime.now(timezone.utc) - timedelta(days=1),
+        )
+    )
+
+    # Twilio is connected whenever a number is configured; a paired session is
+    # only connected while the handset says so.
+    connected = provider == whatsapp.TWILIO or channel.session_status == "AUTHENTICATED"
+
+    bridge_ok = None
+    if provider == whatsapp.QR_SESSION:
+        bridge_ok = await _bridge_reachable(channel)
+
+    return {
+        "connected": bool(connected),
+        "provider": provider,
+        "phone_number": channel.phone_number,
+        "session_status": channel.session_status,
+        "session_connected_at": channel.session_connected_at,
+        "bridge_reachable": bridge_ok,
+        "last_inbound_at": last_inbound,
+        "last_outbound_at": last_outbound,
+        "failed_last_day": failed or 0,
+    }
+
+
+async def _bridge_reachable(channel) -> bool | None:
+    """Can we reach the WhatsApp Web bridge? None when we could not tell.
+
+    Bounded hard: this is called to render a status light, and a status light
+    that hangs the dashboard for thirty seconds is worse than one that admits
+    it does not know.
+    """
+    import httpx
+
+    from app.config import settings
+
+    url = f"{settings.wa_qr_service_url.rstrip('/')}/health"
+    try:
+        async with httpx.AsyncClient(timeout=4) as client:
+            response = await client.get(
+                url, headers={"X-PingPulse-Bridge": settings.wa_qr_shared_secret}
+            )
+            return response.status_code < 500
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# --------------------------------------------------------------- the sandbox
+@router.post("/agent/simulate")
+async def simulate(
+    payload: dict,
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Try a message against this shop's real setup without sending anything.
+
+    The whole point is that nothing leaves the building: no WhatsApp call, no
+    contact created, no message stored. It uses the real prompt assembly, the
+    real knowledge base and the real operating rules, because a sandbox that
+    tests a different prompt from the live one tests nothing.
+    """
+    tenant.require_role(WRITE_ROLES)
+
+    message = (payload.get("message") or "").strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="Type a message to try")
+
+    organization = await db.get(Organization, tenant.id)
+
+    # A contact that is never added to the session, so nothing is written.
+    pretend = CRMContact(
+        organization_id=tenant.id,
+        phone_number="+10000000000",
+        name=payload.get("name") or "Test customer",
+        pipeline_stage=await pipelines.entry_stage(db, tenant.id),
+        sales_stage="NEW",
+        tags=[],
+        qualification=payload.get("qualification") or {},
+    )
+
+    history = [
+        _PretendMessage(entry.get("sender") or "user", entry.get("content") or "")
+        for entry in (payload.get("history") or [])
+        if isinstance(entry, dict)
+    ]
+
+    chunks = await retrieval.search(db, tenant.id, message, limit=3, doc_type="policy")
+    knowledge = retrieval.as_prompt_block(chunks)
+
+    escalation = agent_config.needs_escalation(message, organization)
+    if escalation:
+        return {
+            "reply": None,
+            "escalated": True,
+            "reason": escalation,
+            "note": (
+                "A real conversation would stop here and wait for a person. "
+                f"The word that triggered it was '{escalation}'."
+            ),
+            "knowledge_used": [chunk.title for chunk in chunks],
+        }
+
+    generation = await llm_service.generate_reply(
+        organization, pretend, history, message, knowledge=knowledge
+    )
+    return {
+        "reply": generation.text,
+        "escalated": False,
+        "provider": generation.provider,
+        "latency_ms": generation.latency_ms,
+        "fallback_used": generation.fallback_used,
+        "knowledge_used": [chunk.title for chunk in chunks],
+        "sent": False,
+    }
+
+
+class _PretendMessage:
+    """Shaped like a Message for the prompt builder, backed by nothing."""
+
+    def __init__(self, sender: str, content: str):
+        self.sender = sender
+        self.content = content
+        self.media_urls: list[str] = []
 
 
 # -------------------------------------------------------------------- logs

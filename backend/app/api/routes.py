@@ -27,7 +27,7 @@ from app.schemas import (
     OutboundMessageRequest,
 )
 from app.schemas_tenancy import CRMContactOut
-from app.services import outbox, whatsapp, ws_manager
+from app.services import outbox, pipelines, whatsapp, ws_manager
 from app.services.ws_manager import manager
 
 router = APIRouter(prefix="/api/v1", tags=["dashboard"])
@@ -299,30 +299,97 @@ async def list_logs(
     return result.scalars().all()
 
 
+WINDOWS = {"today": 1, "7d": 7, "30d": 30, "90d": 90}
+
+
+def _window_start(window: str | None, since: datetime | None) -> datetime | None:
+    """Where the counting starts, or None for all time.
+
+    A window rather than two dates for the common case, because "this week" is
+    what somebody actually asks and computing it in the browser means two
+    clients disagreeing about when a week starts.
+    """
+    if since is not None:
+        return since
+    if not window or window == "all":
+        return None
+    days = WINDOWS.get(window.lower())
+    if days is None:
+        return None
+    if window.lower() == "today":
+        now = datetime.now(timezone.utc)
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return datetime.now(timezone.utc) - timedelta(days=days)
+
+
 @router.get("/stats")
 async def dashboard_stats(
-    tenant: Tenant = Depends(current_org), db: AsyncSession = Depends(get_db)
+    window: str = Query(default="all", description="today | 7d | 30d | 90d | all"),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
 ):
-    stage_rows = await db.execute(
-        select(CRMContact.pipeline_stage, func.count(CRMContact.id))
-        .where(CRMContact.organization_id == tenant.id)
-        .group_by(CRMContact.pipeline_stage)
+    """The numbers on the dashboard, over a chosen span of time.
+
+    Contacts are counted by when they arrived and messages by when they were
+    sent, so "30 days" means the same thing in both. The pipeline itself is
+    always current: a board showing only the leads created this week would be
+    a different question from the one it looks like it is answering.
+    """
+    start = _window_start(window, since)
+
+    stage_query = select(CRMContact.pipeline_stage, func.count(CRMContact.id)).where(
+        CRMContact.organization_id == tenant.id
     )
-    provider_rows = await db.execute(
-        select(LLMLog.provider, func.count(LLMLog.id), func.avg(LLMLog.latency_ms))
-        .where(LLMLog.organization_id == tenant.id)
-        .group_by(LLMLog.provider)
+    provider_query = select(
+        LLMLog.provider, func.count(LLMLog.id), func.avg(LLMLog.latency_ms)
+    ).where(LLMLog.organization_id == tenant.id)
+    message_query = select(func.count(Message.id)).where(
+        Message.organization_id == tenant.id
     )
-    total_messages = await db.scalar(
-        select(func.count(Message.id)).where(Message.organization_id == tenant.id)
+    new_contacts_query = select(func.count(CRMContact.id)).where(
+        CRMContact.organization_id == tenant.id
     )
+
+    if start is not None:
+        provider_query = provider_query.where(LLMLog.created_at >= start)
+        message_query = message_query.where(Message.created_at >= start)
+        new_contacts_query = new_contacts_query.where(CRMContact.created_at >= start)
+    if until is not None:
+        provider_query = provider_query.where(LLMLog.created_at <= until)
+        message_query = message_query.where(Message.created_at <= until)
+        new_contacts_query = new_contacts_query.where(CRMContact.created_at <= until)
+
+    stage_rows = await db.execute(stage_query.group_by(CRMContact.pipeline_stage))
+    provider_rows = await db.execute(provider_query.group_by(LLMLog.provider))
+    total_messages = await db.scalar(message_query)
+    new_contacts = await db.scalar(new_contacts_query)
+
+    by_stage = {stage: count for stage, count in stage_rows.all()}
+
+    # What each column means for counting, so "Booked" stops being one word
+    # that could mean an appointment, a job or a sale. The board says which
+    # column carries which meaning and the screen shows the tenant's own label.
+    stages = await pipelines.stages_for(db, tenant.id)
+    outcomes: dict[str, int] = {}
+    labels: dict[str, str] = {}
+    for stage in stages:
+        if stage.outcome:
+            outcomes[stage.outcome] = outcomes.get(stage.outcome, 0) + by_stage.get(stage.key, 0)
+            labels.setdefault(stage.outcome, stage.label)
 
     return {
         "organization": tenant.organization.name,
         "currency": tenant.organization.default_currency,
         "language": tenant.organization.default_language,
+        "window": window,
+        "since": start,
         "messages": total_messages or 0,
-        "pipeline": {stage: count for stage, count in stage_rows.all()},
+        "new_contacts": new_contacts or 0,
+        "pipeline": by_stage,
+        "outcomes": outcomes,
+        "outcome_labels": labels,
         "providers": [
             {
                 "provider": provider,

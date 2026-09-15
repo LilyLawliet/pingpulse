@@ -146,7 +146,18 @@ export const api = {
   pairingState: (id) => request(`/organizations/active/channels/${id}/qr`),
 
   // -------------------------------- CRM ---------------------------------
-  listContacts: () => request('/crm/contacts'),
+  // The inbox, filtered. Empty values are dropped rather than sent as blanks,
+  // because "search=" and no search at all are different queries.
+  listContacts: (filters = {}) => {
+    const params = new URLSearchParams()
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '' && value !== false) {
+        params.set(key, value)
+      }
+    })
+    const query = params.toString()
+    return request(`/crm/contacts${query ? `?${query}` : ''}`)
+  },
   contactMessages: (id) => request(`/crm/contacts/${id}/messages`),
 
   // Follow-ups. The automatic sequence fires hours later for warm
@@ -216,10 +227,26 @@ export const api = {
     }),
   markRead: (contactId) => request(`/contacts/${contactId}/read`, { method: 'POST' }),
 
+  // ---------------------------- how it behaves --------------------------
+  getAgentConfig: () => request('/agent-config'),
+  saveAgentConfig: (config, timezone) =>
+    request('/agent-config', {
+      method: 'PUT',
+      body: JSON.stringify({ agent_config: config, timezone }),
+    }),
+
+  // ------------------------------ is it on? -----------------------------
+  whatsappStatus: () => request('/whatsapp/status'),
+
+  // ------------------------------- sandbox ------------------------------
+  // Nothing leaves the building: no WhatsApp call, no contact, no message.
+  simulate: (message, history = []) =>
+    request('/agent/simulate', { method: 'POST', body: JSON.stringify({ message, history }) }),
+
   // ------------------------------ what broke ----------------------------
   listErrors: (days = 7) => request(`/errors?days=${days}`),
   resolveError: (id) => request(`/errors/${id}/resolve`, { method: 'POST' }),
 
   // ------------------------------- misc ---------------------------------
-  stats: () => request('/stats'),
+  stats: (window = 'all') => request(`/stats?window=${encodeURIComponent(window)}`),
 }

@@ -4,6 +4,9 @@ import { api } from '../api.js'
 import WhatsAppSettings from './WhatsAppSettings.jsx'
 import KnowledgeSettings from './KnowledgeSettings.jsx'
 import LearningSettings from './LearningSettings.jsx'
+import AgentSettings from './AgentSettings.jsx'
+import PipelineEditor from './PipelineEditor.jsx'
+import ErrorLog from './ErrorLog.jsx'
 
 const EMPTY = {
   name: '',
@@ -221,12 +224,27 @@ export default function OrgSelector({ organizations, selectedId, onSelect, onSav
               )}
               {editingId && (
                 <div className="border-t border-edge pt-4">
+                  <AgentSettings />
+                </div>
+              )}
+              {editingId && (
+                <div className="border-t border-edge pt-4">
+                  <PipelineEditor />
+                </div>
+              )}
+              {editingId && (
+                <div className="border-t border-edge pt-4">
                   <LearningSettings />
                 </div>
               )}
               {editingId && (
                 <div className="border-t border-edge pt-4">
                   <WhatsAppSettings />
+                </div>
+              )}
+              {editingId && (
+                <div className="border-t border-edge pt-4">
+                  <ErrorLog />
                 </div>
               )}
             </div>

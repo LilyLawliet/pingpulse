@@ -70,7 +70,14 @@ async def test_outcomes_are_marked_so_counting_never_reads_a_label(org_a, db_ses
     stages = await pipelines.stages_for(db_session, uuid.UUID(org_a.organization_id))
     outcomes = {s.key: s.outcome for s in stages if s.outcome}
 
-    assert outcomes == {"WON": "won", "LOST": "lost", "UNQUALIFIED": "unqualified"}
+    assert outcomes == {
+        # An appointment, a job and a sale are three businesses' words for the
+        # same milestone, so the column carries the meaning.
+        "ESTIMATE_SCHEDULED": "booked",
+        "WON": "won",
+        "LOST": "lost",
+        "UNQUALIFIED": "unqualified",
+    }
 
 
 @pytest.mark.asyncio

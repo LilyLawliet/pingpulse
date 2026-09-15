@@ -1,4 +1,5 @@
 import { MessageSquare } from 'lucide-react'
+import InboxFilters from './InboxFilters.jsx'
 import { contactLabel, initialsOf, prettyPhone, stageChip, stageLabel } from '../format.js'
 
 export default function ConversationList({
@@ -9,6 +10,8 @@ export default function ConversationList({
   composing,
   className = '',
   stages,
+  filters,
+  onFilters,
 }) {
   return (
     <section className={`panel shrink-0 ${className}`}>
@@ -18,12 +21,26 @@ export default function ConversationList({
         <span className="ml-auto font-mono text-2xs text-faint">{contacts.length}</span>
       </header>
 
+      {onFilters && (
+        <InboxFilters filters={filters || {}} onChange={onFilters} stages={stages} />
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto">
         {contacts.length === 0 && (
-          <p className="px-4 py-10 text-center text-xs text-faint">
-            No conversations yet.
-            <br />
-            They appear the moment someone messages you.
+          <p className="px-4 py-10 text-center text-xs leading-relaxed text-faint">
+            {narrowed(filters) ? (
+              <>
+                Nothing matches those filters.
+                <br />
+                Clear them to see every conversation.
+              </>
+            ) : (
+              <>
+                No conversations yet.
+                <br />
+                They appear the moment someone messages you.
+              </>
+            )}
           </p>
         )}
 
@@ -75,4 +92,15 @@ export default function ConversationList({
       </div>
     </section>
   )
+}
+
+/**
+ * Whether the empty list is empty because of a filter.
+ *
+ * Worth the few lines: the likeliest failure of a filter bar is somebody
+ * leaving one on and concluding their conversations have disappeared.
+ */
+function narrowed(filters) {
+  const f = filters || {}
+  return Boolean(f.search || f.stage || f.unread_only || f.taken_over)
 }

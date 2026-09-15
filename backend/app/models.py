@@ -36,7 +36,7 @@ DEFAULT_PIPELINE = (
     ("NEW_LEAD", "New lead", "slate", None),
     ("CONTACTED", "Contacted", "sky", None),
     ("QUALIFIED", "Qualified", "cyan", None),
-    ("ESTIMATE_SCHEDULED", "Estimate scheduled", "violet", None),
+    ("ESTIMATE_SCHEDULED", "Estimate scheduled", "violet", "booked"),
     ("ESTIMATE_SENT", "Estimate sent", "amber", None),
     ("FOLLOW_UP", "Follow-up", "orange", None),
     ("WON", "Won", "emerald", "won"),
@@ -62,7 +62,12 @@ PIPELINE_STAGES = tuple(key for key, _label, _colour, _outcome in DEFAULT_PIPELI
 # What a stage means for counting. A board can be renamed and reordered freely,
 # but analytics needs to know which column is a sale and which is a dead end,
 # and asking the label would break the moment somebody translates it.
-PIPELINE_OUTCOMES = ("won", "lost", "unqualified")
+#
+# "booked" is the answer to the client's complaint that one metric called
+# "Booked" said nothing: an appointment, a job and a sale are three businesses'
+# words for the same milestone, so the column carries the meaning and the
+# screen shows whatever that tenant calls it.
+PIPELINE_OUTCOMES = ("booked", "won", "lost", "unqualified")
 
 # How a tenant's WhatsApp is connected.
 #   TWILIO     the official API; costs per message.
@@ -379,7 +384,7 @@ class TenantPipeline(Base):
         String(16), nullable=False, default="slate", server_default="slate"
     )
 
-    # 'won' | 'lost' | 'unqualified' | null. See PIPELINE_OUTCOMES.
+    # 'booked' | 'won' | 'lost' | 'unqualified' | null. See PIPELINE_OUTCOMES.
     outcome: Mapped[str | None] = mapped_column(String(16))
 
     # Where a brand-new contact lands. Exactly one row per organization should

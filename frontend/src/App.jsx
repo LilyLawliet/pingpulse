@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Inbox, LogOut, Sparkles } from 'lucide-react'
+import { FlaskConical, Inbox, LogOut, Sparkles } from 'lucide-react'
 import useMonitorSocket from './useMonitorSocket.js'
 import { api, auth } from './api.js'
 import { DEFAULT_STAGES } from './format.js'
@@ -13,6 +13,11 @@ import PulseLine from './components/PulseLine.jsx'
 import BrandMark from './components/BrandMark.jsx'
 import WhatsNew, { hasUnseenUpgrades } from './components/WhatsNew.jsx'
 import Prospects from './components/Prospects.jsx'
+import LeadProfileDrawer from './components/LeadProfileDrawer.jsx'
+import SetupChecklist from './components/SetupChecklist.jsx'
+import ConnectionStatus from './components/ConnectionStatus.jsx'
+import AgentSandbox from './components/AgentSandbox.jsx'
+import InboxFilters from './components/InboxFilters.jsx'
 
 /**
  * Pane switcher, phones only.
@@ -52,6 +57,13 @@ function PaneTabs({ pane, onPick, waiting }) {
   )
 }
 
+/** Is anything narrowing the list right now? */
+function filtering(filters) {
+  return Boolean(
+    filters.search || filters.stage || filters.unread_only || filters.taken_over,
+  )
+}
+
 export default function App() {
   const [signedIn, setSignedIn] = useState(Boolean(auth.token))
 
@@ -73,6 +85,15 @@ function Dashboard({ onSignedOut }) {
   // columns never flicker between two different sets while the call is in
   // flight, and replaced by whatever the server says belongs to this tenant.
   const [stages, setStages] = useState(DEFAULT_STAGES)
+  const [filters, setFilters] = useState({
+    search: '',
+    stage: '',
+    unread_only: false,
+    taken_over: false,
+  })
+  const [showDrawer, setShowDrawer] = useState(false)
+  const [showSandbox, setShowSandbox] = useState(false)
+  const [window_, setWindow_] = useState('all')
   /**
    * Which pane a phone is showing. Three panes side by side is the right
    * layout on a desktop and impossible on a 390px screen, so below `lg` they
@@ -105,8 +126,10 @@ function Dashboard({ onSignedOut }) {
 
   const loadContacts = useCallback(async () => {
     try {
-      // Scoped server-side to the active organization — no id is sent.
-      const rows = await api.listContacts()
+      // Scoped server-side to the active organization — no id is sent. The
+      // filters go to the server rather than narrowing a list already fetched,
+      // which would only ever search the most recent hundred.
+      const rows = await api.listContacts(filters)
       setContacts(rows)
       // Keep the open conversation, but only if it still exists — replayed
       // history can point at a contact that has since been deleted, which
@@ -118,15 +141,15 @@ function Dashboard({ onSignedOut }) {
       if (err.status === 401) onSignedOut()
       setContacts([])
     }
-  }, [selectedOrg, onSignedOut])
+  }, [selectedOrg, onSignedOut, filters])
 
   const loadStats = useCallback(async () => {
     try {
-      setStats(await api.stats())
+      setStats(await api.stats(window_))
     } catch {
       setStats(null)
     }
-  }, [])
+  }, [window_])
 
   const loadPipeline = useCallback(async () => {
     try {
@@ -366,6 +389,16 @@ function Dashboard({ onSignedOut }) {
             </button>
           )}
 
+          <ConnectionStatus />
+
+          <button
+            onClick={() => setShowSandbox(true)}
+            title="Try it out — nothing is sent"
+            className="rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
+          >
+            <FlaskConical size={13} />
+          </button>
+
           <button
             onClick={() => {
               setShowUpgrades(true)
@@ -397,7 +430,7 @@ function Dashboard({ onSignedOut }) {
           conversation. The numbers stay one tap away under Chats, and on a
           desktop nothing moves. */}
       <div className={mobilePane === 'thread' ? 'hidden lg:block' : ''}>
-        <MetricStrip stats={stats} contacts={contacts} />
+        <MetricStrip stats={stats} contacts={contacts} window={window_} onWindow={setWindow_} />
       </div>
 
       <PaneTabs pane={mobilePane} onPick={setMobilePane} waiting={contacts.length} />
@@ -406,6 +439,8 @@ function Dashboard({ onSignedOut }) {
         <ConversationList
           className={`${mobilePane === 'list' ? 'flex' : 'hidden'} w-full lg:flex lg:w-[280px]`}
           contacts={contacts}
+          filters={filters}
+          onFilters={setFilters}
           selectedId={selectedContact}
           onSelect={(id) => {
             setSelectedContact(id)
@@ -415,6 +450,11 @@ function Dashboard({ onSignedOut }) {
           composing={composing}
           stages={stages}
         />
+        {contacts.length === 0 && !filtering(filters) ? (
+          <SetupChecklist
+            onOpenSettings={() => document.getElementById('pp-settings')?.click()}
+          />
+        ) : (
         <ConversationThread
           className={`${mobilePane === 'thread' ? 'flex' : 'hidden'} lg:flex`}
           onBack={() => setMobilePane('list')}
@@ -428,7 +468,9 @@ function Dashboard({ onSignedOut }) {
           // the list has to be re-read for the panel to show what it now says.
           onChanged={loadContacts}
           stages={stages}
+          onOpenProfile={() => setShowDrawer(true)}
         />
+        )}
         <PipelineBoard
           className={`${mobilePane === 'pipeline' ? 'flex' : 'hidden'} w-full lg:flex lg:w-[290px]`}
           contacts={contacts}
@@ -442,6 +484,15 @@ function Dashboard({ onSignedOut }) {
       </main>
 
       {showUpgrades && <WhatsNew onClose={() => setShowUpgrades(false)} />}
+      {showSandbox && <AgentSandbox onClose={() => setShowSandbox(false)} />}
+      {showDrawer && activeContact && (
+        <LeadProfileDrawer
+          contact={activeContact}
+          stages={stages}
+          onClose={() => setShowDrawer(false)}
+          onSaved={loadContacts}
+        />
+      )}
       {showProspects && (
         <Prospects
           onClose={() => {

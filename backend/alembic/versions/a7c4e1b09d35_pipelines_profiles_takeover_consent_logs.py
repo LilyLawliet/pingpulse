@@ -48,7 +48,7 @@ DEFAULT_PIPELINE = (
     ("NEW_LEAD", "New lead", "slate", None),
     ("CONTACTED", "Contacted", "sky", None),
     ("QUALIFIED", "Qualified", "cyan", None),
-    ("ESTIMATE_SCHEDULED", "Estimate scheduled", "violet", None),
+    ("ESTIMATE_SCHEDULED", "Estimate scheduled", "violet", "booked"),
     ("ESTIMATE_SENT", "Estimate sent", "amber", None),
     ("FOLLOW_UP", "Follow-up", "orange", None),
     ("WON", "Won", "emerald", "won"),

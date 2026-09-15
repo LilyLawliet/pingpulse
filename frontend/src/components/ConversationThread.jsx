@@ -8,6 +8,7 @@ import {
   Sparkles,
   TriangleAlert,
   User,
+  UserSquare2,
   X,
 } from 'lucide-react'
 import { clockOf, contactLabel, initialsOf, isPlaceholderNumber, prettyPhone, stageChip, stageLabel } from '../format.js'
@@ -351,6 +352,7 @@ export default function ConversationThread({
   className = '',
   onBack,
   stages,
+  onOpenProfile,
 }) {
   const endRef = useRef(null)
 
@@ -425,6 +427,29 @@ export default function ConversationThread({
         >
           {stageLabel(stages, contact.pipeline_stage)}
         </span>
+
+        {/* Shown here rather than only in the drawer: the moment somebody
+            most wants to take a conversation over is while they are reading
+            one going wrong. */}
+        {contact.ai_enabled === false && (
+          <span
+            title="You have this conversation — the agent is not replying"
+            className="rounded-full bg-warn/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-warn"
+          >
+            Yours
+          </span>
+        )}
+
+        {onOpenProfile && (
+          <button
+            type="button"
+            onClick={onOpenProfile}
+            title="Lead details"
+            className="rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
+          >
+            <UserSquare2 size={13} />
+          </button>
+        )}
       </header>
 
       <PhotoRead contact={contact} />
