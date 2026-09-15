@@ -131,6 +131,24 @@ def clean_config(raw: dict) -> dict:
     return {"events": chosen, "email": email if "@" in email else ""}
 
 
+# Addresses that exist to satisfy a NOT NULL, not to receive mail. Accounts
+# created from an access token get one of these, and offering it as a
+# suggestion would have somebody save a dead address and then wonder why no
+# alert ever arrived.
+PLACEHOLDER_DOMAINS = (".local", ".invalid", ".test", "example.com")
+
+
+def usable_address(address: str | None) -> str:
+    """An address worth suggesting, or empty."""
+    candidate = (address or "").strip()
+    if "@" not in candidate:
+        return ""
+    domain = candidate.rsplit("@", 1)[-1].lower()
+    if any(domain == bad or domain.endswith(bad) for bad in PLACEHOLDER_DOMAINS):
+        return ""
+    return candidate
+
+
 def push_available() -> bool:
     return bool(settings.vapid_public_key and settings.vapid_private_key)
 

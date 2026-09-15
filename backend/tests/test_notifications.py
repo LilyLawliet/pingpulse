@@ -759,16 +759,31 @@ async def test_the_watcher_never_raises(db_session):
 
 # ------------------------------------------------- reaching them without a click
 @pytest.mark.asyncio
-async def test_the_settings_offer_the_accounts_own_address(client, org_a):
+async def test_the_settings_offer_the_accounts_own_address(client):
     """An empty box is the difference between email working and never working.
 
     Somebody who will not read a browser prompt will not type an address in
     either. Their own account address is nearly always the right answer, so it
     is offered rather than waited for.
     """
+    from tests.conftest import make_tenant
+
+    shop = await make_tenant(client, "owner@realshop.co.uk", "Real Shop")
+    response = await client.get("/api/v1/notifications/settings", headers=shop.headers)
+
+    assert response.json()["suggested_email"] == "owner@realshop.co.uk"
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_offered_when_the_account_has_no_real_address(client, org_a):
+    """The fixtures, and every account created from an access token.
+
+    Both end up with an address that exists to satisfy a column rather than to
+    receive mail, and a suggestion is only useful if it would actually work.
+    """
     response = await client.get("/api/v1/notifications/settings", headers=org_a.headers)
 
-    assert response.json()["suggested_email"] == "owner-a@example.com"
+    assert response.json()["suggested_email"] == ""
 
 
 @pytest.mark.asyncio
@@ -845,3 +860,18 @@ def test_a_relay_that_needs_no_login_still_counts(monkeypatch):
     monkeypatch.setattr(settings, "smtp_password", "")
 
     assert notifications.email_available() is True
+
+
+def test_a_placeholder_address_is_not_offered():
+    """Accounts created from an access token get a made-up address.
+
+    Offering it would have somebody save something like
+    yaha@token.pingpulse.local and then wonder for a week why no alert ever
+    arrived. Better to ask for an address than to suggest a dead one.
+    """
+    assert notifications.usable_address("yaha@token.pingpulse.local") == ""
+    assert notifications.usable_address("owner@example.com") == ""
+    assert notifications.usable_address("nobody@nowhere.invalid") == ""
+    assert notifications.usable_address("not an address") == ""
+    assert notifications.usable_address(None) == ""
+    assert notifications.usable_address("  owner@realshop.co.uk ") == "owner@realshop.co.uk"
