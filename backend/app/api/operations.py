@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -20,8 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
-from app.models import PIPELINE_OUTCOMES, CRMContact, SystemError, TenantPipeline
-from app.services import oplog, pipelines, ws_manager
+from app.models import PIPELINE_OUTCOMES, CRMContact, Organization, SystemError, TenantPipeline
+from app.services import agent_config, oplog, pipelines, ws_manager
 from app.services.ws_manager import manager
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,75 @@ async def replace_pipeline(
         changes={"before": before, "after": [s.as_dict() for s in stages]},
     )
     return {"stages": [stage.as_dict() for stage in stages]}
+
+
+# ------------------------------------------------------------ agent config
+@router.get("/agent-config")
+async def get_agent_config(
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """How this business wants its agent to behave."""
+    organization = await db.get(Organization, tenant.id)
+    return {
+        "agent_config": organization.agent_config or {},
+        "timezone": organization.timezone,
+        "open_now": agent_config.is_open(organization),
+        "days": list(agent_config.DAYS),
+    }
+
+
+@router.put("/agent-config")
+async def save_agent_config(
+    payload: dict,
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the operating rules. Everything is optional.
+
+    An empty config is a valid one and means the agent behaves as it did before
+    any of this existed, which is what makes it safe to leave alone.
+    """
+    tenant.require_role(WRITE_ROLES)
+
+    organization = await db.get(Organization, tenant.id)
+    before = dict(organization.agent_config or {})
+
+    config = payload.get("agent_config")
+    if config is not None and not isinstance(config, dict):
+        raise HTTPException(status_code=422, detail="agent_config must be an object")
+
+    zone = payload.get("timezone")
+    if zone is not None:
+        # Validated now rather than discovered at reply time, where a bad zone
+        # would have the agent apologising about the wrong opening hours.
+        try:
+            ZoneInfo(str(zone))
+        except Exception:  # noqa: BLE001
+            raise HTTPException(
+                status_code=422,
+                detail=f"'{zone}' is not a timezone. Use an IANA name like Asia/Dubai.",
+            )
+        organization.timezone = str(zone)[:64]
+
+    if config is not None:
+        organization.agent_config = config
+    await db.flush()
+
+    await oplog.record(
+        db,
+        tenant.id,
+        "agent_config.update",
+        user_id=getattr(tenant.user, "id", None),
+        resource_type="organization",
+        resource_id=tenant.id,
+        changes=oplog.changes_between(before, organization.agent_config or {}),
+    )
+    return {
+        "agent_config": organization.agent_config,
+        "timezone": organization.timezone,
+        "open_now": agent_config.is_open(organization),
+    }
 
 
 # ---------------------------------------------------------------- takeover

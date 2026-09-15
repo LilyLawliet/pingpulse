@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
 from app.models import SENDER_AGENT, SENDER_OPERATOR, CRMContact, Message
-from app.services import outbox, prospects, whatsapp, ws_manager
+from app.services import outbox, pipelines, prospects, whatsapp, ws_manager
 from app.services.ws_manager import manager
 
 logger = logging.getLogger(__name__)
@@ -174,7 +174,7 @@ async def reply_to_prospect(
             organization_id=tenant.id,
             phone_number=number,
             name=match.name or None,
-            pipeline_stage="LEAD",
+            pipeline_stage=await pipelines.entry_stage(db, tenant.id),
             sales_stage="NEW",
             tags=["from-history"],
             contact_metadata={"wa_jid": jid, "picked_up_from": match.last_message[:280]},

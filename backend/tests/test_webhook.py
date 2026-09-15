@@ -187,12 +187,15 @@ async def test_dispatch_failure_still_persists_the_reply(db_session, default_org
 @pytest.mark.parametrize(
     "current,message,expected",
     [
-        ("LEAD", "just saying hi", "LEAD"),
-        ("LEAD", "what is the price?", "QUALIFIED"),
-        ("LEAD", "can we book a demo", "DEMO_BOOKED"),
-        ("QUALIFIED", "I want to buy", "CLOSED"),
-        ("DEMO_BOOKED", "how much again?", "DEMO_BOOKED"),
-        ("CLOSED", "hello there", "CLOSED"),
+        ("NEW_LEAD", "just saying hi", "NEW_LEAD"),
+        ("NEW_LEAD", "what is the price?", "QUALIFIED"),
+        ("NEW_LEAD", "can we book a demo", "ESTIMATE_SCHEDULED"),
+        ("QUALIFIED", "I want to buy", "WON"),
+        ("ESTIMATE_SCHEDULED", "how much again?", "ESTIMATE_SCHEDULED"),
+        ("WON", "hello there", "WON"),
+        # A contact on a board this ladder knows nothing about is left exactly
+        # where their operator put them.
+        ("BOOKED_IN", "I want to buy", "BOOKED_IN"),
     ],
 )
 def test_evaluate_stage_only_moves_forward(current, message, expected):

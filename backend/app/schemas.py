@@ -2,11 +2,16 @@
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-PipelineStage = Literal["LEAD", "QUALIFIED", "DEMO_BOOKED", "CLOSED"]
+# A stage key, not a fixed set. Which stages exist is now a per-organization
+# question - a contractor's board and a salon's do not carry the same columns -
+# so a Literal here would reject a tenant's own stage as an invalid value.
+# Membership is checked against that organization's board at the endpoint,
+# where the tenant is known, rather than by the type.
+PipelineStage = Annotated[str, Field(min_length=1, max_length=40)]
 
 
 # ----------------------------- Twilio webhook -----------------------------
@@ -73,7 +78,7 @@ class ContactCreate(BaseModel):
     phone_number: str = Field(min_length=3, max_length=50)
     name: str | None = None
     organization_id: uuid.UUID | None = None
-    pipeline_stage: PipelineStage = "LEAD"
+    pipeline_stage: PipelineStage = "NEW_LEAD"
 
 
 class ContactUpdate(BaseModel):

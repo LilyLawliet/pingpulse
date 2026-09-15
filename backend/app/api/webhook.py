@@ -22,6 +22,7 @@ from app.database import get_db
 from app.models import ChannelConfig, CRMContact, LLMLog, Message, Organization
 from app.schemas import TwilioWebhookPayload
 from app.services import (
+    agent_config,
     analyzer,
     consent,
     customer_memory,
@@ -34,7 +35,7 @@ from app.services import (
     vision,
     ws_manager,
 )
-from app.services import outbox, whatsapp
+from app.services import oplog, outbox, pipelines, whatsapp
 from app.services.twilio_service import (
     Sender,
     signature_url,
@@ -61,7 +62,19 @@ QUALIFYING_SIGNALS = (
 DEMO_SIGNALS = ("demo", "call", "meeting", "schedule", "book", "appointment", "trial")
 CLOSING_SIGNALS = ("sign up", "purchase", "buy", "invoice", "contract", "let us start")
 
-STAGE_ORDER = ("LEAD", "QUALIFIED", "DEMO_BOOKED", "CLOSED")
+# The default ladder the automatic advancement climbs. Only the default keys
+# appear here: a tenant who renamed their board to ENQUIRY / BOOKED_IN / DONE
+# has no "QUALIFIED" to be moved into, and inventing one would put contacts in
+# a column that is not on their board.
+STAGE_ORDER = (
+    "NEW_LEAD",
+    "CONTACTED",
+    "QUALIFIED",
+    "ESTIMATE_SCHEDULED",
+    "ESTIMATE_SENT",
+    "FOLLOW_UP",
+    "WON",
+)
 
 # Durable customer facts kept on the contact record.
 MEMORY_FIELDS = (
@@ -81,11 +94,16 @@ def evaluate_stage(current_stage: str, customer_message: str) -> str:
     """
     text = (customer_message or "").lower()
 
-    target = current_stage if current_stage in STAGE_ORDER else "LEAD"
+    # A contact on a stage this ladder does not know - anyone on a customised
+    # board - is left exactly where their operator put them.
+    if current_stage not in STAGE_ORDER:
+        return current_stage
+
+    target = current_stage
     if any(signal in text for signal in CLOSING_SIGNALS):
-        target = "CLOSED"
+        target = "WON"
     elif any(signal in text for signal in DEMO_SIGNALS):
-        target = "DEMO_BOOKED"
+        target = "ESTIMATE_SCHEDULED"
     elif any(signal in text for signal in QUALIFYING_SIGNALS):
         target = "QUALIFIED"
 
@@ -239,7 +257,9 @@ async def _resolve_contact(
             phone_number=number or lid or "",
             wa_lid=lid,
             name=profile_name,
-            pipeline_stage="LEAD",
+            # Wherever this organization's board starts, rather than a
+            # hardcoded stage that may not be a column they have.
+            pipeline_stage=await pipelines.entry_stage(db, organization.id),
             tags=[],
         )
         db.add(contact)
@@ -399,6 +419,34 @@ async def process_inbound_message(
     if consent.is_opt_in(body) and contact.opt_out:
         consent.record_opt_in(contact)
         await db.commit()
+
+    # A complaint, a refund demand, or somebody asking for a person. Handing
+    # the conversation over is a keyword decision rather than the model's,
+    # because the conversations most in need of a person are exactly the ones a
+    # sales-tuned model is inclined to smooth over with an offer.
+    escalation = agent_config.needs_escalation(body, organization)
+    if escalation and contact.ai_enabled:
+        contact.ai_enabled = False
+        await db.commit()
+        await oplog.record(
+            db,
+            organization.id,
+            "contact.escalated",
+            resource_type="contact",
+            resource_id=contact.id,
+            changes={"trigger": escalation},
+        )
+        await db.commit()
+        await manager.broadcast(
+            ws_manager.EVENT_SYNC,
+            {"contact_id": str(contact.id), "organization_id": str(organization.id)},
+        )
+        logger.info("handed %s to a person after %r", phone_number, escalation)
+        return {
+            "status": "escalated",
+            "reason": escalation,
+            "contact_id": str(contact.id),
+        }
 
     if not consent.agent_may_reply(contact):
         reason = "opted out" if contact.opt_out else "a person has taken this conversation over"
@@ -657,7 +705,18 @@ async def process_inbound_message(
     previous_stage = contact.pipeline_stage
     from_analyzer = analyzer.STAGE_TO_PIPELINE.get(contact.sales_stage, previous_stage)
     new_stage = evaluate_stage(previous_stage, body)
-    new_stage = max(new_stage, from_analyzer, key=STAGE_ORDER.index)
+    # Both candidates have to be on the ladder to be compared on it. On a
+    # customised board they will not be, and the contact stays put rather than
+    # being moved into a column that does not exist for this tenant.
+    if new_stage in STAGE_ORDER and from_analyzer in STAGE_ORDER:
+        new_stage = max(new_stage, from_analyzer, key=STAGE_ORDER.index)
+    elif previous_stage not in STAGE_ORDER:
+        new_stage = previous_stage
+
+    on_board = {stage.key for stage in await pipelines.stages_for(db, organization.id)}
+    if new_stage not in on_board:
+        new_stage = previous_stage
+
     if new_stage != previous_stage:
         contact.pipeline_stage = new_stage
         await manager.broadcast(

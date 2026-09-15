@@ -34,14 +34,15 @@ SALES_STAGES = (
 
 # How the agent's own state machine rolls up to the operator's CRM board.
 STAGE_TO_PIPELINE = {
-    "NEW": "LEAD",
-    "DISCOVERY": "LEAD",
+    "NEW": "NEW_LEAD",
+    "DISCOVERY": "CONTACTED",
     "QUALIFIED": "QUALIFIED",
     "PRESENTATION": "QUALIFIED",
+    # Still in play, not lost - an objection is a conversation to answer.
     "OBJECTION": "QUALIFIED",
-    "NEGOTIATION": "DEMO_BOOKED",
-    "READY_TO_BUY": "DEMO_BOOKED",
-    "CLOSED": "CLOSED",
+    "NEGOTIATION": "ESTIMATE_SENT",
+    "READY_TO_BUY": "ESTIMATE_SENT",
+    "CLOSED": "WON",
 }
 
 OBJECTION_TYPES = ("price", "quality", "delivery", "trust", "timing", "none")

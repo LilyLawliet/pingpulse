@@ -280,8 +280,13 @@ def test_stages_never_move_backwards():
 
 
 def test_every_sales_stage_maps_to_a_crm_bucket():
+    """Checked against the real board rather than a copy of it: this assertion
+    held a duplicate of the stage list and went stale the moment the board
+    changed, which is the failure it exists to catch."""
+    from app.models import PIPELINE_STAGES
+
     for stage in analyzer.SALES_STAGES:
-        assert analyzer.STAGE_TO_PIPELINE[stage] in ("LEAD", "QUALIFIED", "DEMO_BOOKED", "CLOSED")
+        assert analyzer.STAGE_TO_PIPELINE[stage] in PIPELINE_STAGES
 
 
 @pytest.mark.asyncio

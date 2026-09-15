@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 Role = Literal["OWNER", "ADMIN", "AGENT", "VIEWER"]
-PipelineStage = Literal["LEAD", "QUALIFIED", "DEMO_BOOKED", "CLOSED"]
+# A stage key, not a fixed set. Which stages exist is now a per-organization
+# question - a contractor's board and a salon's do not carry the same columns -
+# so a Literal here would reject a tenant's own stage as an invalid value.
+# Membership is checked against that organization's board at the endpoint,
+# where the tenant is known, rather than by the type.
+PipelineStage = Annotated[str, Field(min_length=1, max_length=40)]
 
 
 # ------------------------------- Identity ---------------------------------
@@ -137,7 +142,7 @@ class CRMContactCreate(BaseModel):
     phone_number: str = Field(min_length=3, max_length=50)
     name: str | None = None
     email: EmailStr | None = None
-    pipeline_stage: PipelineStage = "LEAD"
+    pipeline_stage: PipelineStage = "NEW_LEAD"
     tags: list[str] = Field(default_factory=list)
     notes: str | None = None
 
@@ -152,6 +157,17 @@ class CRMContactUpdate(BaseModel):
     category_interest: str | None = None
     colour_preference: str | None = None
     budget_note: str | None = None
+
+    # What a person needs on screen to act on a lead, typed in directly rather
+    # than waited for the agent to extract.
+    company: str | None = Field(default=None, max_length=255)
+    service_requested: str | None = Field(default=None, max_length=255)
+    project_address: str | None = None
+    budget: str | None = Field(default=None, max_length=120)
+    timeline: str | None = Field(default=None, max_length=120)
+    source: str | None = Field(default=None, max_length=80)
+    custom_fields: dict | None = None
+    assigned_to: uuid.UUID | None = None
 
 
 class TagRequest(BaseModel):
@@ -188,6 +204,29 @@ class CRMContactOut(BaseModel):
     category_interest: str | None = None
     colour_preference: str | None = None
     budget_note: str | None = None
+
+    # The structured profile the lead drawer shows.
+    company: str | None = None
+    service_requested: str | None = None
+    project_address: str | None = None
+    budget: str | None = None
+    timeline: str | None = None
+    source: str | None = None
+    photo_urls: list[str] = Field(default_factory=list)
+    custom_fields: dict = Field(default_factory=dict)
+    qualification: dict = Field(default_factory=dict)
+    summary: str | None = None
+
+    # False when a person has taken this conversation over: messages still
+    # arrive and are shown, nothing is generated for them.
+    ai_enabled: bool = True
+    assigned_to: uuid.UUID | None = None
+    last_read_at: datetime | None = None
+
+    # They asked us to stop. Nothing outbound may reach them again.
+    opt_out: bool = False
+    opt_out_at: datetime | None = None
+
     created_at: datetime
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -16,8 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
-from app.models import CRMContact, Message
+from app.models import SENDER_CUSTOMER, CRMContact, Message
 from app.schemas import MessageOut
+from app.services import pipelines
 from app.schemas_tenancy import (
     CRMContactCreate,
     CRMContactOut,
@@ -49,24 +51,69 @@ async def _get_contact(
     return contact
 
 
+async def _valid_stage(db: AsyncSession, organization_id, key: str | None) -> None:
+    """Refuse a stage this organization does not have.
+
+    This used to be a Literal on the schema, which stopped working the moment
+    boards became per-tenant: the type cannot know that this shop renamed its
+    columns. Checked here instead, where the organization is known.
+    """
+    if key is None:
+        return
+    stages = await pipelines.stages_for(db, organization_id)
+    if key.upper() not in {stage.key for stage in stages}:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"'{key}' is not a stage on this board. It has: "
+                + ", ".join(stage.key for stage in stages)
+            ),
+        )
+
+
 @router.get("/contacts", response_model=list[CRMContactOut])
 async def list_contacts(
-    stage: str | None = Query(default=None, description="Pipeline stage"),
+    stage: str | None = Query(default=None, description="Pipeline stage key"),
     tag: str | None = Query(default=None, description="Only contacts carrying this tag"),
-    search: str | None = Query(default=None, description="Match name or phone number"),
+    search: str | None = Query(default=None, description="Match name, phone, company or notes"),
+    unread_only: bool = Query(default=False, description="Only threads nobody has opened since"),
+    assigned_to: uuid.UUID | None = Query(default=None),
+    since: datetime | None = Query(default=None, description="First seen on or after"),
+    until: datetime | None = Query(default=None, description="First seen on or before"),
+    taken_over: bool | None = Query(
+        default=None, description="True for conversations a person has claimed"
+    ),
     limit: int = Query(default=100, le=500),
     offset: int = Query(default=0, ge=0),
     tenant: Tenant = Depends(current_org),
     db: AsyncSession = Depends(get_db),
 ):
+    """The inbox, filtered.
+
+    Every filter is a WHERE clause on a query already pinned to one
+    organization, so narrowing can only ever shrink a tenant's own rows.
+    """
     query = select(CRMContact).where(CRMContact.organization_id == tenant.id)
 
     if stage:
         query = query.where(CRMContact.pipeline_stage == stage.upper())
+    if assigned_to:
+        query = query.where(CRMContact.assigned_to == assigned_to)
+    if taken_over is not None:
+        query = query.where(CRMContact.ai_enabled.is_(not taken_over))
+    if since:
+        query = query.where(CRMContact.created_at >= since)
+    if until:
+        query = query.where(CRMContact.created_at <= until)
     if search:
+        # Widened past name and phone: an operator hunting for a lead searches
+        # for the company or something they wrote in the notes just as often.
         pattern = f"%{search.strip()}%"
         query = query.where(
-            (CRMContact.name.ilike(pattern)) | (CRMContact.phone_number.ilike(pattern))
+            CRMContact.name.ilike(pattern)
+            | CRMContact.phone_number.ilike(pattern)
+            | CRMContact.company.ilike(pattern)
+            | CRMContact.notes.ilike(pattern)
         )
 
     query = query.order_by(CRMContact.created_at.desc()).limit(limit).offset(offset)
@@ -78,7 +125,33 @@ async def list_contacts(
         wanted = tag.strip().lower()
         contacts = [c for c in contacts if wanted in {t.lower() for t in (c.tags or [])}]
 
+    if unread_only:
+        # Derived from the last customer message rather than a stored flag: a
+        # flag and the messages it describes drift apart the first time
+        # anything writes one without the other.
+        contacts = [c for c in contacts if await _is_unread(db, c)]
+
     return contacts
+
+
+async def _is_unread(db: AsyncSession, contact) -> bool:
+    """Has a customer message arrived since anybody last opened this thread?"""
+    latest = await db.scalar(
+        select(func.max(Message.created_at)).where(
+            Message.contact_id == contact.id,
+            Message.sender == SENDER_CUSTOMER,
+        )
+    )
+    if latest is None:
+        return False
+    if contact.last_read_at is None:
+        return True
+    seen = contact.last_read_at
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=timezone.utc)
+    if latest.tzinfo is None:
+        latest = latest.replace(tzinfo=timezone.utc)
+    return latest > seen
 
 
 @router.post("/contacts", response_model=CRMContactOut, status_code=201)
@@ -101,7 +174,12 @@ async def create_contact(
             detail="That number is already a contact in this organization",
         )
 
-    contact = CRMContact(organization_id=tenant.id, **payload.model_dump())
+    fields = payload.model_dump()
+    await _valid_stage(db, tenant.id, fields.get("pipeline_stage"))
+    if fields.get("pipeline_stage"):
+        fields["pipeline_stage"] = fields["pipeline_stage"].upper()
+
+    contact = CRMContact(organization_id=tenant.id, **fields)
     db.add(contact)
     await db.flush()
     await db.refresh(contact)
@@ -149,7 +227,13 @@ async def update_contact(
 ):
     tenant.require_role(WRITE_ROLES)
     contact = await _get_contact(db, tenant, contact_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+
+    changed = payload.model_dump(exclude_unset=True)
+    await _valid_stage(db, tenant.id, changed.get("pipeline_stage"))
+    if "pipeline_stage" in changed and changed["pipeline_stage"]:
+        changed["pipeline_stage"] = changed["pipeline_stage"].upper()
+
+    for field, value in changed.items():
         setattr(contact, field, value)
     await db.flush()
     await db.refresh(contact)

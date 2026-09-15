@@ -234,8 +234,8 @@ async def test_dashboard_stats_are_per_organization(org_a, org_b):
 
     assert a_stats["organization"] == "Alpha Shoes"
     assert b_stats["organization"] == "Beta Motors"
-    assert a_stats["pipeline"].get("LEAD", 0) == 1
-    assert b_stats["pipeline"].get("LEAD", 0) == 0
+    assert a_stats["pipeline"].get("NEW_LEAD", 0) == 1
+    assert b_stats["pipeline"].get("NEW_LEAD", 0) == 0
 
 
 async def test_dashboard_contacts_are_scoped(org_a, org_b):

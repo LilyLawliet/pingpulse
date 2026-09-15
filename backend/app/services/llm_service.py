@@ -15,6 +15,7 @@ import httpx
 
 from app.config import settings
 from app.models import SENDER_CUSTOMER, SENDER_OPERATOR, Contact, Message, Organization
+from app.services import agent_config
 from app.schemas import GenerationResult
 from app.services import sales_policy
 
@@ -498,6 +499,14 @@ def build_prompt(
         )
         business.append(f"Product offerings and rules: {scope_catalogue(product_rules, focus)}")
     sections.append("\n".join(business))
+
+    # How this particular business operates: hours, areas served, services,
+    # what it will not promise. Empty for an organization that has configured
+    # none of it, which is what keeps a running client's agent answering
+    # exactly as it did before this shipped.
+    operating = agent_config.as_prompt_block(organization)
+    if operating:
+        sections.append(operating)
 
     contact_name = getattr(contact, "name", None) or "Unknown"
     phone = getattr(contact, "phone_number", None) or "Unknown"
