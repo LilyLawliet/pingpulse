@@ -117,3 +117,49 @@ export function seconds(ms) {
   if (!ms && ms !== 0) return '—'
   return `${(ms / 1000).toFixed(1)}s`
 }
+
+/**
+ * 45 -> "45s" ; 630 -> "10m 30s" ; 9000 -> "2h 30m" ; null -> "—"
+ *
+ * Zero is a real answer and null is not, so they are kept apart. A shop that
+ * has never replied has no median reply time; showing it as "0s" would be the
+ * best number on the screen and a complete fiction.
+ */
+export function duration(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  const total = Math.round(value)
+  if (total < 60) return `${total}s`
+  if (total < 3600) {
+    const minutes = Math.floor(total / 60)
+    const rest = total % 60
+    return rest ? `${minutes}m ${rest}s` : `${minutes}m`
+  }
+  if (total < 86400) {
+    const hours = Math.floor(total / 3600)
+    const rest = Math.round((total % 3600) / 60)
+    return rest ? `${hours}h ${rest}m` : `${hours}h`
+  }
+  return `${Math.round(total / 86400)}d`
+}
+
+/** 0.1875 -> "19%" ; 0 -> "0%" ; null -> "—" */
+export function percent(fraction, places = 0) {
+  if (fraction === null || fraction === undefined || Number.isNaN(fraction)) return '—'
+  return `${(fraction * 100).toFixed(places)}%`
+}
+
+/**
+ * A bucket key from the analytics API, as an axis label.
+ *
+ * Parsed as local midnight rather than handed to `new Date('2026-09-11')`,
+ * which reads as UTC midnight and then prints as the tenth for anybody west
+ * of Greenwich — an off-by-one-day that only appears for some of the people
+ * looking at it.
+ */
+export function bucketLabel(bucket, grain) {
+  if (!bucket) return ''
+  if (grain === 'hour') return `${bucket.slice(11, 13)}:00`
+  const date = new Date(`${bucket}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return bucket
+  return date.toLocaleDateString([], { day: 'numeric', month: 'short' })
+}

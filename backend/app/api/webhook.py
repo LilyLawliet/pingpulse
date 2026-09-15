@@ -19,7 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models import ChannelConfig, CRMContact, LLMLog, Message, Organization
+from app.models import (
+    STAGE_AGENT,
+    ChannelConfig,
+    CRMContact,
+    LLMLog,
+    Message,
+    Organization,
+)
 from app.schemas import TwilioWebhookPayload
 from app.services import (
     agent_config,
@@ -37,7 +44,7 @@ from app.services import (
     vision,
     ws_manager,
 )
-from app.services import oplog, outbox, pipelines, whatsapp
+from app.services import analytics, oplog, outbox, pipelines, whatsapp
 from app.services.twilio_service import (
     Sender,
     signature_url,
@@ -745,6 +752,12 @@ async def process_inbound_message(
 
     if new_stage != previous_stage:
         contact.pipeline_stage = new_stage
+        # Written down as it happens. A current-stage column can say where a
+        # lead is standing and never how it got there, so the funnel has
+        # nothing to read unless the move is recorded at the moment it is made.
+        await analytics.record_move(
+            db, contact, new_stage, from_stage=previous_stage, source=STAGE_AGENT
+        )
         await manager.broadcast(
             ws_manager.EVENT_STAGE,
             {

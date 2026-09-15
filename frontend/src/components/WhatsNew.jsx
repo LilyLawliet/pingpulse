@@ -12,6 +12,36 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.3.3',
+    date: '16 September 2026',
+    items: [
+      {
+        title: 'See how it is actually going',
+        body:
+          'A new button in the top bar. It shows how many leads arrived, how far each of ' +
+          'them got and how many turned into work — over today, a week, a month, or all ' +
+          'of it. The stages are your own, in your own words, so the numbers mean what ' +
+          'your board says they mean.',
+      },
+      {
+        title: 'Where people stop',
+        body:
+          'If forty people ask and six get as far as an estimate, this says where the ' +
+          'other thirty-four dropped off, stage by stage. A lead you marked lost still ' +
+          'counts for the distance it travelled before it went, so the work that went ' +
+          'into it is not hidden.',
+      },
+      {
+        title: 'How fast people get answered, and by whom',
+        body:
+          'Your typical reply time, your slowest ten per cent, and how much of the ' +
+          'answering the agent did rather than you. Counted per conversation, so ' +
+          'somebody firing off three messages in a row counts as waiting once — and a ' +
+          'follow-up you sent unprompted does not count as answering anybody.',
+      },
+    ],
+  },
+  {
     version: '1.3.2',
     date: '11 September 2026',
     items: [

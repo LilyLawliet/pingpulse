@@ -20,6 +20,7 @@ from app.api.auth import router as auth_router
 from app.api.crm import router as crm_router
 from app.api.knowledge import router as knowledge_router
 from app.api.learning import router as learning_router
+from app.api.analytics import router as analytics_router
 from app.api.operations import router as operations_router
 from app.api.organizations import router as organizations_router
 from app.api.prospects import router as prospects_router
@@ -170,6 +171,7 @@ app.include_router(dashboard_router)
 app.include_router(prospects_router)
 app.include_router(learning_router)
 app.include_router(operations_router)
+app.include_router(analytics_router)
 
 
 @app.get("/")

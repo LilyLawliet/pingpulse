@@ -4,25 +4,33 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: 'var(--bg)',
-        panel: 'var(--panel)',
-        'panel-2': 'var(--panel-2)',
-        edge: 'var(--edge)',
-        'edge-hi': 'var(--edge-hi)',
-        ink: 'var(--ink)',
-        dim: 'var(--ink-dim)',
-        faint: 'var(--ink-faint)',
-        platinum: 'var(--platinum)',
-        'platinum-dim': 'var(--platinum-dim)',
-        accent: 'var(--accent)',
-        'accent-deep': 'var(--accent-deep)',
-        customer: 'var(--customer)',
-        warn: 'var(--warn)',
-        crit: 'var(--crit)',
+        bg: 'rgb(var(--bg) / <alpha-value>)',
+        panel: 'rgb(var(--panel) / <alpha-value>)',
+        'panel-2': 'rgb(var(--panel-2) / <alpha-value>)',
+        edge: 'rgb(var(--edge) / <alpha-value>)',
+        'edge-hi': 'rgb(var(--edge-hi) / <alpha-value>)',
+        ink: 'rgb(var(--ink) / <alpha-value>)',
+        dim: 'rgb(var(--ink-dim) / <alpha-value>)',
+        faint: 'rgb(var(--ink-faint) / <alpha-value>)',
+        platinum: 'rgb(var(--platinum) / <alpha-value>)',
+        'platinum-dim': 'rgb(var(--platinum-dim) / <alpha-value>)',
+        accent: 'rgb(var(--accent) / <alpha-value>)',
+        'accent-deep': 'rgb(var(--accent-deep) / <alpha-value>)',
+        customer: 'rgb(var(--customer) / <alpha-value>)',
+        ok: 'rgb(var(--ok) / <alpha-value>)',
+        warn: 'rgb(var(--warn) / <alpha-value>)',
+        crit: 'rgb(var(--crit) / <alpha-value>)',
       },
       fontFamily: {
         sans: ['"IBM Plex Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+      },
+      // Tailwind's opacity scale has no 8 or 12, and a modifier it does not
+      // recognise generates no rule at all rather than an error - so the
+      // panels asking for bg-accent/12 were rendering with no fill.
+      opacity: {
+        8: '0.08',
+        12: '0.12',
       },
       fontSize: {
         '2xs': ['0.6875rem', { lineHeight: '1rem' }],

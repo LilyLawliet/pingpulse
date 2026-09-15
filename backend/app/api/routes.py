@@ -18,7 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
-from app.models import SENDER_OPERATOR, ChannelConfig, CRMContact, LLMLog, Message
+from app.models import (
+    SENDER_OPERATOR,
+    STAGE_OPERATOR,
+    ChannelConfig,
+    CRMContact,
+    LLMLog,
+    Message,
+)
 from app.schemas import (
     FollowUpRequest,
     FollowUpState,
@@ -27,7 +34,7 @@ from app.schemas import (
     OutboundMessageRequest,
 )
 from app.schemas_tenancy import CRMContactOut
-from app.services import outbox, pipelines, whatsapp, ws_manager
+from app.services import analytics, outbox, pipelines, whatsapp, ws_manager
 from app.services.ws_manager import manager
 
 router = APIRouter(prefix="/api/v1", tags=["dashboard"])
@@ -74,6 +81,17 @@ async def update_contact_stage(
     await db.refresh(contact)
 
     if contact.pipeline_stage != previous_stage:
+        # A person dragged this, so it is filed as theirs. "The agent decided"
+        # and "somebody moved it" are different facts about the same lead, and
+        # a funnel that cannot tell them apart cannot say whether the agent is
+        # working.
+        await analytics.record_move(
+            db,
+            contact,
+            contact.pipeline_stage,
+            from_stage=previous_stage,
+            source=STAGE_OPERATOR,
+        )
         await manager.broadcast(
             ws_manager.EVENT_STAGE,
             {
@@ -299,27 +317,15 @@ async def list_logs(
     return result.scalars().all()
 
 
-WINDOWS = {"today": 1, "7d": 7, "30d": 30, "90d": 90}
+# Both the dashboard strip and the analytics screen have to agree about when
+# "7 days" begins, so the span lives in one place and both read it from there.
+WINDOWS = analytics.WINDOWS
 
 
-def _window_start(window: str | None, since: datetime | None) -> datetime | None:
-    """Where the counting starts, or None for all time.
-
-    A window rather than two dates for the common case, because "this week" is
-    what somebody actually asks and computing it in the browser means two
-    clients disagreeing about when a week starts.
-    """
-    if since is not None:
-        return since
-    if not window or window == "all":
-        return None
-    days = WINDOWS.get(window.lower())
-    if days is None:
-        return None
-    if window.lower() == "today":
-        now = datetime.now(timezone.utc)
-        return now.replace(hour=0, minute=0, second=0, microsecond=0)
-    return datetime.now(timezone.utc) - timedelta(days=days)
+def _window_start(
+    window: str | None, since: datetime | None, zone=None
+) -> datetime | None:
+    return analytics.window_start(window, since, zone)
 
 
 @router.get("/stats")
@@ -337,7 +343,9 @@ async def dashboard_stats(
     always current: a board showing only the leads created this week would be
     a different question from the one it looks like it is answering.
     """
-    start = _window_start(window, since)
+    start = _window_start(
+        window, since, analytics.zone_for(tenant.organization.timezone)
+    )
 
     stage_query = select(CRMContact.pipeline_stage, func.count(CRMContact.id)).where(
         CRMContact.organization_id == tenant.id

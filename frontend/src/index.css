@@ -15,26 +15,39 @@
    Colour is spent sparingly, which is what keeps it feeling expensive. Platinum
    carries the brand mark and the chrome; emerald is the one live accent and
    means "working"; blue, amber and red are states, never decoration. */
-:root {
-  --bg: #000000;
-  --panel: #0a0b0d;
-  --panel-2: #121418;
-  --edge: #1d2027;
-  --edge-hi: #2f343d;
+/* Colours are stored as bare RGB channels rather than hex.
 
-  --ink: #f3f5f8;
-  --ink-dim: #99a1ad;
-  --ink-faint: #626a77;
+   Tailwind cannot compose an opacity onto a colour it cannot see into: with
+   `--accent: #3ae3ae`, every `bg-accent/12`, `bg-crit/10` and `ring-accent/25`
+   in the app silently generated no rule at all, so every tinted chip, error
+   box and empty state has been rendering with no fill. Channels plus the
+   `rgb(var(--x) / <alpha-value>)` form in tailwind.config.js is what makes the
+   modifier work. The consequence is that anything reading one of these
+   directly has to wrap it in rgb() itself. */
+:root {
+  --bg: 0 0 0;
+  --panel: 10 11 13;
+  --panel-2: 18 20 24;
+  --edge: 29 32 39;
+  --edge-hi: 47 52 61;
+
+  --ink: 243 245 248;
+  --ink-dim: 153 161 173;
+  --ink-faint: 98 106 119;
 
   /* The brand mark is brushed silver, so the chrome that frames it is too. */
-  --platinum: #cbd2dc;
-  --platinum-dim: #8d95a2;
+  --platinum: 203 210 220;
+  --platinum-dim: 141 149 162;
 
-  --accent: #3ae3ae;
-  --accent-deep: #0f7f62;
-  --customer: #6aa8ff;
-  --warn: #f2b23e;
-  --crit: #ff6b72;
+  --accent: 58 227 174;
+  /* Confirmation rather than emphasis. Written as its own name because
+     seven "Saved" notes already ask for text-ok, and until this existed
+     Tailwind generated no such class and they rendered colourless. */
+  --ok: 58 227 174;
+  --accent-deep: 15 127 98;
+  --customer: 106 168 255;
+  --warn: 242 178 62;
+  --crit: 255 107 114;
 
   color-scheme: dark;
 }
@@ -53,8 +66,8 @@ body,
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--ink);
+  background: rgb(var(--bg));
+  color: rgb(var(--ink));
   font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -74,7 +87,7 @@ body::before {
 
 ::selection {
   background: rgba(58, 227, 174, 0.26);
-  color: var(--ink);
+  color: rgb(var(--ink));
 }
 
 ::-webkit-scrollbar {
@@ -85,15 +98,15 @@ body::before {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--edge);
+  background: rgb(var(--edge));
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--edge-hi);
+  background: rgb(var(--edge-hi));
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid rgb(var(--accent));
   outline-offset: 2px;
 }
 
@@ -115,7 +128,7 @@ body::before {
   }
   /* The brand mark, and anything that should feel like the same metal. */
   .platinum {
-    background: linear-gradient(160deg, #ffffff 0%, var(--platinum) 42%, #7f8794 100%);
+    background: linear-gradient(160deg, #ffffff 0%, rgb(var(--platinum)) 42%, #7f8794 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;

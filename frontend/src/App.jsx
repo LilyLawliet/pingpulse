@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FlaskConical, Inbox, LogOut, Sparkles } from 'lucide-react'
+import { ChartNoAxesColumn, FlaskConical, Inbox, LogOut, Sparkles } from 'lucide-react'
 import useMonitorSocket from './useMonitorSocket.js'
 import { api, auth } from './api.js'
 import { DEFAULT_STAGES } from './format.js'
@@ -18,6 +18,7 @@ import SetupChecklist from './components/SetupChecklist.jsx'
 import ConnectionStatus from './components/ConnectionStatus.jsx'
 import AgentSandbox from './components/AgentSandbox.jsx'
 import InboxFilters from './components/InboxFilters.jsx'
+import Analytics from './components/Analytics.jsx'
 
 /**
  * Pane switcher, phones only.
@@ -104,6 +105,7 @@ function Dashboard({ onSignedOut }) {
   const [mobilePane, setMobilePane] = useState('list')
   const [showUpgrades, setShowUpgrades] = useState(false)
   const [showProspects, setShowProspects] = useState(false)
+  const [showAnalytics, setShowAnalytics] = useState(false)
   // Only shown once there is something to act on — a button offering an empty
   // list is a button that teaches people to ignore it.
   const [waiting, setWaiting] = useState(0)
@@ -392,6 +394,14 @@ function Dashboard({ onSignedOut }) {
           <ConnectionStatus />
 
           <button
+            onClick={() => setShowAnalytics(true)}
+            title="How it is going"
+            className="rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
+          >
+            <ChartNoAxesColumn size={13} />
+          </button>
+
+          <button
             onClick={() => setShowSandbox(true)}
             title="Try it out — nothing is sent"
             className="rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
@@ -485,6 +495,7 @@ function Dashboard({ onSignedOut }) {
 
       {showUpgrades && <WhatsNew onClose={() => setShowUpgrades(false)} />}
       {showSandbox && <AgentSandbox onClose={() => setShowSandbox(false)} />}
+      {showAnalytics && <Analytics onClose={() => setShowAnalytics(false)} />}
       {showDrawer && activeContact && (
         <LeadProfileDrawer
           contact={activeContact}

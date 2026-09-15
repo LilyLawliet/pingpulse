@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
-from app.models import SENDER_CUSTOMER, CRMContact, Message
+from app.models import STAGE_OPERATOR, SENDER_CUSTOMER, CRMContact, Message
 from app.schemas import MessageOut
-from app.services import pipelines
+from app.services import analytics, pipelines
 from app.schemas_tenancy import (
     CRMContactCreate,
     CRMContactOut,
@@ -233,9 +233,19 @@ async def update_contact(
     if "pipeline_stage" in changed and changed["pipeline_stage"]:
         changed["pipeline_stage"] = changed["pipeline_stage"].upper()
 
+    was = contact.pipeline_stage
     for field, value in changed.items():
         setattr(contact, field, value)
     await db.flush()
+
+    # Only a real move. A PATCH that names the stage it is already on is not a
+    # transition, and recording one would put a step in the history that
+    # nobody took.
+    if contact.pipeline_stage != was:
+        await analytics.record_move(
+            db, contact, contact.pipeline_stage, from_stage=was, source=STAGE_OPERATOR
+        )
+
     await db.refresh(contact)
     return contact
 

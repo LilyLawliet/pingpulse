@@ -12,6 +12,7 @@ from sqlalchemy import (
     CHAR,
     Boolean,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -404,6 +405,10 @@ class CRMContact(Base):
     __tablename__ = "crm_contacts"
     __table_args__ = (
         UniqueConstraint("organization_id", "phone_number", name="uq_contact_org_phone"),
+        # Every analytics query has the same shape: one tenant, one span of
+        # time. The organization index alone still scans a tenant's whole
+        # history to answer "the last seven days".
+        Index("ix_contacts_org_created", "organization_id", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
@@ -556,6 +561,9 @@ SENDER_OPERATOR = "operator"
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = (
+        Index("ix_messages_org_created", "organization_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
     organization_id: Mapped[uuid.UUID] = mapped_column(
@@ -709,3 +717,60 @@ class SystemError(Base):
     # through rather than only accumulated.
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _now_column()
+
+
+class StageEvent(Base):
+    """One contact moving from one column to another, and when.
+
+    The board only ever held where a lead *is*. That answers the question the
+    inbox asks and none of the questions a funnel asks: how many leads got as
+    far as qualified, how many stalled at the estimate, how long it takes to
+    go from a first message to a win. None of that is recoverable from a
+    single current-stage column, because the moment a lead moves the previous
+    answer is gone.
+
+    So every move is written down as it happens. Only real transitions: a lead
+    arriving is not one, because `created_at` on the contact already says when
+    that happened and a second row saying the same thing would be one more
+    place for the two to disagree. `from_stage` stays nullable for the case
+    where a lead is imported straight onto a column partway down the board.
+
+    Nothing was backfilled. Rows created before this existed have no history
+    and inventing dates for them would put numbers on a chart that never
+    happened - the funnel reads a contact's current stage as well as its
+    events, so an untracked lead still counts where it stands, and only the
+    timing of its journey is unknown rather than wrong.
+    """
+
+    __tablename__ = "stage_events"
+    __table_args__ = (
+        Index("ix_stage_events_org_at", "organization_id", "at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("crm_contacts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Null on the first event: there was nowhere to come from.
+    from_stage: Mapped[str | None] = mapped_column(String(50))
+    to_stage: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    # STAGE_SOURCES. Who moved it, not which code path - "the agent decided"
+    # and "somebody dragged it" are different facts about the same lead.
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="agent", server_default="agent"
+    )
+    at: Mapped[datetime] = _now_column()
+
+
+# Who moved a lead. `agent` is the model reading a conversation, `operator` a
+# person on the dashboard, `system` an import or a board being rewritten under
+# contacts that were standing on it.
+STAGE_AGENT = "agent"
+STAGE_OPERATOR = "operator"
+STAGE_SYSTEM = "system"
+STAGE_SOURCES = (STAGE_AGENT, STAGE_OPERATOR, STAGE_SYSTEM)

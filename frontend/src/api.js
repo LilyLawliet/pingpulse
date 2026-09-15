@@ -249,4 +249,10 @@ export const api = {
 
   // ------------------------------- misc ---------------------------------
   stats: (window = 'all') => request(`/stats?window=${encodeURIComponent(window)}`),
+
+  // One call rather than one per panel. The whole screen opens at once, and
+  // a funnel counted at one instant beside traffic counted a moment later
+  // disagree in ways that always read as a bug in the numbers.
+  analytics: (window = '30d') =>
+    request(`/analytics?window=${encodeURIComponent(window)}`),
 }
