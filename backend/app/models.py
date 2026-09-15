@@ -24,7 +24,45 @@ from sqlalchemy.types import JSON, DateTime, TypeDecorator
 
 from app.database import Base
 
-PIPELINE_STAGES = ("LEAD", "QUALIFIED", "DEMO_BOOKED", "CLOSED")
+# The operator's board. Nine stages rather than the four this shipped with,
+# and per-organization rather than global: a roofer's board and a salon's do
+# not carry the same columns, which is what `tenant_pipelines` exists for.
+#
+# These are the defaults an organization starts from. The keys are what a
+# contact stores, so they stay stable; the labels are what a person reads, and
+# a tenant may change the label, the order, the colour or the set itself.
+DEFAULT_PIPELINE = (
+    # key, label, colour, outcome
+    ("NEW_LEAD", "New lead", "slate", None),
+    ("CONTACTED", "Contacted", "sky", None),
+    ("QUALIFIED", "Qualified", "cyan", None),
+    ("ESTIMATE_SCHEDULED", "Estimate scheduled", "violet", None),
+    ("ESTIMATE_SENT", "Estimate sent", "amber", None),
+    ("FOLLOW_UP", "Follow-up", "orange", None),
+    ("WON", "Won", "emerald", "won"),
+    ("LOST", "Lost", "rose", "lost"),
+    ("UNQUALIFIED", "Unqualified", "zinc", "unqualified"),
+)
+
+# Where the four original stages land. Existing contacts are moved by the
+# migration rather than left pointing at a column that no longer exists - there
+# is a live client whose board must still have everyone on it after deploy.
+#
+# CLOSED becomes WON because the agent's own state machine has no losing end
+# state: it reaches CLOSED only by way of READY_TO_BUY.
+LEGACY_PIPELINE = {
+    "LEAD": "NEW_LEAD",
+    "QUALIFIED": "QUALIFIED",
+    "DEMO_BOOKED": "ESTIMATE_SCHEDULED",
+    "CLOSED": "WON",
+}
+
+PIPELINE_STAGES = tuple(key for key, _label, _colour, _outcome in DEFAULT_PIPELINE)
+
+# What a stage means for counting. A board can be renamed and reordered freely,
+# but analytics needs to know which column is a sale and which is a dead end,
+# and asking the label would break the moment somebody translates it.
+PIPELINE_OUTCOMES = ("won", "lost", "unqualified")
 
 # How a tenant's WhatsApp is connected.
 #   TWILIO     the official API; costs per message.
@@ -210,6 +248,19 @@ class Organization(Base):
     #
     # Null means the agent writes in its default voice, which is what every
     # tenant already running keeps until somebody chooses otherwise.
+    # How the agent is allowed to behave: business hours, service areas, the
+    # services on offer, when to hand over to a person, what it must never
+    # promise. A dict because the shape differs by industry and because every
+    # one of these is injected into the prompt rather than branched on in code.
+    agent_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    # IANA name. Needed before the agent can offer an appointment time or
+    # honour business hours - "9am" is meaningless without it, and the server
+    # runs in UTC.
+    timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="UTC", server_default="UTC"
+    )
+
     voice_style: Mapped[str | None] = mapped_column(Text)
     voice_examples: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     voice_learned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -298,6 +349,49 @@ class ChannelConfig(Base):
 
 
 # ================================ CRM =====================================
+class TenantPipeline(Base):
+    """One column on one organization's board.
+
+    The board used to be a constant, which is right until the second industry
+    arrives: "Estimate sent" means everything to a contractor and nothing to a
+    salon. Rows here let each organization keep its own columns, in its own
+    order, in its own words.
+
+    `key` is what a contact stores and `label` is what a person reads, and they
+    are deliberately separate. Renaming a column on screen must not orphan
+    every contact standing in it, and translating a board must not change what
+    the analytics count.
+    """
+
+    __tablename__ = "tenant_pipelines"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "key", name="uq_pipeline_org_key"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    key: Mapped[str] = mapped_column(String(40), nullable=False)
+    label: Mapped[str] = mapped_column(String(60), nullable=False)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    colour: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="slate", server_default="slate"
+    )
+
+    # 'won' | 'lost' | 'unqualified' | null. See PIPELINE_OUTCOMES.
+    outcome: Mapped[str | None] = mapped_column(String(16))
+
+    # Where a brand-new contact lands. Exactly one row per organization should
+    # carry this; the seeder sets it on the first stage.
+    is_entry: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    created_at: Mapped[datetime] = _now_column()
+
+    organization: Mapped["Organization"] = relationship()
+
+
 class CRMContact(Base):
     """A lead. Unique per organization, not globally — the same person may
     talk to two different businesses on the platform."""
@@ -327,7 +421,7 @@ class CRMContact(Base):
     name: Mapped[str | None] = mapped_column(String(255))
     email: Mapped[str | None] = mapped_column(String(320))
     pipeline_stage: Mapped[str] = mapped_column(
-        String(50), nullable=False, default="LEAD", server_default="LEAD"
+        String(50), nullable=False, default="NEW_LEAD", server_default="NEW_LEAD"
     )
 
     # Free-form labels the operator applies from the CRM.
@@ -363,6 +457,61 @@ class CRMContact(Base):
     category_interest: Mapped[str | None] = mapped_column(String(80))
     colour_preference: Mapped[str | None] = mapped_column(String(80))
     budget_note: Mapped[str | None] = mapped_column(String(160))
+
+    # ---------------------------------------------------------------- profile
+    # What a person needs on screen to act on a lead, rather than what the
+    # agent happened to extract. These are columns and not entries in `memory`
+    # because they are filtered and sorted on, and because an operator types
+    # them in directly.
+    company: Mapped[str | None] = mapped_column(String(255))
+    service_requested: Mapped[str | None] = mapped_column(String(255))
+    project_address: Mapped[str | None] = mapped_column(Text)
+    budget: Mapped[str | None] = mapped_column(String(120))
+    timeline: Mapped[str | None] = mapped_column(String(120))
+    source: Mapped[str | None] = mapped_column(String(80))
+    photo_urls: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+
+    # Anything this industry needs that the columns above do not name. Kept
+    # deliberately loose: the alternative is a migration every time a tenant
+    # asks for one more field.
+    custom_fields: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    # What the qualification run has collected so far - job type, location,
+    # scope, ownership and the rest. A dict rather than columns because which
+    # slots matter is a per-tenant question.
+    qualification: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    # A short standing summary of the conversation, rewritten as it moves on,
+    # so somebody opening a thread does not have to read it from the top.
+    summary: Mapped[str | None] = mapped_column(Text)
+
+    # ---------------------------------------------------------------- control
+    # Human takeover. False means the agent stays out of this conversation
+    # entirely: inbound messages are recorded and shown, and nothing is
+    # generated. Checked before any reply is composed, not after.
+    ai_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
+    assigned_to: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+
+    # When an operator last opened this thread. Unread is derived from it
+    # rather than stored as a flag, because a flag and the messages it
+    # describes drift apart the first time anything writes one without the
+    # other.
+    last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # ---------------------------------------------------------------- consent
+    # Somebody who said STOP. Nothing outbound may be sent to them again -
+    # not a follow-up, not a broadcast, not an agent reply - and the timestamp
+    # is kept because "when did they opt out" is the question asked when a
+    # complaint arrives.
+    opt_out: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    opt_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = _now_column()
 
@@ -493,3 +642,65 @@ class KnowledgeDocument(Base):
     created_at: Mapped[datetime] = _now_column()
 
     organization: Mapped["Organization"] = relationship()
+
+
+# ============================== Operations ================================
+class AuditLog(Base):
+    """Who changed what, and to what.
+
+    Written for the configuration changes that alter how the agent treats
+    customers - a prompt edit, a pipeline reshuffle, a voice being applied, a
+    takeover. Not a general request log: an audit trail nobody can read is the
+    same as no audit trail, so only the things somebody would later need to
+    account for go in here.
+
+    `user_id` is nullable and set null on delete, because the record of a
+    change must outlive the account that made it.
+    """
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    action: Mapped[str] = mapped_column(String(80), nullable=False)
+    resource_type: Mapped[str | None] = mapped_column(String(40))
+    resource_id: Mapped[str | None] = mapped_column(String(64))
+
+    # Before and after, for the fields that moved. Whole objects are not
+    # stored: a prompt is long, and the question is always what changed.
+    changes: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = _now_column()
+
+
+class SystemError(Base):
+    """An operational failure worth a person seeing.
+
+    These already reach the container logs, which is the wrong place for them:
+    a client cannot read those, and by the time anybody does the question has
+    become "why did messages stop yesterday". Recorded per organization so the
+    dashboard can answer that without an engineer.
+
+    `organization_id` is nullable because some failures - a bridge that will
+    not start, a broker that is gone - belong to no tenant in particular.
+    """
+
+    __tablename__ = "system_errors"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    # 'whatsapp' | 'calendar' | 'llm' | 'delivery' | 'system'
+    category: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text)
+
+    # Set when an operator has seen it, so a list of failures can be worked
+    # through rather than only accumulated.
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _now_column()

@@ -232,7 +232,10 @@ def test_warm_stages_are_the_only_ones_nudged(monkeypatch):
     )
 
     assert tasks.schedule_followups(contact(sales_stage="QUALIFIED")) is not None
-    assert len(queued) == 2  # a 4-hour and a 24-hour nudge
+    # Three: at 4, 24 and 72 hours. The third was added with the opt-out work
+    # and is the last anybody gets - see MAX_FOLLOWUPS for why there is no
+    # fourth.
+    assert len(queued) == tasks.MAX_FOLLOWUPS
 
     queued.clear()
     assert tasks.schedule_followups(contact(sales_stage="NEW")) is None

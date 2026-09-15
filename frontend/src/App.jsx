@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Inbox, LogOut, Sparkles } from 'lucide-react'
 import useMonitorSocket from './useMonitorSocket.js'
 import { api, auth } from './api.js'
+import { DEFAULT_STAGES } from './format.js'
 import SignIn from './components/SignIn.jsx'
 import ConversationList from './components/ConversationList.jsx'
 import ConversationThread from './components/ConversationThread.jsx'
@@ -68,6 +69,10 @@ function Dashboard({ onSignedOut }) {
   const [threads, setThreads] = useState({})
   const [composing, setComposing] = useState(new Set())
   const [stats, setStats] = useState(null)
+  // This organization's own board. Seeded from the shared defaults so the
+  // columns never flicker between two different sets while the call is in
+  // flight, and replaced by whatever the server says belongs to this tenant.
+  const [stages, setStages] = useState(DEFAULT_STAGES)
   /**
    * Which pane a phone is showing. Three panes side by side is the right
    * layout on a desktop and impossible on a 390px screen, so below `lg` they
@@ -123,10 +128,21 @@ function Dashboard({ onSignedOut }) {
     }
   }, [])
 
+  const loadPipeline = useCallback(async () => {
+    try {
+      const board = await api.getPipeline()
+      if (board?.stages?.length) setStages(board.stages)
+    } catch {
+      // The defaults are already on screen and are what the server falls back
+      // to as well, so a failed read changes nothing a person would notice.
+    }
+  }, [])
+
   useEffect(() => {
     loadOrganizations()
     loadStats()
-  }, [loadOrganizations, loadStats])
+    loadPipeline()
+  }, [loadOrganizations, loadStats, loadPipeline])
 
   const countWaiting = useCallback(async () => {
     try {
@@ -397,6 +413,7 @@ function Dashboard({ onSignedOut }) {
           }}
           previews={previews}
           composing={composing}
+          stages={stages}
         />
         <ConversationThread
           className={`${mobilePane === 'thread' ? 'flex' : 'hidden'} lg:flex`}
@@ -410,10 +427,12 @@ function Dashboard({ onSignedOut }) {
           // Scheduling or cancelling a follow-up is stored on the contact, so
           // the list has to be re-read for the panel to show what it now says.
           onChanged={loadContacts}
+          stages={stages}
         />
         <PipelineBoard
           className={`${mobilePane === 'pipeline' ? 'flex' : 'hidden'} w-full lg:flex lg:w-[290px]`}
           contacts={contacts}
+          stages={stages}
           selectedId={selectedContact}
           onSelect={(id) => {
             setSelectedContact(id)

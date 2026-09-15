@@ -1,25 +1,60 @@
-export const STAGE_ORDER = ['LEAD', 'QUALIFIED', 'DEMO_BOOKED', 'CLOSED']
+/**
+ * The board is no longer a constant here.
+ *
+ * Each organization keeps its own columns, in its own order and its own words,
+ * so the stages arrive from /api/v1/pipeline and the screen renders whatever
+ * comes back. These defaults are the fallback for the moment before that call
+ * returns, and they match what the server falls back to, so the board never
+ * flickers between two different sets of columns.
+ *
+ * A contact stores a key and the screen shows a label. Renaming a column must
+ * not orphan the people standing in it.
+ */
+export const DEFAULT_STAGES = [
+  { key: 'NEW_LEAD', label: 'New lead', colour: 'slate' },
+  { key: 'CONTACTED', label: 'Contacted', colour: 'sky' },
+  { key: 'QUALIFIED', label: 'Qualified', colour: 'cyan' },
+  { key: 'ESTIMATE_SCHEDULED', label: 'Estimate scheduled', colour: 'violet' },
+  { key: 'ESTIMATE_SENT', label: 'Estimate sent', colour: 'amber' },
+  { key: 'FOLLOW_UP', label: 'Follow-up', colour: 'orange' },
+  { key: 'WON', label: 'Won', colour: 'emerald', outcome: 'won' },
+  { key: 'LOST', label: 'Lost', colour: 'rose', outcome: 'lost' },
+  { key: 'UNQUALIFIED', label: 'Unqualified', colour: 'zinc', outcome: 'unqualified' },
+]
 
-// Customer-facing wording — the database keeps the enum, the screen shows English.
-export const STAGE_LABEL = {
-  LEAD: 'New lead',
-  QUALIFIED: 'Interested',
-  DEMO_BOOKED: 'Booked',
-  CLOSED: 'Won',
+// Colour names rather than classes cross the wire, because a tenant picking a
+// colour should not be choosing a Tailwind utility string. Written out in full
+// so the class names survive Tailwind's build-time scan, which cannot see a
+// string this code assembles at runtime.
+const SWATCH = {
+  slate: { chip: 'bg-edge text-dim', dot: 'bg-faint' },
+  zinc: { chip: 'bg-edge text-dim', dot: 'bg-faint' },
+  sky: { chip: 'bg-customer/15 text-customer', dot: 'bg-customer' },
+  cyan: { chip: 'bg-customer/15 text-customer', dot: 'bg-customer' },
+  violet: { chip: 'bg-warn/15 text-warn', dot: 'bg-warn' },
+  amber: { chip: 'bg-warn/15 text-warn', dot: 'bg-warn' },
+  orange: { chip: 'bg-warn/15 text-warn', dot: 'bg-warn' },
+  emerald: { chip: 'bg-accent/15 text-accent', dot: 'bg-accent' },
+  rose: { chip: 'bg-crit/15 text-crit', dot: 'bg-crit' },
+}
+const FALLBACK_SWATCH = SWATCH.slate
+
+/** Look a stage up by the key a contact actually stores. */
+export function stageOf(stages, key) {
+  return (stages || DEFAULT_STAGES).find((stage) => stage.key === key) || null
 }
 
-export const STAGE_STYLE = {
-  LEAD: 'bg-edge text-dim',
-  QUALIFIED: 'bg-customer/15 text-customer',
-  DEMO_BOOKED: 'bg-warn/15 text-warn',
-  CLOSED: 'bg-accent/15 text-accent',
+/** What to call this stage on screen, falling back to the raw key. */
+export function stageLabel(stages, key) {
+  return stageOf(stages, key)?.label || key || 'Unknown'
 }
 
-export const STAGE_DOT = {
-  LEAD: 'bg-faint',
-  QUALIFIED: 'bg-customer',
-  DEMO_BOOKED: 'bg-warn',
-  CLOSED: 'bg-accent',
+export function stageChip(stages, key) {
+  return (SWATCH[stageOf(stages, key)?.colour] || FALLBACK_SWATCH).chip
+}
+
+export function stageDot(stages, key) {
+  return (SWATCH[stageOf(stages, key)?.colour] || FALLBACK_SWATCH).dot
 }
 
 export function initialsOf(name, phone) {

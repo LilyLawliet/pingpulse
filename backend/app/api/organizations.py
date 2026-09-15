@@ -21,6 +21,7 @@ from app.database import get_db
 from app.deps import ADMIN_ROLES, Tenant, current_org, current_user, membership_of
 from app.models import ChannelConfig, Organization, OrganizationMember, User
 from app.services import outbox, whatsapp
+from app.services import pipelines
 from app.schemas_tenancy import (
     ChannelConfigCreate,
     ChannelConfigOut,
@@ -55,6 +56,13 @@ async def create_organization(
         )
     )
     user.active_organization_id = organization.id
+
+    # Give it a board of its own straight away. Reading falls back to the
+    # defaults without these rows, but a tenant cannot rename or reorder a
+    # column that does not exist yet, so the first customisation would
+    # otherwise have nothing to edit.
+    await pipelines.seed(db, organization.id)
+
     await db.flush()
     await db.refresh(organization)
     return organization

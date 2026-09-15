@@ -10,7 +10,7 @@ import {
   User,
   X,
 } from 'lucide-react'
-import { STAGE_LABEL, STAGE_STYLE, clockOf, contactLabel, initialsOf, isPlaceholderNumber, prettyPhone } from '../format.js'
+import { clockOf, contactLabel, initialsOf, isPlaceholderNumber, prettyPhone, stageChip, stageLabel } from '../format.js'
 import { mediaUrl } from '../backend.js'
 import { api } from '../api.js'
 
@@ -350,6 +350,7 @@ export default function ConversationThread({
   onChanged,
   className = '',
   onBack,
+  stages,
 }) {
   const endRef = useRef(null)
 
@@ -419,10 +420,10 @@ export default function ConversationThread({
 
         <span
           className={`ml-auto rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider ${
-            STAGE_STYLE[contact.pipeline_stage] || STAGE_STYLE.LEAD
+            stageChip(stages, contact.pipeline_stage)
           }`}
         >
-          {STAGE_LABEL[contact.pipeline_stage] || contact.pipeline_stage}
+          {stageLabel(stages, contact.pipeline_stage)}
         </span>
       </header>
 

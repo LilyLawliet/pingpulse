@@ -29,7 +29,7 @@ export default function MetricStrip({ stats, contacts }) {
   return (
     <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-edge bg-edge lg:grid-cols-4">
       <Tile icon={MessagesSquare} label="Messages handled" value={replied} />
-      <Tile icon={UserPlus} label="People talking to you" value={contacts.length} />
+      <Tile icon={UserPlus} label="Active contacts" value={contacts.length} />
       <Tile
         icon={CalendarCheck}
         label="Booked"

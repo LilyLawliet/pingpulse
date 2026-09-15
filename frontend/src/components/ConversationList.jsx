@@ -1,5 +1,5 @@
 import { MessageSquare } from 'lucide-react'
-import { STAGE_LABEL, STAGE_STYLE, contactLabel, initialsOf, prettyPhone } from '../format.js'
+import { contactLabel, initialsOf, prettyPhone, stageChip, stageLabel } from '../format.js'
 
 export default function ConversationList({
   contacts,
@@ -8,6 +8,7 @@ export default function ConversationList({
   previews,
   composing,
   className = '',
+  stages,
 }) {
   return (
     <section className={`panel shrink-0 ${className}`}>
@@ -62,10 +63,10 @@ export default function ConversationList({
                 </span>
                 <span
                   className={`mt-1.5 inline-block rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
-                    STAGE_STYLE[contact.pipeline_stage] || STAGE_STYLE.LEAD
+                    stageChip(stages, contact.pipeline_stage)
                   }`}
                 >
-                  {STAGE_LABEL[contact.pipeline_stage] || contact.pipeline_stage}
+                  {stageLabel(stages, contact.pipeline_stage)}
                 </span>
               </span>
             </button>

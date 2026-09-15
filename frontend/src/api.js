@@ -200,6 +200,26 @@ export const api = {
   importLearnedFacts: (facts) =>
     request('/learning/facts', { method: 'POST', body: JSON.stringify({ facts }) }),
 
+  // ------------------------------ the board -----------------------------
+  // Each organization keeps its own columns, so the board is fetched rather
+  // than compiled in. The server always answers with one, falling back to the
+  // defaults for an organization that has not customised it.
+  getPipeline: () => request('/pipeline'),
+  savePipeline: (stages) =>
+    request('/pipeline', { method: 'PUT', body: JSON.stringify({ stages }) }),
+
+  // --------------------------- human takeover ---------------------------
+  setTakeover: (contactId, aiEnabled) =>
+    request(`/contacts/${contactId}/takeover`, {
+      method: 'POST',
+      body: JSON.stringify({ ai_enabled: aiEnabled }),
+    }),
+  markRead: (contactId) => request(`/contacts/${contactId}/read`, { method: 'POST' }),
+
+  // ------------------------------ what broke ----------------------------
+  listErrors: (days = 7) => request(`/errors?days=${days}`),
+  resolveError: (id) => request(`/errors/${id}/resolve`, { method: 'POST' }),
+
   // ------------------------------- misc ---------------------------------
   stats: () => request('/stats'),
 }

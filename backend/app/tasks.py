@@ -22,6 +22,7 @@ from celery import Celery
 from sqlalchemy import select
 
 from app.config import settings
+from app.services import consent
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,21 @@ SECOND_NUDGE = (
     "Still here whenever you're ready. Tell me the colour or budget you have in "
     "mind and I'll pull up what we have."
 )
+# The last one anybody gets. It says so, and it offers the way out, because a
+# third unanswered message is the point where persistence starts reading as
+# pestering and the honest thing is to stop and say we have stopped.
+THIRD_NUDGE = (
+    "I'll leave it there so I'm not filling up your phone — just message me any "
+    "time and I'll pick it straight back up. Reply STOP if you'd rather not hear "
+    "from us."
+)
+NUDGES = (FIRST_NUDGE, SECOND_NUDGE, THIRD_NUDGE)
+
+# Three, and the cap is here rather than in configuration because it is a
+# promise to the customer and not a dial. A fourth automated message to
+# somebody who has answered none of the first three is not a follow-up
+# strategy, it is the reason numbers get reported.
+MAX_FOLLOWUPS = 3
 
 
 def new_token() -> str:
@@ -112,7 +128,18 @@ def schedule_followups(contact, delays: tuple[float, ...] | None = None) -> str 
     if getattr(contact, "sales_stage", None) not in FOLLOWUP_STAGES:
         return None
 
-    hours = delays or (settings.followup_first_hours, settings.followup_second_hours)
+    # Nothing is queued for somebody who has asked us to stop. The running
+    # task checks again when it fires, because an opt-out usually lands in the
+    # hours between these two moments.
+    if getattr(contact, "opt_out", False):
+        return None
+
+    hours = delays or (
+        settings.followup_first_hours,
+        settings.followup_second_hours,
+        settings.followup_third_hours,
+    )
+    hours = hours[:MAX_FOLLOWUPS]
     token = new_token()
 
     for index, delay_hours in enumerate(hours):
@@ -174,6 +201,47 @@ async def _announce(contact, nudge, body: str) -> None:
         logger.warning("could not announce the follow-up for %s: %s", contact.id, exc)
 
 
+CANCELLED = "cancelled"
+OPTED_OUT = "opted out"
+
+
+def refuse_followup(contact, token: str, attempt: int, manual: bool) -> str | None:
+    """Why this queued nudge must not go out, or None if it may.
+
+    Separated from the task that sends it because the task owns a database
+    engine of its own — a worker has no FastAPI lifespan — and a rule this
+    important should be testable without one.
+
+    The order matters. A cancelled sequence is checked first because it is the
+    common case, and the opt-out before the stage gate because somebody who
+    said STOP gets nothing regardless of how warm the lead looked.
+    """
+    metadata = dict(getattr(contact, "contact_metadata", None) or {})
+    if metadata.get("followup_token") != token:
+        # The customer replied, or a newer reply re-armed the sequence.
+        return CANCELLED
+
+    # Including a nudge that was already queued when they said it. These sit in
+    # the broker for hours and the opt-out almost always arrives inside that
+    # window, so queue-time checking alone sends to somebody who asked us to
+    # stop.
+    if not consent.may_send(contact):
+        return OPTED_OUT
+
+    # The stage gate belongs to the automatic sequence: it is what stops the
+    # agent nudging a conversation that was never warm. An operator asking for
+    # a follow-up has already made that judgement.
+    if not manual and getattr(contact, "sales_stage", None) not in FOLLOWUP_STAGES:
+        return f"stage moved to {getattr(contact, 'sales_stage', None)}"
+
+    # A stale task carrying an attempt beyond the cap must not index past the
+    # end of NUDGES in the worker.
+    if not manual and attempt > MAX_FOLLOWUPS:
+        return f"past the {MAX_FOLLOWUPS}-nudge cap"
+
+    return None
+
+
 async def _run_followup(
     contact_id: str,
     organization_id: str,
@@ -205,17 +273,17 @@ async def _run_followup(
                 return "contact gone"
 
             metadata = dict(contact.contact_metadata or {})
-            if metadata.get("followup_token") != token:
-                # The customer replied, or a newer reply re-armed the sequence.
-                return "cancelled"
+            refusal = refuse_followup(contact, token, attempt, manual)
+            if refusal is not None:
+                if refusal == OPTED_OUT:
+                    # Drop the token too, so the rest of the queued sequence
+                    # becomes a no-op instead of each task rediscovering this.
+                    metadata.pop("followup_token", None)
+                    contact.contact_metadata = metadata
+                    await session.commit()
+                return refusal
 
-            # The stage gate belongs to the automatic sequence: it is what
-            # stops the agent nudging a conversation that was never warm. An
-            # operator asking for a follow-up has already made that judgement.
-            if not manual and contact.sales_stage not in FOLLOWUP_STAGES:
-                return f"stage moved to {contact.sales_stage}"
-
-            body = body_override or (FIRST_NUDGE if attempt == 1 else SECOND_NUDGE)
+            body = body_override or NUDGES[min(attempt, MAX_FOLLOWUPS) - 1]
 
             # A nudge must come from the same number the conversation is on.
             channel = await whatsapp.active_channel(session, contact.organization_id)

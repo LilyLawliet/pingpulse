@@ -115,6 +115,8 @@ class Settings(BaseSettings):
     followups_enabled: bool = True
     followup_first_hours: float = 4
     followup_second_hours: float = 24
+    # The last nudge. See MAX_FOLLOWUPS in tasks.py for why there is no fourth.
+    followup_third_hours: float = 72
 
     # Auth
     secret_key: str = "change-me-in-production-please-32-chars-min"

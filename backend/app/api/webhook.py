@@ -23,6 +23,7 @@ from app.models import ChannelConfig, CRMContact, LLMLog, Message, Organization
 from app.schemas import TwilioWebhookPayload
 from app.services import (
     analyzer,
+    consent,
     customer_memory,
     llm_service,
     media_service,
@@ -379,6 +380,38 @@ async def process_inbound_message(
             "image_analysis": image_analysis or None,
         },
     )
+
+    # ---- Step 0: is the agent allowed to answer this at all? -------------
+    # Both checks sit after the message is stored and broadcast, never before.
+    # A customer who opted out and a conversation a person has taken over both
+    # still have their messages recorded and shown on the dashboard: the shop
+    # needs to see what was said. What stops is the generating and the sending.
+    if consent.is_opt_out(body):
+        consent.record_opt_out(contact)
+        await db.commit()
+        await manager.broadcast(
+            ws_manager.EVENT_SYNC,
+            {"contact_id": str(contact.id), "organization_id": str(organization.id)},
+        )
+        logger.info("inbound from %s was an opt-out; nothing will be sent", phone_number)
+        return {"status": "opted_out", "contact_id": str(contact.id)}
+
+    if consent.is_opt_in(body) and contact.opt_out:
+        consent.record_opt_in(contact)
+        await db.commit()
+
+    if not consent.agent_may_reply(contact):
+        reason = "opted out" if contact.opt_out else "a person has taken this conversation over"
+        await manager.broadcast(
+            ws_manager.EVENT_SYNC,
+            {"contact_id": str(contact.id), "organization_id": str(organization.id)},
+        )
+        logger.info("no reply generated for %s: %s", phone_number, reason)
+        return {
+            "status": "not_answered",
+            "reason": "opt_out" if contact.opt_out else "human_takeover",
+            "contact_id": str(contact.id),
+        }
 
     # ---- Step 1: understand the message before answering it -------------
     analysis = await analyzer.analyse(history, body, contact.sales_stage)

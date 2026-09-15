@@ -1,14 +1,22 @@
 import { TrendingUp } from 'lucide-react'
-import { STAGE_DOT, STAGE_LABEL, STAGE_ORDER, contactLabel, initialsOf, prettyPhone } from '../format.js'
+import { DEFAULT_STAGES, contactLabel, initialsOf, prettyPhone, stageDot } from '../format.js'
 
 /**
  * Where every lead stands. Ordered by the funnel, so the shape of the
  * business reads before any individual name does.
  */
-export default function PipelineBoard({ contacts, selectedId, onSelect, className = '' }) {
-  const byStage = STAGE_ORDER.map((stage) => ({
+export default function PipelineBoard({
+  contacts,
+  selectedId,
+  onSelect,
+  stages = DEFAULT_STAGES,
+  className = '',
+}) {
+  // Driven by this organization's own columns rather than a constant, so a
+  // board that was renamed or reordered shows what its owner arranged.
+  const byStage = (stages.length ? stages : DEFAULT_STAGES).map((stage) => ({
     stage,
-    people: contacts.filter((c) => c.pipeline_stage === stage),
+    people: contacts.filter((c) => c.pipeline_stage === stage.key),
   }))
   const total = contacts.length || 1
 
@@ -21,17 +29,17 @@ export default function PipelineBoard({ contacts, selectedId, onSelect, classNam
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3.5 py-3.5">
         {byStage.map(({ stage, people }) => (
-          <div key={stage}>
+          <div key={stage.key}>
             <div className="mb-2 flex items-center gap-2">
-              <span className={`h-1.5 w-1.5 rounded-full ${STAGE_DOT[stage]}`} />
-              <span className="eyebrow">{STAGE_LABEL[stage]}</span>
+              <span className={`h-1.5 w-1.5 rounded-full ${stageDot(stages, stage.key)}`} />
+              <span className="eyebrow">{stage.label}</span>
               <span className="ml-auto font-mono text-xs text-dim">{people.length}</span>
             </div>
 
             {/* Share of the pipeline sitting at this stage. */}
             <div className="mb-2 h-1 overflow-hidden rounded-full bg-edge">
               <div
-                className={`h-full rounded-full ${STAGE_DOT[stage]} transition-[width] duration-500`}
+                className={`h-full rounded-full ${stageDot(stages, stage.key)} transition-[width] duration-500`}
                 style={{ width: `${(people.length / total) * 100}%` }}
               />
             </div>
