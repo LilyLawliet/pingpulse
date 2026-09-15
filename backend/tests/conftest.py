@@ -231,8 +231,12 @@ def offline_by_default(monkeypatch):
     monkeypatch.setattr(llm_service, "_gemini_once", offline)
     monkeypatch.setattr(vision, "analyse_image", no_vision)
 
-    # No Redis in unit tests; queuing is covered by the live suite.
+    # No Redis in unit tests; queuing is covered by the live suite. The same
+    # goes for alerts: without this, every escalation and failed delivery in
+    # the suite waits out a broker connect timeout, which turned a ninety
+    # second run into a nine minute one.
     monkeypatch.setattr(settings, "followups_enabled", False)
+    monkeypatch.setattr("app.tasks.queue_notification", lambda _id: True)
 
 
 @pytest.fixture(autouse=True)

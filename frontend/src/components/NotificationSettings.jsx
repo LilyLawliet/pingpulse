@@ -42,8 +42,6 @@ export default function NotificationSettings() {
 
   if (!state) return null
 
-  const enabled = new Set(state.events.filter((e) => e.enabled).map((e) => e.key))
-
   const toggle = (key) => {
     setState({
       ...state,
@@ -58,8 +56,11 @@ export default function NotificationSettings() {
     setError(null)
     setNote(null)
     try {
+      // A yes or no for every event on screen, rather than a list of the ones
+      // that are on. An event added to the server later then arrives at its
+      // own default instead of looking like something this shop refused.
       await api.saveNotificationSettings({
-        events: state.events.filter((e) => e.enabled).map((e) => e.key),
+        events: Object.fromEntries(state.events.map((e) => [e.key, e.enabled])),
         email: state.email || '',
       })
       setNote('Saved.')

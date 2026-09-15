@@ -27,6 +27,8 @@ from app.models import (
 from app.services import notifications
 
 
+
+
 # ------------------------------------------------------------------ settings
 def test_a_shop_that_never_opened_the_settings_page_still_gets_the_urgent_ones():
     """A missing config is the defaults, not silence.
@@ -57,11 +59,33 @@ def test_turning_everything_off_is_honoured():
 
 def test_settings_cannot_be_used_to_store_arbitrary_things():
     cleaned = notifications.clean_config(
-        {"events": ["escalation", "nonsense", "booking"], "email": "owner@shop.com"}
+        {"events": {"escalation": True, "nonsense": True, "booking": False},
+         "email": "owner@shop.com"}
     )
 
-    assert cleaned["events"] == ["escalation", "booking"]
+    assert "nonsense" not in cleaned["events"]
+    assert cleaned["events"]["escalation"] is True
+    assert cleaned["events"]["booking"] is False
     assert cleaned["email"] == "owner@shop.com"
+
+
+def test_an_event_added_later_is_not_silently_off():
+    """The reason this is a map and not a list of the ones that are on.
+
+    A shop that had ever opened the settings page would otherwise never
+    receive an event added afterwards - they did not turn it off, it was not
+    there to turn on - and the first one added this way was the disconnect
+    alert, which is the most important thing this can tell anybody.
+    """
+    saved_before_it_existed = Organization(
+        name="Early Adopter",
+        sales_prompt="Sell.",
+        notify_config={"events": {"escalation": True, "booking": False}, "email": ""},
+    )
+
+    assert notifications.wants(saved_before_it_existed, "whatsapp_down") is True
+    assert notifications.wants(saved_before_it_existed, "booking") is False
+    assert notifications.wants(saved_before_it_existed, "escalation") is True
 
 
 def test_something_that_is_not_an_email_is_not_stored_as_one():
@@ -568,3 +592,166 @@ async def test_a_broker_outage_does_not_cost_the_customer_their_reply(
     rows = (await db_session.execute(select(Notification))).scalars().all()
     assert len(rows) == 1
     assert rows[0].sent_at is None
+
+
+# ------------------------------------------------- the failure nothing sees
+@pytest.mark.asyncio
+async def test_a_logged_out_number_is_noticed(db_session, default_org):
+    """The real one, found in production three days after it happened.
+
+    Somebody logged the number out from their phone. WhatsApp killed the
+    session, no messages arrived, and because every other alert in this module
+    is triggered by an inbound message, nothing fired. The shop's agent was
+    dead and the only symptom was quiet.
+    """
+    from app.models import Message
+
+    # A shop that has clearly been using WhatsApp, and now has no channel.
+    contact = CRMContact(
+        organization_id=default_org.id, phone_number="+15550001", pipeline_stage="NEW_LEAD"
+    )
+    db_session.add(contact)
+    await db_session.flush()
+    db_session.add(
+        Message(
+            organization_id=default_org.id,
+            contact_id=contact.id,
+            sender="user",
+            content="hello",
+        )
+    )
+    await db_session.flush()
+
+    told = await notifications.watch_connections(db_session)
+
+    assert told == 1
+    from sqlalchemy import select
+
+    row = (
+        await db_session.execute(
+            select(Notification).where(Notification.event == "whatsapp_down")
+        )
+    ).scalars().one()
+    assert "no WhatsApp number is connected" in row.body
+    assert "pair the number again" in row.body
+
+
+@pytest.mark.asyncio
+async def test_a_shop_that_has_never_set_up_is_not_told_it_is_broken(
+    db_session, default_org
+):
+    """A tenant created an hour ago is not broken, it is new.
+
+    Telling them their number has stopped working would be wrong, and would
+    be the first thing they ever heard from us.
+    """
+    told = await notifications.watch_connections(db_session)
+
+    assert told == 0
+
+
+@pytest.mark.asyncio
+async def test_a_half_paired_session_counts_as_down(db_session, default_org):
+    """A channel row is not the same as a working connection.
+
+    The row survives a logout; the session status is what changes. Checking
+    only for the row's existence would report a dead number as healthy.
+    """
+    from app.models import ChannelConfig
+
+    db_session.add(
+        ChannelConfig(
+            organization_id=default_org.id,
+            channel="whatsapp",
+            provider="twilio",
+            whatsapp_provider="QR_SESSION",
+            phone_number="+923097209908",
+            session_status="LOGGED_OUT",
+        )
+    )
+    await db_session.flush()
+
+    told = await notifications.watch_connections(db_session)
+
+    assert told == 1
+
+
+@pytest.mark.asyncio
+async def test_a_working_number_is_left_alone(db_session, default_org):
+    from app.models import ChannelConfig
+
+    db_session.add(
+        ChannelConfig(
+            organization_id=default_org.id,
+            channel="whatsapp",
+            provider="twilio",
+            whatsapp_provider="QR_SESSION",
+            phone_number="+923097209908",
+            session_status="AUTHENTICATED",
+        )
+    )
+    await db_session.flush()
+
+    assert await notifications.watch_connections(db_session) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_number_that_stays_down_is_mentioned_once_a_day(
+    db_session, default_org
+):
+    """Not every five minutes.
+
+    The first alert is the useful one. The rest exist only so it is not
+    forgotten, and at loop frequency they would be the fastest way to get
+    somebody to switch alerts off entirely.
+    """
+    from app.models import ChannelConfig
+
+    db_session.add(
+        ChannelConfig(
+            organization_id=default_org.id,
+            channel="whatsapp",
+            provider="twilio",
+            whatsapp_provider="QR_SESSION",
+            phone_number="+923097209908",
+            session_status="LOGGED_OUT",
+        )
+    )
+    await db_session.flush()
+
+    first = await notifications.watch_connections(db_session)
+    second = await notifications.watch_connections(db_session)
+
+    assert first == 1
+    assert second == 0
+
+
+@pytest.mark.asyncio
+async def test_a_shop_that_turned_this_off_is_not_told(db_session, default_org):
+    from app.models import ChannelConfig
+
+    default_org.notify_config = {"events": ["escalation"], "email": ""}
+    db_session.add(
+        ChannelConfig(
+            organization_id=default_org.id,
+            channel="whatsapp",
+            provider="twilio",
+            whatsapp_provider="QR_SESSION",
+            phone_number="+923097209908",
+            session_status="LOGGED_OUT",
+        )
+    )
+    await db_session.flush()
+
+    assert await notifications.watch_connections(db_session) == 0
+
+
+@pytest.mark.asyncio
+async def test_the_watcher_never_raises(db_session):
+    """It runs in a loop in the app process. It may not take the app with it."""
+
+    class Broken:
+        async def execute(self, *_a, **_k):
+            raise RuntimeError("the database is gone")
+
+    assert await notifications.watch_connections(Broken()) == 0

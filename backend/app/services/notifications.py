@@ -65,24 +65,45 @@ EMAIL_TIMEOUT = 15
 
 
 # ------------------------------------------------------------------ settings
+def default_for(event: str) -> bool:
+    """Whether this event is loud enough to be on before anybody asks."""
+    for key, _, on in NOTIFY_EVENTS:
+        if key == event:
+            return on
+    return False
+
+
 def defaults() -> dict:
     """What a shop that has never opened the settings page gets."""
-    return {"events": [key for key, _, on in NOTIFY_EVENTS if on], "email": ""}
+    return {"events": {key: on for key, _, on in NOTIFY_EVENTS}, "email": ""}
 
 
 def wants(organization, event: str) -> bool:
     """Is this organization listening for this kind of thing?
 
-    A missing config is the defaults rather than silence - a client who never
-    found the settings page should still be told when somebody asks for a
-    human. An explicitly empty list, though, is a decision: it means every
-    alert was turned off on purpose, and it is honoured.
+    Stored as a choice per event rather than as a list of the ones that are
+    on, and the difference matters the first time an event is added. With a
+    list, a shop that had ever visited the settings page would silently never
+    receive the new one - they did not turn it off, it simply was not there to
+    be turned on - and the first such event added was the disconnect alert,
+    which is the single most important thing this can tell anybody.
+
+    So an event nobody has expressed an opinion about falls back to its own
+    default, and only an explicit false is silence.
     """
     config = getattr(organization, "notify_config", None) or {}
     chosen = config.get("events")
-    if not isinstance(chosen, list):
-        chosen = defaults()["events"]
-    return event in chosen
+
+    if isinstance(chosen, dict):
+        value = chosen.get(event)
+        return default_for(event) if value is None else bool(value)
+    # The shape this used to be stored in, read literally. Guessing that a
+    # list predates an event and therefore cannot have meant to exclude it
+    # would override somebody who switched everything off on purpose, and an
+    # empty list is about as clear as an instruction gets.
+    if isinstance(chosen, list):
+        return event in chosen
+    return default_for(event)
 
 
 def email_for(organization) -> str:
@@ -92,15 +113,22 @@ def email_for(organization) -> str:
 
 
 def clean_config(raw: dict) -> dict:
-    """What a settings form is allowed to store."""
+    """What a settings form is allowed to store.
+
+    Always written as a full map, so every event the shop has actually been
+    shown carries an explicit answer and anything added later is recognisably
+    new rather than indistinguishable from a refusal.
+    """
     events = raw.get("events")
-    if not isinstance(events, list):
-        events = defaults()["events"]
+    if isinstance(events, dict):
+        chosen = {key: bool(events[key]) for key in NOTIFY_KEYS if key in events}
+    elif isinstance(events, list):
+        chosen = {key: key in events for key in NOTIFY_KEYS}
+    else:
+        chosen = {key: default_for(key) for key in NOTIFY_KEYS}
+
     email = (raw.get("email") or "").strip()[:320]
-    return {
-        "events": [key for key in NOTIFY_KEYS if key in events],
-        "email": email if "@" in email else "",
-    }
+    return {"events": chosen, "email": email if "@" in email else ""}
 
 
 def push_available() -> bool:
@@ -348,10 +376,163 @@ async def raise_and_send(
     if row is None:
         return None
 
+    await _hand_to_worker(row.id)
+    return row
+
+
+async def _hand_to_worker(notification_id) -> None:
+    """Enqueue without blocking the event loop.
+
+    Celery's `.delay()` is synchronous socket work. Called straight from an
+    async handler it stops the whole process while the broker is contacted -
+    and this runs inside the request a customer is waiting on, so a slow Redis
+    would show up as every reply getting slower, which is a far stranger
+    symptom to diagnose than a missing notification.
+    """
     try:
         from app.tasks import queue_notification
 
-        queue_notification(row.id)
+        await asyncio.to_thread(queue_notification, notification_id)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("could not queue notification %s: %s", row.id, exc)
-    return row
+        logger.warning("could not queue notification %s: %s", notification_id, exc)
+
+
+# ------------------------------------------------------- the silent failure
+# Every other event in this module is triggered by an inbound message. That
+# leaves one hole, and it is the worst one: a number that has been logged out
+# receives nothing, so there is no message to trigger anything and the symptom
+# is silence. A shop can go days believing its agent is working.
+#
+# So this is the one thing that has to be gone looking for rather than
+# reacted to.
+WHATSAPP_DOWN = "whatsapp_down"
+
+# While it stays broken, say so once a day rather than every time the loop
+# runs. The first alert is the useful one; the point of the rest is only to
+# stop it being forgotten.
+DOWN_REPEAT_HOURS = 24
+
+# How often the watcher looks. Slow on purpose - this is a condition that
+# lasts hours, and a tighter loop would only find it a few minutes sooner
+# while asking the bridge for its health all day.
+WATCH_INTERVAL_SECONDS = 300
+
+
+async def connection_problem(db, organization) -> str | None:
+    """Why this organization cannot send or receive right now, or None."""
+    from app.services import whatsapp
+
+    channel = await whatsapp.active_channel(db, organization.id)
+    if channel is None:
+        return "no WhatsApp number is connected"
+    if channel.whatsapp_provider == "QR_SESSION":
+        status = (channel.session_status or "").upper()
+        if status != "AUTHENTICATED":
+            return f"the paired session is {status.lower() or 'not paired'}"
+    return None
+
+
+async def _told_recently(db, organization_id) -> bool:
+    since = datetime.now(timezone.utc) - timedelta(hours=DOWN_REPEAT_HOURS)
+    found = await db.scalar(
+        select(Notification.id)
+        .where(
+            Notification.organization_id == organization_id,
+            Notification.event == WHATSAPP_DOWN,
+            Notification.created_at >= since,
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
+async def watch_connections(db) -> int:
+    """Alert every shop whose number has stopped working. Never raises.
+
+    Only shops that have used WhatsApp before are checked. A tenant created an
+    hour ago and not yet set up is not broken, and telling them their number
+    has stopped working would be both wrong and the first thing they ever
+    heard from us.
+    """
+    from sqlalchemy import func, or_
+
+    from app.models import ChannelConfig, Message, Organization
+
+    told = 0
+    try:
+        ever_used = (
+            select(Organization)
+            .where(
+                or_(
+                    Organization.id.in_(select(ChannelConfig.organization_id)),
+                    Organization.id.in_(select(Message.organization_id)),
+                )
+            )
+        )
+        organizations = (await db.execute(ever_used)).scalars().all()
+
+        for organization in organizations:
+            try:
+                problem = await connection_problem(db, organization)
+                if problem is None:
+                    continue
+                if not wants(organization, WHATSAPP_DOWN):
+                    continue
+                if await _told_recently(db, organization.id):
+                    continue
+
+                last = await db.scalar(
+                    select(func.max(Message.created_at)).where(
+                        Message.organization_id == organization.id
+                    )
+                )
+                # Naive from SQLite, aware from PostgreSQL; both mean UTC.
+                if last is not None and last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+                when = f" The last message was {last.strftime('%d %b')}." if last else ""
+
+                row = await raise_alert(
+                    db,
+                    organization,
+                    WHATSAPP_DOWN,
+                    "Your WhatsApp is not connected",
+                    f"Nothing can be sent or received for {organization.name}: "
+                    f"{problem}.{when} Open the dashboard and pair the number again.",
+                )
+                if row is not None:
+                    told += 1
+                    await _hand_to_worker(row.id)
+            except Exception as exc:  # noqa: BLE001 - one bad tenant, not all of them
+                logger.warning("connection check failed for %s: %s", organization.id, exc)
+
+        if told:
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("the connection watcher could not run: %s", exc)
+    return told
+
+
+async def run_connection_watch(stop) -> None:
+    """The loop, started alongside the outbox drainer.
+
+    In the app process rather than a Celery beat container, because there is
+    no beat container and adding one to ship a five-minute poll would be a lot
+    of moving parts for a question that is one query wide.
+    """
+    import asyncio
+
+    from app.database import SessionLocal
+
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=WATCH_INTERVAL_SECONDS)
+            return
+        except asyncio.TimeoutError:
+            pass
+        try:
+            async with SessionLocal() as session:
+                told = await watch_connections(session)
+                if told:
+                    logger.warning("told %d organization(s) their WhatsApp is down", told)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("connection watch tick failed: %s", exc)

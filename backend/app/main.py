@@ -31,7 +31,7 @@ from app.config import settings
 from app.database import SessionLocal, engine
 from app.deps import resolve_token
 from app.schemas import ComponentHealth, HealthResponse
-from app.services import outbox, ws_manager
+from app.services import notifications, outbox, ws_manager
 from app.services.llm_service import probe_gemini, probe_groq
 from app.services.twilio_service import twilio_service
 from app.services.ws_manager import manager
@@ -97,11 +97,19 @@ async def lifespan(app: FastAPI):
     stop_bridge = asyncio.Event()
     bridge = asyncio.create_task(ws_manager.run_event_bridge(stop_bridge))
 
+    # The one failure nothing else can see. Every other alert is triggered by
+    # an inbound message, and a number that has been logged out receives
+    # none - so the symptom of the worst problem this product can have is
+    # silence, and somebody has to go and look for it.
+    stop_watch = asyncio.Event()
+    watch = asyncio.create_task(notifications.run_connection_watch(stop_watch))
+
     yield
 
     stop_drainer.set()
     stop_bridge.set()
-    for task in (drainer, bridge):
+    stop_watch.set()
+    for task in (drainer, bridge, watch):
         task.cancel()
         try:
             await task

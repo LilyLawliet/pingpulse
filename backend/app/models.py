@@ -883,6 +883,11 @@ class Notification(Base):
 # on to begin with.
 NOTIFY_EVENTS: tuple[tuple[str, str, bool], ...] = (
     # key, what it means, on by default
+    # First because it is the one that matters most and the one the rest of
+    # this system cannot otherwise see. Every other event here is triggered by
+    # an inbound message; a number that has been logged out receives nothing,
+    # so silence is the symptom and nothing would ever fire.
+    ("whatsapp_down", "Your WhatsApp number has stopped working", True),
     ("escalation", "Somebody asked for a person, or complained", True),
     ("booking", "Somebody wants to book a time", True),
     ("delivery_failure", "A message could not be delivered", True),
