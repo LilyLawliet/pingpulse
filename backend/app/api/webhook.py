@@ -25,6 +25,8 @@ from app.services import (
     agent_config,
     analyzer,
     consent,
+    qualification,
+    summarise,
     customer_memory,
     llm_service,
     media_service,
@@ -507,6 +509,13 @@ async def process_inbound_message(
     )
     knowledge = retrieval.as_prompt_block(chunks)
 
+    # What is known about the job and the one gap worth closing. Empty until a
+    # slot has been filled or a tenant has configured slots, so a shop that
+    # never touches this sees no change in how its agent answers.
+    job = qualification.as_prompt_block(organization, contact.qualification)
+    if job:
+        knowledge = "\n\n".join(filter(None, [knowledge, job]))
+
     products: list = []
     outbound_media: list[str] = []
 
@@ -687,6 +696,23 @@ async def process_inbound_message(
                 setattr(contact, field, value)
         if learned:
             logger.info("learned about %s: %s", phone_number, learned)
+
+    # What this job actually is. Runs after the reply is on its way, only ever
+    # adds, and never raises - a customer who named a budget once has not
+    # withdrawn it by failing to repeat it.
+    slots = await qualification.extract(organization, list(history) + [inbound], body)
+    if slots:
+        contact.qualification = qualification.merge(contact.qualification, slots)
+
+    # A standing summary for whoever opens this thread cold, refreshed on a
+    # cadence rather than every turn: rewriting it after "ok thanks" spends a
+    # model call to produce the same sentence.
+    if summarise.is_due(len(history) + 1, bool(contact.summary)):
+        written = await summarise.write(list(history) + [inbound], body)
+        if written.get("summary"):
+            contact.summary = written["summary"]
+        if written.get("next_action"):
+            contact.next_action = written["next_action"][:120]
 
     # The customer wrote back, so any pending nudge is cancelled by clearing
     # the token the queued tasks check against.
