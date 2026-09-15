@@ -389,6 +389,17 @@ async def _run_notification(notification_id: str) -> str:
 
             result = await notifications.deliver(session, organization, row)
             await session.commit()
+
+            # Committed first, so the record of what failed survives whatever
+            # the retry does. The caller turns this into a Celery retry.
+            failed = [
+                name for name, outcome in result.items()
+                if outcome and outcome.startswith("failed")
+            ]
+            if failed and row.sent_at is None:
+                raise RuntimeError(
+                    "could not deliver on: " + ", ".join(sorted(failed))
+                )
             return f"push={result['push']} email={result['email']}"
     finally:
         await engine.dispose()

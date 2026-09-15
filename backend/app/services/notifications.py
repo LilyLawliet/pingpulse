@@ -61,7 +61,14 @@ MAX_SUBSCRIPTIONS = 40
 MAX_FAILURES = 5
 
 PUSH_TIMEOUT = 8
-EMAIL_TIMEOUT = 15
+
+# Gmail wants a TCP connect, a STARTTLS negotiation and an AUTH round trip
+# before it will take a message, and from a cold container that measured over
+# fifteen seconds - which is how the first real alert failed while the inline
+# test from a warm process had just succeeded. Nobody is waiting on this: it
+# runs in a worker, so a generous timeout costs nothing and a tight one costs
+# the alert.
+EMAIL_TIMEOUT = 45
 
 
 # ------------------------------------------------------------------ settings
@@ -363,28 +370,53 @@ async def _send_email(organization, notification: Notification) -> str:
         return f"failed: {type(exc).__name__}"
 
 
+def _failed(outcome: str | None) -> bool:
+    """Did this channel fail in a way worth trying again?
+
+    "not configured" and "no devices" are settled answers, not failures. Only
+    something that broke gets another go.
+    """
+    return bool(outcome) and outcome.startswith("failed")
+
+
 async def deliver(db, organization, notification: Notification) -> dict:
     """Actually send one recorded notification. Never raises.
 
     Both channels are attempted even if the first fails, because they exist
-    for each other: email is what catches the person whose browser is shut,
-    and push is what catches the person whose email is buried.
-    """
-    result = {"push": "skipped", "email": "skipped"}
-    try:
-        result["push"] = await _send_push(db, notification)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("push delivery failed: %s", exc)
-        result["push"] = f"failed: {type(exc).__name__}"
-    try:
-        result["email"] = await _send_email(organization, notification)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("email delivery failed: %s", exc)
-        result["email"] = f"failed: {type(exc).__name__}"
+    for each other: email catches the person whose browser is shut, push
+    catches the person whose email is buried.
 
+    A channel that already succeeded on an earlier attempt is skipped. Without
+    that, one transient email failure alongside a delivered push would mean
+    the retry buzzed everybody a second time about something they had already
+    been told.
+    """
+    previous = notification.delivery or {}
+    result = dict(previous) if previous else {"push": "skipped", "email": "skipped"}
+
+    if not previous or _failed(previous.get("push")):
+        try:
+            result["push"] = await _send_push(db, notification)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("push delivery failed: %s", exc)
+            result["push"] = f"failed: {type(exc).__name__}"
+
+    if not previous or _failed(previous.get("email")):
+        try:
+            result["email"] = await _send_email(organization, notification)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("email delivery failed: %s", exc)
+            result["email"] = f"failed: {type(exc).__name__}"
+
+    # Only finished when nothing is still failing. Stamping sent_at regardless
+    # made every transient failure permanent: the retry would read "already
+    # sent" and return without trying, so an alert lost to one slow handshake
+    # was lost for good.
+    unfinished = any(_failed(value) for value in result.values())
     try:
         notification.delivery = result
-        notification.sent_at = datetime.now(timezone.utc)
+        if not unfinished:
+            notification.sent_at = datetime.now(timezone.utc)
         await db.flush()
     except Exception as exc:  # noqa: BLE001
         logger.warning("could not record delivery of %s: %s", notification.id, exc)

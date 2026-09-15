@@ -875,3 +875,95 @@ def test_a_placeholder_address_is_not_offered():
     assert notifications.usable_address("not an address") == ""
     assert notifications.usable_address(None) == ""
     assert notifications.usable_address("  owner@realshop.co.uk ") == "owner@realshop.co.uk"
+
+
+# ------------------------------------------------------- failure and retry
+@pytest.mark.asyncio
+async def test_a_failed_send_is_not_marked_as_finished(db_session, default_org, monkeypatch):
+    """The bug the first real alert hit.
+
+    Gmail's cold TLS handshake took longer than the timeout allowed, the send
+    failed, and sent_at was stamped anyway - so the retry read "already sent"
+    and returned without trying. One slow handshake lost the alert for good.
+    """
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example")
+    monkeypatch.setattr(settings, "smtp_from", "bot@example")
+    default_org.notify_config = {"events": {"escalation": True}, "email": "who@example.com"}
+
+    async def times_out(*_a, **_k):
+        raise TimeoutError()
+
+    monkeypatch.setattr(notifications, "_send_email", times_out)
+
+    row = Notification(
+        organization_id=default_org.id, event="escalation", title="t", body="b"
+    )
+    db_session.add(row)
+    await db_session.flush()
+
+    result = await notifications.deliver(db_session, default_org, row)
+
+    assert result["email"].startswith("failed")
+    assert row.sent_at is None, "a failed send must stay open for a retry"
+
+
+@pytest.mark.asyncio
+async def test_a_retry_does_not_buzz_everybody_again(db_session, default_org, monkeypatch):
+    """Push went out, email did not. Only email should be tried again.
+
+    Without this, one transient email failure alongside a delivered push means
+    the retry pushes a second time about something they were already told.
+    """
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example")
+    monkeypatch.setattr(settings, "smtp_from", "bot@example")
+    default_org.notify_config = {"events": {"escalation": True}, "email": "who@example.com"}
+
+    pushes = []
+
+    async def push(*_a, **_k):
+        pushes.append(1)
+        return "1 of 1"
+
+    emails = []
+
+    async def email(*_a, **_k):
+        emails.append(1)
+        return "sent" if len(emails) > 1 else "failed: TimeoutError"
+
+    monkeypatch.setattr(notifications, "_send_push", push)
+    monkeypatch.setattr(notifications, "_send_email", email)
+
+    row = Notification(
+        organization_id=default_org.id, event="escalation", title="t", body="b"
+    )
+    db_session.add(row)
+    await db_session.flush()
+
+    first = await notifications.deliver(db_session, default_org, row)
+    assert first["push"] == "1 of 1" and first["email"].startswith("failed")
+    assert row.sent_at is None
+
+    second = await notifications.deliver(db_session, default_org, row)
+
+    assert len(pushes) == 1, "the retry pushed again"
+    assert second["push"] == "1 of 1"
+    assert second["email"] == "sent"
+    assert row.sent_at is not None
+
+
+@pytest.mark.asyncio
+async def test_an_unconfigured_channel_is_not_a_failure(db_session, default_org):
+    """"not configured" and "no devices" are answers, not errors.
+
+    Treating them as failures would retry every alert twice for a shop that
+    has simply not set anything up.
+    """
+    row = Notification(
+        organization_id=default_org.id, event="escalation", title="t", body="b"
+    )
+    db_session.add(row)
+    await db_session.flush()
+
+    await notifications.deliver(db_session, default_org, row)
+
+    assert row.sent_at is not None
