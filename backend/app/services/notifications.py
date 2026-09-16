@@ -392,7 +392,11 @@ async def deliver(db, organization, notification: Notification) -> dict:
     been told.
     """
     previous = notification.delivery or {}
-    result = dict(previous) if previous else {"push": "skipped", "email": "skipped"}
+    # Both keys always present, whatever shape the stored map turned out to
+    # be. A row missing one raised a KeyError on the way out, which the task
+    # could only read as a delivery failure - so it retried, hit the same
+    # KeyError, and gave up without ever having tried to send anything.
+    result = {"push": "skipped", "email": "skipped", **previous}
 
     if not previous or _failed(previous.get("push")):
         try:
@@ -562,13 +566,15 @@ async def watch_connections(db) -> int:
                     f"{problem}.{when} Open the dashboard and pair the number again.",
                 )
                 if row is not None:
+                    # Committed before the worker is told, so the row is
+                    # readable the instant the task is picked up. Here the
+                    # window would otherwise stay open across every remaining
+                    # tenant in the loop, which is as wide as it gets.
+                    await db.commit()
                     told += 1
                     await _hand_to_worker(row.id)
             except Exception as exc:  # noqa: BLE001 - one bad tenant, not all of them
                 logger.warning("connection check failed for %s: %s", organization.id, exc)
-
-        if told:
-            await db.commit()
     except Exception as exc:  # noqa: BLE001
         logger.warning("the connection watcher could not run: %s", exc)
     return told

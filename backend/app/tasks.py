@@ -363,6 +363,18 @@ def schedule_customer_followup(
         raise self.retry(exc=exc, countdown=300)
 
 
+class NotYetVisible(Exception):
+    """The row was handed over before the transaction that wrote it committed.
+
+    Every caller flushes the notification, hands the id to the worker, and
+    commits afterwards - often with a websocket broadcast in between. The
+    worker reads through its own connection, so for that window the row does
+    not exist yet, and a worker on the same host as the broker gets there in
+    single-digit milliseconds. Treating that as "gone" loses the alert
+    permanently and silently, because returning a string is a success.
+    """
+
+
 async def _run_notification(notification_id: str) -> str:
     """Deliver one recorded notification, inside the worker's own loop."""
     from app.models import Notification, Organization
@@ -377,7 +389,9 @@ async def _run_notification(notification_id: str) -> str:
         async with factory() as session:
             row = await session.get(Notification, uuid.UUID(notification_id))
             if row is None:
-                return "gone"
+                # Not "gone" - almost always "not committed yet". Worth a few
+                # quick goes before believing it was really rolled back.
+                raise NotYetVisible(notification_id)
             # Already delivered. A retry after a partial failure would send a
             # second copy of something the person has already been buzzed for.
             if row.sent_at is not None:
@@ -405,6 +419,14 @@ async def _run_notification(notification_id: str) -> str:
         await engine.dispose()
 
 
+# Two different reasons to come back, and they want different patience. A
+# mail server that timed out needs minutes; a transaction that has not landed
+# yet needs a moment, and waiting two minutes for it would hold an escalation
+# back long after it was readable.
+NOT_VISIBLE_RETRIES = 4
+NOT_VISIBLE_COUNTDOWN = 5
+
+
 @celery_app.task(name="pingpulse.deliver_notification", bind=True, max_retries=2)
 def deliver_notification(self, notification_id: str) -> str:
     """Send one alert to push and email.
@@ -417,6 +439,13 @@ def deliver_notification(self, notification_id: str) -> str:
         outcome = asyncio.run(_run_notification(notification_id))
         logger.info("notification %s: %s", notification_id, outcome)
         return outcome
+    except NotYetVisible as exc:
+        logger.info("notification %s is not committed yet; looking again", notification_id)
+        raise self.retry(
+            exc=exc,
+            countdown=NOT_VISIBLE_COUNTDOWN,
+            max_retries=NOT_VISIBLE_RETRIES,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.error("notification %s failed: %s", notification_id, exc)
         raise self.retry(exc=exc, countdown=120)

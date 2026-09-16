@@ -967,3 +967,197 @@ async def test_an_unconfigured_channel_is_not_a_failure(db_session, default_org)
     await notifications.deliver(db_session, default_org, row)
 
     assert row.sent_at is not None
+
+
+# ------------------------------------------------- handed over before it exists
+def _run_task(task, argument):
+    """Call a Celery task body without wrecking the session's event loop.
+
+    The task calls `asyncio.run`, which closes the loop it made and leaves the
+    thread with none. In a worker about to move on that is nothing; in a test
+    session the next async test then fails with "no current event loop" for a
+    reason that has nothing to do with it.
+    """
+    import asyncio
+
+    try:
+        return task(argument)
+    finally:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+
+def test_a_row_the_worker_cannot_see_yet_is_not_treated_as_delivered(monkeypatch):
+    """The narrowest gap in the whole chain, and the quietest.
+
+    Every caller flushes the notification, hands the id to Celery and commits
+    afterwards - sometimes with a websocket fan-out in between. The worker
+    reads through its own connection, so until that commit lands the row does
+    not exist. Returning "gone" made that a *success*: the task finished, the
+    alert was never sent, and nothing anywhere said so.
+
+    In the one production alert on record the worker picked the task up 186ms
+    after the row was written. It won. Nothing made it likely to.
+    """
+    from app import tasks
+
+    async def not_committed_yet(_id):
+        raise tasks.NotYetVisible(_id)
+
+    monkeypatch.setattr(tasks, "_run_notification", not_committed_yet)
+
+    asked = {}
+
+    class Retrying(Exception):
+        pass
+
+    def retry(**kwargs):
+        asked.update(kwargs)
+        return Retrying()
+
+    monkeypatch.setattr(tasks.deliver_notification, "retry", retry)
+
+    with pytest.raises(Retrying):
+        _run_task(tasks.deliver_notification, "2b0a0e5e-0000-0000-0000-000000000001")
+
+    assert asked, "a row that was not visible yet was quietly dropped"
+    # Quickly, and more than twice. A committing transaction needs a moment,
+    # not the two minutes a refusing mail server needs.
+    assert asked["countdown"] == tasks.NOT_VISIBLE_COUNTDOWN
+    assert asked["countdown"] <= 15
+    assert asked["max_retries"] == tasks.NOT_VISIBLE_RETRIES
+
+
+def test_a_refused_mail_server_still_waits_the_long_time(monkeypatch):
+    """The two reasons to come back must not collapse into one countdown.
+
+    Five seconds is right for a transaction landing and useless for a mail
+    server that is rate-limiting; two minutes is the reverse.
+    """
+    from app import tasks
+
+    async def mail_refused(_id):
+        raise RuntimeError("could not deliver on: email")
+
+    monkeypatch.setattr(tasks, "_run_notification", mail_refused)
+
+    asked = {}
+
+    class Retrying(Exception):
+        pass
+
+    def retry(**kwargs):
+        asked.update(kwargs)
+        return Retrying()
+
+    monkeypatch.setattr(tasks.deliver_notification, "retry", retry)
+
+    with pytest.raises(Retrying):
+        _run_task(tasks.deliver_notification, "2b0a0e5e-0000-0000-0000-000000000002")
+
+    assert asked["countdown"] == 120
+    assert "max_retries" not in asked, "a mail failure borrowed the quick budget"
+
+
+@pytest.mark.asyncio
+async def test_the_watcher_commits_before_it_tells_the_worker(
+    db_session, default_org, monkeypatch
+):
+    """Here the gap would stay open across every remaining tenant.
+
+    The loop used to commit once at the end, so the first shop's alert was
+    handed over and then sat uncommitted while every other organization was
+    checked - a window measured in queries, not milliseconds.
+    """
+    from app.models import Message
+
+    contact = CRMContact(
+        organization_id=default_org.id, phone_number="+15550009", pipeline_stage="NEW_LEAD"
+    )
+    db_session.add(contact)
+    await db_session.flush()
+    db_session.add(
+        Message(
+            organization_id=default_org.id,
+            contact_id=contact.id,
+            sender="user",
+            content="hello",
+        )
+    )
+    await db_session.flush()
+
+    order = []
+    real_commit = db_session.commit
+
+    async def watched_commit():
+        order.append("commit")
+        await real_commit()
+
+    monkeypatch.setattr(db_session, "commit", watched_commit)
+
+    async def handed(_id):
+        order.append("queued")
+
+    monkeypatch.setattr(notifications, "_hand_to_worker", handed)
+
+    assert await notifications.watch_connections(db_session) == 1
+    assert order.index("commit") < order.index("queued"), (
+        "the worker was told about a row that was not committed yet"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_worker_itself_refuses_to_call_a_missing_row_finished(tmp_path, monkeypatch):
+    """The line the bug was actually on.
+
+    The test above proves the task retries when told the row is not visible.
+    This proves the worker says so in the first place, against a real database
+    where the row genuinely is not there.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app import tasks
+    from app.models import Base
+
+    url = f"sqlite+aiosqlite:///{tmp_path.as_posix()}/alerts.db"
+    engine = create_async_engine(url, future=True)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    await engine.dispose()
+
+    monkeypatch.setattr(settings, "database_url", url)
+
+    with pytest.raises(tasks.NotYetVisible):
+        await tasks._run_notification("2b0a0e5e-0000-0000-0000-000000000003")
+
+
+@pytest.mark.asyncio
+async def test_a_half_written_delivery_map_does_not_burn_every_retry(
+    db_session, default_org, monkeypatch
+):
+    """A stored map missing a channel must not become a KeyError.
+
+    The report line reads both keys. A row carrying only one raised on the way
+    out, the task read that as a delivery failure, retried, raised again, and
+    exhausted its budget without ever attempting a send.
+    """
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example")
+    monkeypatch.setattr(settings, "smtp_from", "bot@example")
+    default_org.notify_config = {"events": {"escalation": True}, "email": "who@example.com"}
+
+    async def email(*_a, **_k):
+        return "sent"
+
+    monkeypatch.setattr(notifications, "_send_email", email)
+
+    row = Notification(
+        organization_id=default_org.id, event="escalation", title="t", body="b"
+    )
+    row.delivery = {"email": "failed: TimeoutError"}
+    db_session.add(row)
+    await db_session.flush()
+
+    result = await notifications.deliver(db_session, default_org, row)
+
+    assert result["email"] == "sent"
+    assert "push" in result, "the missing channel was never filled in"
+    assert f"push={result['push']} email={result['email']}"
