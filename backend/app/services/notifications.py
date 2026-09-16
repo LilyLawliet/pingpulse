@@ -177,15 +177,38 @@ def email_available() -> bool:
 
 
 # -------------------------------------------------------------------- record
+# How long an alert might still be on its way: two Celery retries two minutes
+# apart, plus the attempt itself. Younger than this and an undelivered row is
+# in flight; older and it has run out of chances.
+DELIVERY_HORIZON_MINUTES = 5
+
+
 async def _recently_told(db, organization_id, event: str, contact_id) -> bool:
-    """Have we already raised this, about this person, just now?"""
+    """Have we already *told* them this, about this person, just now?
+
+    Told, not raised. The cool-off exists so four angry messages are one buzz,
+    and a row that never reached anybody was not a buzz. Counting it silenced
+    the next occurrence too, so an escalation whose email timed out took the
+    following escalation down with it - the failure spreading rather than
+    being contained.
+
+    A row that is undelivered but still young is left counting, because it may
+    yet arrive and two buzzes is exactly what this is here to prevent.
+    """
+    from sqlalchemy import or_
+
     if settings.notify_cooloff_minutes <= 0:
         return False
-    since = datetime.now(timezone.utc) - timedelta(minutes=settings.notify_cooloff_minutes)
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(minutes=settings.notify_cooloff_minutes)
     query = select(Notification.id).where(
         Notification.organization_id == organization_id,
         Notification.event == event,
         Notification.created_at >= since,
+        or_(
+            Notification.sent_at.is_not(None),
+            Notification.created_at >= now - timedelta(minutes=DELIVERY_HORIZON_MINUTES),
+        ),
     )
     # An event with no contact - a delivery failure on the channel itself -
     # collapses per organization instead.
@@ -499,13 +522,26 @@ async def connection_problem(db, organization) -> str | None:
 
 
 async def _told_recently(db, organization_id) -> bool:
-    since = datetime.now(timezone.utc) - timedelta(hours=DOWN_REPEAT_HOURS)
+    """As with the cool-off: told, not raised.
+
+    A daily alert whose email failed would otherwise buy the outage another
+    full day of silence, which is the opposite of what the repeat is for.
+    """
+    from sqlalchemy import or_
+
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=DOWN_REPEAT_HOURS)
     found = await db.scalar(
         select(Notification.id)
         .where(
             Notification.organization_id == organization_id,
             Notification.event == WHATSAPP_DOWN,
             Notification.created_at >= since,
+            or_(
+                Notification.sent_at.is_not(None),
+                Notification.created_at
+                >= now - timedelta(minutes=DELIVERY_HORIZON_MINUTES),
+            ),
         )
         .limit(1)
     )

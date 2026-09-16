@@ -1161,3 +1161,110 @@ async def test_a_half_written_delivery_map_does_not_burn_every_retry(
     assert result["email"] == "sent"
     assert "push" in result, "the missing channel was never filled in"
     assert f"push={result['push']} email={result['email']}"
+
+
+# ------------------------------------------------ a failure must not spread
+@pytest.mark.asyncio
+async def test_an_alert_nobody_got_does_not_silence_the_next_one(
+    db_session, default_org
+):
+    """The cool-off counts buzzes, and a failed send was not a buzz.
+
+    Nine at night, a customer demands a manager, the email times out and the
+    retries run out. Ten minutes later they demand one again - and the first
+    row, which reached nobody, suppressed it. Two escalations, no alerts, and
+    the second failure caused by the first.
+    """
+    default_org.notify_config = {"events": {"escalation": True}}
+
+    stale = Notification(
+        organization_id=default_org.id,
+        event="escalation",
+        title="first",
+        body="b",
+    )
+    db_session.add(stale)
+    await db_session.flush()
+    # Raised ten minutes ago, delivered to nobody, out of retries.
+    stale.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    stale.sent_at = None
+    await db_session.flush()
+
+    again = await notifications.raise_alert(
+        db_session, default_org, "escalation", "second", "b"
+    )
+
+    assert again is not None, "a failed alert silenced the one that followed it"
+
+
+@pytest.mark.asyncio
+async def test_an_alert_still_on_its_way_does_silence_the_next_one(
+    db_session, default_org
+):
+    """The restraint has to survive the fix.
+
+    An undelivered row a few seconds old is not a failure, it is in flight.
+    Letting the next occurrence through would be the double buzz the cool-off
+    exists to prevent.
+    """
+    default_org.notify_config = {"events": {"escalation": True}}
+
+    in_flight = Notification(
+        organization_id=default_org.id,
+        event="escalation",
+        title="first",
+        body="b",
+    )
+    db_session.add(in_flight)
+    await db_session.flush()
+
+    again = await notifications.raise_alert(
+        db_session, default_org, "escalation", "second", "b"
+    )
+
+    assert again is None, "buzzed twice about one thing"
+
+
+@pytest.mark.asyncio
+async def test_an_outage_alert_nobody_got_is_raised_again_tomorrow(
+    db_session, default_org
+):
+    """Otherwise a failed daily alert buys the outage another day of quiet."""
+    from app.models import Message
+
+    contact = CRMContact(
+        organization_id=default_org.id, phone_number="+15550011", pipeline_stage="NEW_LEAD"
+    )
+    db_session.add(contact)
+    await db_session.flush()
+    db_session.add(
+        Message(
+            organization_id=default_org.id,
+            contact_id=contact.id,
+            sender="user",
+            content="hello",
+        )
+    )
+    db_session.add(
+        Notification(
+            organization_id=default_org.id,
+            event="whatsapp_down",
+            title="told once",
+            body="b",
+        )
+    )
+    await db_session.flush()
+
+    # An hour ago, and it reached nobody.
+    from sqlalchemy import select as sa_select
+
+    row = (
+        await db_session.execute(
+            sa_select(Notification).where(Notification.event == "whatsapp_down")
+        )
+    ).scalars().one()
+    row.created_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    row.sent_at = None
+    await db_session.flush()
+
+    assert await notifications.watch_connections(db_session) == 1
