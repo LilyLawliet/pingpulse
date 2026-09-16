@@ -591,6 +591,8 @@ async def run_connection_watch(stop) -> None:
 
     from app.database import SessionLocal
 
+    logger.info("connection watch started, looking every %ds", WATCH_INTERVAL_SECONDS)
+
     while not stop.is_set():
         try:
             await asyncio.wait_for(stop.wait(), timeout=WATCH_INTERVAL_SECONDS)
@@ -602,5 +604,11 @@ async def run_connection_watch(stop) -> None:
                 told = await watch_connections(session)
                 if told:
                     logger.warning("told %d organization(s) their WhatsApp is down", told)
+                else:
+                    # One line every five minutes, on purpose. This loop is the
+                    # only thing that notices a number has stopped working, and
+                    # a loop that has quietly died looks exactly like a loop
+                    # with nothing to report. Now it is possible to tell.
+                    logger.info("connection watch: nothing to report")
         except Exception as exc:  # noqa: BLE001
             logger.warning("connection watch tick failed: %s", exc)
