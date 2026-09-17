@@ -45,6 +45,35 @@ async def get_settings(
         )
     )
 
+    # Counted here so the dashboard learns about a failed alert from a call it
+    # was already making. A badge that needs its own request is a badge that
+    # gets dropped the first time somebody trims a render.
+    #
+    # Counted in Python rather than in SQL, and that is the point: the first
+    # version asked for rows with no sent_at, which missed the alert that
+    # finished having reached nobody - so the badge said one while the list
+    # underneath it showed two in red. Both now come from delivery_state, so
+    # they cannot disagree.
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    lately = (
+        await db.execute(
+            select(Notification)
+            .where(
+                Notification.organization_id == tenant.id,
+                Notification.created_at > now - timedelta(days=7),
+            )
+            .order_by(Notification.created_at.desc())
+            .limit(200)
+        )
+    ).scalars().all()
+    stuck = sum(
+        1
+        for row in lately
+        if notifications.delivery_state(row)["status"] == notifications.UNDELIVERED
+    )
+
     return {
         "events": [
             {
@@ -64,6 +93,9 @@ async def get_settings(
             getattr(tenant.user, "email", None)
         ),
         "devices": devices or 0,
+        # How many alerts in the past week ran out of chances without
+        # reaching anybody. Zero nearly always; the point is the other case.
+        "undelivered": stuck or 0,
         # What this deployment can actually do. A settings page offering email
         # on a server with no mail account configured is a promise it cannot
         # keep, so the browser is told which switches mean anything.
@@ -238,7 +270,15 @@ async def send_test(
 
     result = await notifications.deliver(db, organization, row)
     await db.commit()
-    return {"sent": True, "delivery": result}
+    # "Sent: true" with a delivery of {"push": "no devices", "email": "no
+    # address"} is a lie told in two parts, and it was the answer somebody
+    # got for pressing the button that exists to tell them the truth.
+    state = notifications.delivery_state(row)
+    return {
+        "sent": state["status"] == notifications.DELIVERED,
+        "delivery": result,
+        **state,
+    }
 
 
 @router.get("")
@@ -276,7 +316,11 @@ async def recent(
                 "title": row.title,
                 "body": row.body,
                 "contact_id": str(row.contact_id) if row.contact_id else None,
+                # The raw map stays for whoever is reading logs; the words
+                # beside it are what a person is shown. The browser is never
+                # asked to interpret "failed: TimeoutError".
                 "delivery": row.delivery or {},
+                **notifications.delivery_state(row),
                 "sent_at": row.sent_at,
                 "created_at": row.created_at,
             }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BellOff,
   ChartNoAxesColumn,
+  CircleAlert,
   Columns3,
   FlaskConical,
   Inbox,
@@ -120,6 +121,10 @@ function Dashboard({ onSignedOut }) {
   // Null until we know. Shown only once we are sure nothing can reach
   // them, so the warning never flashes up during a normal load.
   const [alertsReach, setAlertsReach] = useState(null)
+  // Alerts that ran out of chances without reaching anybody. Until now this
+  // was a row in a table with nothing on any screen, so "I was never told"
+  // and "it was never delivered" were the same thing seen from here.
+  const [alertsLost, setAlertsLost] = useState(0)
   // Only shown once there is something to act on — a button offering an empty
   // list is a button that teaches people to ignore it.
   const [waiting, setWaiting] = useState(0)
@@ -201,11 +206,13 @@ function Dashboard({ onSignedOut }) {
       await subscribeQuietly(settings)
       const after = await api.notificationSettings()
       setAlertsReach(after.devices > 0 || Boolean(after.email))
+      setAlertsLost(after.undelivered || 0)
     } catch {
       // Never a visible failure. An older deployment has no such endpoint,
       // and a dashboard that will not load because alerts could not be
       // checked would be a poor trade.
       setAlertsReach(null)
+      setAlertsLost(0)
     }
   }, [])
 
@@ -443,6 +450,25 @@ function Dashboard({ onSignedOut }) {
             >
               <BellOff size={12} />
               <span className="hidden sm:inline">Alerts off</span>
+            </button>
+          )}
+
+          {/*
+            Louder than "Alerts off", because it is worse. Alerts off means
+            nothing was ever set up; this means something was, and it failed
+            anyway - so the person believes they are covered and is not.
+          */}
+          {alertsLost > 0 && (
+            <button
+              onClick={() => document.getElementById('pp-settings')?.click()}
+              title={`${alertsLost} alert${alertsLost === 1 ? '' : 's'} could not be delivered - open alert settings to see why`}
+              className="flex items-center gap-1.5 rounded-full border border-crit/25 bg-crit/10 px-3 py-1.5 text-[11px] font-semibold text-crit transition-colors hover:bg-crit/15"
+            >
+              <CircleAlert size={12} />
+              <span className="hidden sm:inline">
+                {alertsLost} alert{alertsLost === 1 ? '' : 's'} missed
+              </span>
+              <span className="sm:hidden">{alertsLost}</span>
             </button>
           )}
 

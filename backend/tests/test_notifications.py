@@ -484,8 +484,18 @@ async def test_a_test_alert_ignores_the_cool_off_and_the_switches(client, org_a)
 
     assert first.status_code == 200, first.text
     assert second.status_code == 200
-    assert first.json()["sent"] is True
+    # Both presses were really attempted - the cool-off did not swallow the
+    # second and report the first one's success.
+    assert first.json()["delivery"]["push"] == "not configured"
     assert second.json()["delivery"]["push"] == "not configured"
+
+    # And neither of them reached anybody, so neither claims to have. This
+    # shop has no address and no device: "sent: true" was the button that
+    # exists to tell you the truth telling you the opposite.
+    body = second.json()
+    assert body["sent"] is False
+    assert body["status"] == "nowhere"
+    assert "nothing was set up" in body["summary"].lower()
 
 
 # ---------------------------------------------------- the headless path
@@ -1268,3 +1278,150 @@ async def test_an_outage_alert_nobody_got_is_raised_again_tomorrow(
     await db_session.flush()
 
     assert await notifications.watch_connections(db_session) == 1
+
+
+# ------------------------------------------------------ saying it in English
+def _row(delivery, *, sent=False, age_minutes=0):
+    from datetime import datetime as dt
+
+    row = Notification(event="escalation", title="t", body="b")
+    row.delivery = delivery
+    row.created_at = dt.now(timezone.utc) - timedelta(minutes=age_minutes)
+    row.sent_at = dt.now(timezone.utc) if sent else None
+    return row
+
+
+def test_nobody_is_ever_shown_a_python_exception_name():
+    """"failed: TimeoutError" names a class to somebody who wants to know
+    whether their phone will buzz tonight."""
+    state = notifications.delivery_state(
+        _row({"push": "no devices", "email": "failed: TimeoutError"}, age_minutes=60)
+    )
+
+    assert "TimeoutError" not in str(state)
+    assert "failed:" not in str(state)
+    assert state["status"] == "undelivered"
+    assert state["summary"] == "Could not be delivered"
+    assert "mail server did not answer" in state["detail"]
+
+
+def test_an_alert_that_reached_nobody_does_not_read_as_sent():
+    """The quietest way this feature can let somebody down.
+
+    No device registered and no address given: nothing failed, so the record
+    says delivered, and it looked exactly like success.
+    """
+    state = notifications.delivery_state(
+        _row({"push": "no devices", "email": "no address"}, sent=True)
+    )
+
+    assert state["status"] == "nowhere"
+    assert state["summary"] == "Nothing was set up to receive it"
+    assert "no device has been set up" in state["detail"]
+    assert "no email address has been given" in state["detail"]
+
+
+def test_every_device_refusing_is_not_a_success():
+    """"0 of 4" does not start with "failed", so it counted as delivered -
+    four registered devices and not one of them took it."""
+    state = notifications.delivery_state(
+        _row({"push": "0 of 4", "email": "no address"}, sent=True)
+    )
+
+    assert state["status"] == "undelivered"
+    assert "none of your 4 devices accepted it" in state["detail"]
+
+
+def test_having_nowhere_to_send_it_is_not_the_same_as_being_refused():
+    """The two used to share a sentence, and it argued with itself:
+    "Nothing was set up to receive it - none of your 3 devices accepted it"."""
+    refused = notifications.delivery_state(
+        _row({"push": "0 of 3", "email": "no address"}, sent=True)
+    )
+    nowhere = notifications.delivery_state(
+        _row({"push": "no devices", "email": "no address"}, sent=True)
+    )
+
+    assert refused["summary"] == "Reached nobody"
+    assert nowhere["summary"] == "Nothing was set up to receive it"
+    assert refused["summary"] != nowhere["summary"]
+    assert "nothing was set up" not in refused["summary"].lower()
+
+
+def test_one_channel_getting_through_is_enough():
+    state = notifications.delivery_state(
+        _row({"push": "no devices", "email": "sent"}, sent=True)
+    )
+
+    assert state["status"] == "delivered"
+    assert state["summary"] == "Reached your email"
+    assert state["detail"] is None
+
+
+def test_both_channels_are_named_when_both_worked():
+    state = notifications.delivery_state(
+        _row({"push": "2 of 2", "email": "sent"}, sent=True)
+    )
+
+    assert state["status"] == "delivered"
+    assert state["summary"] == "Reached 2 devices and your email"
+
+
+def test_one_device_is_not_called_1_devices():
+    state = notifications.delivery_state(_row({"push": "1 of 1", "email": "no address"}, sent=True))
+
+    assert state["summary"] == "Reached 1 device"
+
+
+def test_something_still_on_its_way_is_not_reported_as_lost():
+    """A minute-old failure is a retry pending, not a lost alert. Calling it
+    "could not be delivered" would have somebody chasing a phantom."""
+    state = notifications.delivery_state(
+        _row({"push": "no devices", "email": "failed: SMTPException"}, age_minutes=1)
+    )
+
+    assert state["status"] == "trying"
+    assert state["summary"] == "Still trying"
+
+
+@pytest.mark.asyncio
+async def test_the_dashboard_is_told_how_many_alerts_were_lost(client, org_a, db_session):
+    """The badge has to ride along with a call the dashboard already makes."""
+    from sqlalchemy import select as sa_select
+
+    from app.models import Organization
+
+    organization = (
+        await db_session.execute(
+            sa_select(Organization).where(Organization.id == org_a.organization_id)
+        )
+    ).scalars().one()
+
+    lost = Notification(
+        organization_id=organization.id, event="escalation", title="t", body="b"
+    )
+    db_session.add(lost)
+    await db_session.flush()
+    lost.created_at = datetime.now(timezone.utc) - timedelta(hours=2)
+    lost.sent_at = None
+    lost.delivery = {"push": "no devices", "email": "failed: TimeoutError"}
+    await db_session.commit()
+
+    # And one that finished having reached nobody, which has a sent_at and so
+    # was invisible to a query asking for rows without one.
+    refused = Notification(
+        organization_id=organization.id, event="escalation", title="t2", body="b"
+    )
+    db_session.add(refused)
+    await db_session.flush()
+    refused.created_at = datetime.now(timezone.utc) - timedelta(hours=3)
+    refused.sent_at = datetime.now(timezone.utc) - timedelta(hours=3)
+    refused.delivery = {"push": "0 of 2", "email": "no address"}
+    await db_session.commit()
+
+    response = await client.get("/api/v1/notifications/settings", headers=org_a.headers)
+
+    assert response.status_code == 200
+    # Two, matching what the list shows in red. A badge that disagrees with
+    # the list beneath it teaches people to trust neither.
+    assert response.json()["undelivered"] == 2

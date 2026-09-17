@@ -450,6 +450,149 @@ async def deliver(db, organization, notification: Notification) -> dict:
     return result
 
 
+# ------------------------------------------------------ saying it in English
+# The delivery map is written for whoever is reading the logs: "no devices",
+# "3 of 4", "failed: TimeoutError". None of that belongs on a screen a shop
+# owner reads, and the last one least of all - it names a Python class to
+# somebody who only wants to know whether their phone will buzz tonight.
+#
+# So the translation lives here rather than in the dashboard. The browser
+# never receives the raw words, which also means the desktop build and
+# anything else that talks to this API get the same sentences for free.
+
+DELIVERED = "delivered"
+TRYING = "trying"
+UNDELIVERED = "undelivered"
+NOWHERE = "nowhere"
+
+
+def _reached_somebody(outcome: str | None) -> bool:
+    """Did this channel actually put the alert in front of a person?
+
+    "0 of 4" is the one worth care: four devices are registered and not one
+    of them took it. Nothing about that string starts with "failed", so it
+    counted as a success and the alert was recorded as delivered to nobody.
+    """
+    if not outcome:
+        return False
+    if outcome == "sent":
+        return True
+    head = outcome.split(" of ")[0]
+    return head.isdigit() and int(head) > 0
+
+
+def _was_attempted(outcome: str | None) -> bool:
+    """Did we actually try to hand this to somebody?
+
+    "no devices" and "no address" mean there was nowhere to try. "0 of 3" and
+    "failed: ..." mean we tried and it did not land, which is a different
+    thing to tell a person and a different thing for them to do about it.
+    """
+    if not outcome:
+        return False
+    if outcome.startswith("failed"):
+        return True
+    head = outcome.split(" of ")[0]
+    return head.isdigit()
+
+
+def _why_not(channel: str, outcome: str | None) -> str | None:
+    """One plain clause for a channel that did not deliver."""
+    if outcome is None or _reached_somebody(outcome):
+        return None
+    if outcome.startswith("failed"):
+        return (
+            "your browser's alert service could not be reached"
+            if channel == "push"
+            else "the mail server did not answer"
+        )
+    if outcome == "not configured":
+        return (
+            "browser alerts are not set up on this server"
+            if channel == "push"
+            else "no mail account is set up on this server"
+        )
+    if outcome == "no devices":
+        return "no device has been set up to receive them"
+    if outcome == "no address":
+        return "no email address has been given"
+    if outcome.endswith(" of 0") or outcome.startswith("0 of"):
+        total = outcome.split(" of ")[-1]
+        return f"none of your {total} devices accepted it"
+    return None
+
+
+def delivery_state(notification) -> dict:
+    """What became of one alert, in words rather than in outcomes.
+
+    Four answers, and the fourth is the one worth having. "Nowhere" is an
+    alert that finished its journey without anybody seeing it - no device
+    registered, no address given - which the record calls sent, because
+    nothing failed. That is the quietest way this whole feature can let
+    somebody down, and until now it looked identical to success.
+    """
+    delivery = notification.delivery or {}
+    push = delivery.get("push")
+    email = delivery.get("email")
+
+    reached = []
+    if _reached_somebody(push):
+        count = push.split(" of ")[0]
+        reached.append(f"{count} device{'' if count == '1' else 's'}")
+    if _reached_somebody(email):
+        reached.append("your email")
+
+    if reached:
+        return {
+            "status": DELIVERED,
+            "summary": "Reached " + " and ".join(reached),
+            "detail": None,
+        }
+
+    reasons = [
+        clause
+        for clause in (_why_not("push", push), _why_not("email", email))
+        if clause
+    ]
+    detail = "; ".join(reasons) or None
+
+    still_failing = any(_failed(value) for value in (push, email))
+    if still_failing and notification.sent_at is None:
+        young = _within_delivery_horizon(notification)
+        return {
+            "status": TRYING if young else UNDELIVERED,
+            "summary": "Still trying" if young else "Could not be delivered",
+            "detail": detail,
+        }
+
+    # Having nowhere to send it and sending it to people who would not take it
+    # are different failures, and saying the first about the second produced a
+    # sentence that argued with itself: "Nothing was set up to receive it -
+    # none of your 3 devices accepted it". Three were set up. They refused.
+    if any(_was_attempted(value) for value in (push, email)):
+        return {
+            "status": UNDELIVERED,
+            "summary": "Reached nobody",
+            "detail": detail,
+        }
+
+    return {
+        "status": NOWHERE,
+        "summary": "Nothing was set up to receive it",
+        "detail": detail,
+    }
+
+
+def _within_delivery_horizon(notification) -> bool:
+    created = notification.created_at
+    if created is None:
+        return True
+    if created.tzinfo is None:  # naive from SQLite, aware from PostgreSQL
+        created = created.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - created
+    return age <= timedelta(minutes=DELIVERY_HORIZON_MINUTES)
+
+
 async def raise_and_send(
     db, organization, event: str, title: str, body: str, *, contact_id=None
 ) -> Notification | None:

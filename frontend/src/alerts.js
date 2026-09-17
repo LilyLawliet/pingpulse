@@ -129,6 +129,27 @@ export async function subscribeQuietly(settings) {
   }
 }
 
+/**
+ * Is *this* browser actually subscribed right now?
+ *
+ * Permission is not the answer. A browser can hold permission and have no
+ * subscription at all - the service worker was cleared, the push service
+ * dropped it, or the silent resubscribe failed quietly on load, which it is
+ * designed to do. The panel read permission alone and so offered to "stop
+ * alerting this device" while reporting that no device was set up: the two
+ * halves of one sentence disagreeing, with the truth in the unhelpful half.
+ */
+export async function deviceSubscribed() {
+  try {
+    if (!supported() || Notification.permission !== 'granted') return false
+    const registration = await navigator.serviceWorker.getRegistration()
+    const subscription = await registration?.pushManager?.getSubscription()
+    return Boolean(subscription)
+  } catch {
+    return false
+  }
+}
+
 /** Ask, then subscribe. Must be called from a real click. */
 export async function subscribeWithPrompt(settings) {
   if (!supported()) {
