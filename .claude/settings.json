@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gcloud compute ssh:*)",
+      "Bash(gcloud compute scp:*)"
+    ]
+  }
+}
