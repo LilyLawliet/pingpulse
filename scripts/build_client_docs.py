@@ -46,6 +46,14 @@ DOCUMENTS = {
             "Supersedes all earlier architecture and guide documents"
         ),
     },
+    "PingPulse_Alerts_And_Insight": {
+        "title": "Knowing What<br>Your Agent Did",
+        "lede": "Being told, the board, and the numbers — for when nobody is watching.",
+        "meta": (
+            "Release 1.3.3 &nbsp;·&nbsp; 17 September 2026 &nbsp;·&nbsp; "
+            "Read alongside What Changed, and How to Use It"
+        ),
+    },
     "PingPulse_Whats_New": {
         "title": "What Changed,<br>and How to Use It",
         "lede": "Everything added in 1.3.x, and the order to set it up in.",

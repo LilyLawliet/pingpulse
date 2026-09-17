@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PingPulse — Client Overview and Upgrade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+@page {
+  size: A4;
+  margin: 18mm 16mm 16mm 16mm;
+  @bottom-center { content: counter(page); }
+}
+
+:root {
+  --ink: #16202b;
+  --muted: #5b6b7a;
+  --line: #dde5ea;
+  --accent: #0f9c78;
+  --accent-soft: #eefaf5;
+  --navy: #0b1118;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+  font-size: 10.5pt;
+  line-height: 1.62;
+  margin: 0;
+}
+
+/* ---- cover ------------------------------------------------------------ */
+.cover {
+  background: var(--navy);
+  color: #eef4f8;
+  padding: 26mm 18mm 20mm 18mm;
+  margin: -18mm -16mm 12mm -16mm;
+}
+.cover .mark {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 8.5pt;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: #2fd8a8;
+  margin-bottom: 10mm;
+}
+.cover h1 {
+  font-size: 30pt;
+  line-height: 1.12;
+  margin: 0 0 5mm 0;
+  color: #ffffff;
+  border: 0;
+  padding: 0;
+}
+.cover .lede { font-size: 12pt; color: #b9c8d4; margin: 0 0 8mm 0; }
+.cover .meta {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 8.5pt;
+  color: #7f93a3;
+  border-top: 1px solid #24313d;
+  padding-top: 4mm;
+}
+
+/* ---- headings --------------------------------------------------------- */
+h1, h2, h3 { font-weight: 600; color: var(--navy); }
+h2 {
+  font-size: 15.5pt;
+  margin: 10mm 0 3mm 0;
+  padding-bottom: 2mm;
+  border-bottom: 2px solid var(--accent);
+  break-after: avoid;
+}
+h3 {
+  font-size: 11.5pt;
+  margin: 6mm 0 1.5mm 0;
+  color: var(--accent);
+  break-after: avoid;
+}
+p { margin: 0 0 3mm 0; }
+strong { color: var(--navy); }
+
+ul, ol { margin: 0 0 3mm 0; padding-left: 5mm; }
+li { margin-bottom: 1.4mm; }
+
+/* ---- tables ----------------------------------------------------------- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 3mm 0 5mm 0;
+  font-size: 9.5pt;
+  break-inside: avoid;
+}
+th {
+  text-align: left;
+  background: var(--accent-soft);
+  color: var(--navy);
+  font-weight: 600;
+  padding: 2.2mm 3mm;
+  border-bottom: 1.5px solid var(--accent);
+}
+td { padding: 2.2mm 3mm; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+
+/* ---- callouts --------------------------------------------------------- */
+blockquote {
+  margin: 4mm 0;
+  padding: 3.5mm 5mm;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 3px 3px 0;
+  color: var(--ink);
+  break-inside: avoid;
+}
+blockquote p:last-child { margin-bottom: 0; }
+
+/* ---- screenshots ------------------------------------------------------ */
+figure {
+  margin: 4mm 0 6mm 0;
+  break-inside: avoid;
+}
+figure img {
+  width: 100%;
+  display: block;
+  border: 1px solid #c9d6df;
+  border-radius: 4px;
+}
+figcaption {
+  font-size: 8.5pt;
+  color: var(--muted);
+  margin-top: 1.8mm;
+  padding-left: 2mm;
+  border-left: 2px solid var(--accent);
+  line-height: 1.45;
+}
+
+/* Fallback frame, only used if an image file is missing. */
+.shot {
+  border: 1.5px dashed #b7c6d2;
+  border-radius: 5px;
+  background: repeating-linear-gradient(45deg, #f7fafb 0 8px, #f1f6f8 8px 16px);
+  padding: 16mm 8mm;
+  margin: 4mm 0;
+  text-align: center;
+  break-inside: avoid;
+}
+.shot .tag {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 7.5pt;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: block;
+  margin-bottom: 2.5mm;
+}
+.shot .caption { font-size: 10pt; color: var(--muted); font-weight: 500; }
+
+hr { border: 0; border-top: 1px solid var(--line); margin: 7mm 0; }
+
+/* Keep a heading with the text under it. */
+h2, h3 { page-break-after: avoid; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="mark">PingPulse · WhatsApp AI Sales Agent</div>
+  <h1>Knowing What<br>Your Agent Did</h1>
+  <p class="lede">Being told, the board, and the numbers — for when nobody is watching.</p>
+  <div class="meta">Release 1.3.3 &nbsp;·&nbsp; 17 September 2026 &nbsp;·&nbsp; Read alongside What Changed, and How to Use It</div>
+</div>
+
+
+<p><strong>Release 1.3.3 — 17 September 2026</strong></p>
+<p>Your agent answers customers whether or not anybody is watching it. That is the whole
+point of it, and it is also the problem this release solves: the moments it <em>cannot</em>
+handle are exactly the moments nobody is there to notice.</p>
+<p>Until now, the only way to find out that a customer had demanded a manager at nine at
+night was to have the dashboard open at nine at night. This document covers the three
+ways you can now find out without it — being told, looking at the board, and looking at
+the numbers — and, at the end, what each one is actually for.</p>
+<p>Read it alongside <em>What Changed, and How to Use It</em>, which covers the 1.3 releases up to
+this one.</p>
+<hr />
+<h2>1. Everything new, in one page</h2>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>What it means for you</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Alerts</strong></td>
+<td>Seven things your agent can interrupt you about, by email and on your screen, with the dashboard shut.</td>
+</tr>
+<tr>
+<td><strong>A watch on your number</strong></td>
+<td>The one problem nothing else can see: a WhatsApp number that has quietly stopped working. Checked every five minutes.</td>
+</tr>
+<tr>
+<td><strong>Alert receipts</strong></td>
+<td>Every alert now says whether it reached you, and when it did not, why.</td>
+</tr>
+<tr>
+<td><strong>Your board</strong></td>
+<td>Your whole pipeline as columns you drag people across, with the value of each deal on the card.</td>
+</tr>
+<tr>
+<td><strong>The numbers</strong></td>
+<td>Where leads get stuck, how fast people get answered, what came in, where from, and what it is worth.</td>
+</tr>
+</tbody>
+</table>
+<p>Nothing here changes how your agent talks to customers. These are all ways of watching
+it, not ways of changing it.</p>
+<hr />
+<h2>2. Alerts</h2>
+<h3>2.1 What you can be told about</h3>
+<p>Seven things. Five are on before you touch anything; two are off, because they happen
+often enough to become noise.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>On by default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Your WhatsApp number has stopped working</td>
+<td><strong>Yes</strong></td>
+</tr>
+<tr>
+<td>Somebody asked for a person, or complained</td>
+<td><strong>Yes</strong></td>
+</tr>
+<tr>
+<td>Somebody wants to book a time</td>
+<td><strong>Yes</strong></td>
+</tr>
+<tr>
+<td>A message could not be delivered</td>
+<td><strong>Yes</strong></td>
+</tr>
+<tr>
+<td>Somebody asked to stop being messaged</td>
+<td><strong>Yes</strong></td>
+</tr>
+<tr>
+<td>A new person messaged for the first time</td>
+<td>No</td>
+</tr>
+<tr>
+<td>The agent could not answer something</td>
+<td>No</td>
+</tr>
+</tbody>
+</table>
+<p>The defaults lean quiet on purpose. A channel that cries wolf gets switched off within a
+week — and then the escalation that mattered is missed too. Start with the five, add the
+other two if you find you want them.</p>
+<h3>2.2 Where it reaches you</h3>
+<p>Two channels, and they exist for each other.</p>
+<p><strong>Email</strong> needs nothing installed and no permission. It reaches you on a machine you have
+never opened PingPulse on, on a phone in a pocket, on holiday. If you only set up one
+thing, set up this one.</p>
+<p><strong>Your browser</strong> shows an alert on screen even with the dashboard closed, as long as the
+browser is running. It is faster and more noticeable, and it costs one click per browser,
+on each machine — browsers will not let anybody skip that click, and nor should they.</p>
+<blockquote>
+<p>A browser that has already been allowed stays allowed. You will not be asked again on
+that machine, and a new tab or a cleared cache does not undo it.</p>
+</blockquote>
+<h3>2.3 Setting it up</h3>
+<p>Open <strong>your business settings</strong> from the organisation selector at the top of the
+dashboard, and scroll to <strong>Tell me when something happens</strong>.</p>
+<ol>
+<li><strong>Tick what is worth interrupting you.</strong> The five defaults are a reasonable place to
+   start.</li>
+<li><strong>Put an email address in.</strong> Your own is offered as a suggestion — one press fills it
+   in. Leave it empty for no email.</li>
+<li><strong>Press <em>Alert this device</em></strong> if you want alerts on screen as well. Your browser will
+   ask once; allow it.</li>
+<li><strong>Press <em>Send a test</em>.</strong> It sends a real alert through the real path and tells you
+   exactly what happened to it. If it says it reached nobody, it will say why.</li>
+</ol>
+<p>Step 4 is the one worth doing. The question you have is not "did my settings save" but
+"will I hear it", and only a real send answers that.</p>
+<h3>2.4 Why you do not get buzzed four times</h3>
+<p>An angry customer sending four messages in a row is one thing happening. Repeats about
+the same person and the same kind of event inside <strong>thirty minutes</strong> collapse into one
+alert.</p>
+<p>This holds across restarts and across the two channels — it is not a memory that gets
+lost.</p>
+<h3>2.5 The alert that goes looking</h3>
+<p>Six of the seven are triggered by a message arriving. That leaves one hole, and it is the
+worst one:</p>
+<blockquote>
+<p><strong>A WhatsApp number that has been logged out receives nothing.</strong> No messages arrive, so
+nothing triggers anything, and the symptom is silence. A business can go days believing
+its agent is working.</p>
+</blockquote>
+<p>So this one is gone looking for rather than reacted to. Every five minutes, PingPulse
+checks whether your number can actually send and receive. If it cannot, you are told —
+and told again once a day until it is fixed, because the first alert is the useful one
+and the rest only exist so it is not forgotten.</p>
+<p>Re-pairing the number stops it immediately.</p>
+<hr />
+<h2>3. When an alert does not arrive</h2>
+<p>An alert that fails is worse than no alert, because you believe you are covered and you
+are not. Every alert PingPulse raises is now recorded with what became of it, and the
+alert settings panel shows the last week of them.</p>
+<table>
+<thead>
+<tr>
+<th>What you see</th>
+<th>What it means</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Reached your email</strong> · <em>Reached 2 devices</em></td>
+<td>It got to you.</td>
+<td>Nothing.</td>
+</tr>
+<tr>
+<td><strong>Still trying</strong></td>
+<td>It failed once and is being retried.</td>
+<td>Wait a minute; it usually lands.</td>
+</tr>
+<tr>
+<td><strong>Could not be delivered</strong></td>
+<td>It ran out of chances. The reason is written beside it.</td>
+<td>Check the address, or set up a second channel.</td>
+</tr>
+<tr>
+<td><strong>Reached nobody</strong></td>
+<td>It was sent and not one device took it.</td>
+<td>Set up alerts on a browser you actually use.</td>
+</tr>
+<tr>
+<td><strong>Nothing was set up to receive it</strong></td>
+<td>There was nowhere to send it.</td>
+<td>Add an email address, or allow alerts on this browser.</td>
+</tr>
+</tbody>
+</table>
+<p>The last two are the ones worth knowing about, because until this release they looked
+exactly like success from the outside.</p>
+<p><strong>You do not have to go looking.</strong> If anything in the past week failed to reach you, a red
+<strong>"2 alerts missed"</strong> appears in the header, next to your connection status. Pressing it
+opens this list. On a phone it collapses to a red number.</p>
+<blockquote>
+<p>Whatever the alert was about happened anyway. A missed alert means you were not told;
+it does not mean the agent stopped working.</p>
+</blockquote>
+<hr />
+<h2>4. Your board</h2>
+<p>Your pipeline as columns, left to right, in the order a deal actually moves: <strong>new lead,
+contacted, qualified, estimate scheduled, estimate sent, follow-up</strong>, then <strong>won, lost,
+unqualified</strong>.</p>
+<ul>
+<li><strong>Drag a card</strong> to move somebody, or use the dropdown on the card — which is the half
+  that works on a phone.</li>
+<li><strong>The value of the deal</strong> shows on the card once you have set one.</li>
+<li>The columns are wider than the screen on purpose and scroll sideways. Squeezing nine
+  columns into a laptop makes all nine unreadable.</li>
+</ul>
+<p>Every move you make is recorded, which is what makes the funnel in the next section
+possible.</p>
+<hr />
+<h2>5. The numbers</h2>
+<p>Open <strong>How it is going</strong> from the header. Everything reads over a window you choose:
+<strong>today, 7 days, 30 days, 90 days, or all time</strong>. "Today" means today where your business
+is, not in UTC.</p>
+<p><strong>Money.</strong> What is in your pipeline, what you have won, and what is still open. Deals
+you marked lost are not counted as open pipeline. It tells you how many of your leads
+have a value on them at all, because a figure built from four of forty leads is not a
+forecast.</p>
+<p><strong>Where leads get to.</strong> How far people got, as a funnel. Two things worth knowing about
+how it is built:</p>
+<ul>
+<li>It follows a <strong>group of people over time</strong>, not a snapshot of where everyone stands
+  now. Somebody who came in last week and has since been won still counts as having
+  passed through every stage on the way.</li>
+<li>A lead is counted at <strong>the furthest point it reached</strong>. Losing somebody is not a stage —
+  a deal lost after an estimate counts as having reached the estimate.</li>
+</ul>
+<p><strong>Messages.</strong> What came in and what went out, over time. The bars group by hour, day or
+week depending on how long a window you picked.</p>
+<p><strong>How fast people get answered.</strong> Your median and your slowest replies. The median is the
+honest one — an average is dragged around by a single conversation somebody sat on
+overnight.</p>
+<p><strong>Where leads came from.</strong> Which source each person arrived through, so you can tell which
+advertising is producing conversations rather than clicks.</p>
+<blockquote>
+<p><strong>Nothing was backfilled.</strong> The funnel and the reply times started counting when this
+was switched on. Early windows will look thin; that is the data being honest rather
+than the feature being broken.</p>
+</blockquote>
+<hr />
+<h2>6. What each of these is actually for</h2>
+<h3>An angry customer at nine at night</h3>
+<p>A customer demands a manager. The agent correctly hands the conversation over and stops
+replying — which is right, and which also means nothing further happens until somebody
+notices.</p>
+<p><strong>Before:</strong> you find out in the morning, and the customer has spent the night being
+ignored.
+<strong>Now:</strong> an email arrives within seconds. You answer it from your phone, or you decide it
+can wait — but it is your decision rather than an accident.</p>
+<h3>A number that quietly stopped working</h3>
+<p>This is not hypothetical. A live PingPulse number sat logged out for several days. Every
+part of the system was healthy; the phone had simply dropped the session, and because a
+logged-out number receives nothing, nothing anywhere had a reason to complain.</p>
+<p><strong>Now:</strong> you are told within five minutes, and told again every day until the number is
+paired again.</p>
+<p>This is the single most valuable alert in the list, and it is the reason the list exists.</p>
+<h3>A quote that never went out</h3>
+<p>WhatsApp refuses a message — a number that is no longer valid, a media file it will not
+take, a rate limit. The agent recorded a perfectly good reply that never arrived.</p>
+<p><strong>Now:</strong> <em>A message could not be delivered</em> tells you which customer, so you can reach
+them another way rather than waiting on an answer to something they never saw.</p>
+<h3>Deciding whether the agent is earning its keep</h3>
+<p>Open <strong>How it is going</strong>, pick <em>30 days</em>, and read three numbers: how many conversations
+came in, how far they got, and how fast people were answered.</p>
+<p>The useful comparison is not against another business. It is against the same three
+numbers from before you had this — most owners already know, roughly, how long it used to
+take them to answer somebody in the evening.</p>
+<h3>Finding out where deals die</h3>
+<p>The funnel shows the drop between one stage and the next. A large fall between <em>estimate
+sent</em> and <em>follow-up</em> is not a software problem — it is a sales one, and it is the single
+most useful thing on that screen.</p>
+<h3>Deciding where to spend on advertising</h3>
+<p><strong>Where leads came from</strong> counts conversations, not clicks. A source producing a lot of
+first messages and nothing beyond <em>contacted</em> is buying you attention from the wrong
+people, which is worth knowing before you renew it.</p>
+<hr />
+<h2>7. What this does not do</h2>
+<p>Said plainly, because a tool that overstates itself is worse than one that admits a gap.</p>
+<ul>
+<li><strong>Alerts do not act.</strong> They tell you something happened. The agent has already stopped
+  replying in the cases that matter; the response is yours.</li>
+<li><strong>Browser alerts need a browser that is running.</strong> Closed laptop, no alert. Email does
+  not have this limitation, which is why it is the one to lean on.</li>
+<li><strong>A missed alert is not a missed event.</strong> The escalation, the booking, the opt-out all
+  happened and are all recorded. The alert is the messenger.</li>
+<li><strong>The numbers only know what they were told.</strong> A deal with no value set is not in the
+  money figures, and a lead whose stage was never moved sits where it was left.</li>
+<li><strong>Nothing here re-pairs your phone.</strong> The watcher will tell you your number is down
+  every day, accurately, indefinitely. Scanning the QR code again is the fix.</li>
+</ul>
+<hr />
+<h2>8. A short setup checklist</h2>
+<ol>
+<li>Open your business settings.</li>
+<li>Scroll to <strong>Tell me when something happens</strong>.</li>
+<li>Leave the five defaults ticked.</li>
+<li>Put an email address in and save.</li>
+<li>Press <strong>Send a test</strong> and read what it says.</li>
+<li>If you want on-screen alerts, press <strong>Alert this device</strong> and allow it — on each
+   machine you use.</li>
+<li>Check the header occasionally. A red badge there means something did not reach you.</li>
+</ol>
+<p>Five minutes, once. After that the only time you should think about any of this is when
+it interrupts you — which is the point.</p>
+</body>
+</html>
