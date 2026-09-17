@@ -1,11 +1,11 @@
 {
-  "version": "1.3.2",
-  "notes": "Your agent can now learn how you write and what you have already told customers, from your own past replies. Nothing changes until you read the draft and approve it.",
-  "pub_date": "2026-09-11T16:24:35+00:00",
+  "version": "1.3.3",
+  "notes": "Your alerts now tell you what became of them. Every alert shows whether it reached you, and when one did not, why - instead of failing quietly where nobody could see it.",
+  "pub_date": "2026-09-17T12:49:07+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjNXSHZ6c1NnRDJHNkU4ZnlremVSbE91em56RnVuYnRZczNoZ3UzRFVKb0JFanRraVo3cG15cS84NmxnL0d1UDJqbjE2ay93T2pwdkpUZ3dhSThnSXdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5MTQzODc0CWZpbGU6UGluZ1B1bHNlXzEuMy4yX3g2NC1zZXR1cC5leGUKeFkxeElyV1pjdWNYNUtLdVRyd2ExdHpCS3hnN2RURk5DR3l1ZnNYY0FVR1N6a3VuSjJSUHJWT2xMU1BicEphbTdVOHp0NjZKcTFqbDFLSXZyWS9vQ0E9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.3.2_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMndDb2JYRENhVEtTWG9JU3VOaWVBMVRTOGpTWWRNWS9MWlh4cTlNOHpxMm9oa0t2LzIwdDd2dWx0SFhCZ241QXRsa1FreTBjSDlCMElnZVp2MnNyY2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjQ5MzQ3CWZpbGU6UGluZ1B1bHNlXzEuMy4zX3g2NC1zZXR1cC5leGUKUW5kck4zUzgzSTBkS3haL2lwRnd1K2ZpdlNxaFNYTnM2SzBOb1NKNTNhbnNLL1A5M1NGbG5FM0pZcHAyQk5KT0d2NlZQNHBydjJrYThhdHY5Q2tVRGc9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.3.3_x64-setup.exe"
     }
   }
 }
