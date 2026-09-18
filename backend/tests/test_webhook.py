@@ -121,8 +121,12 @@ async def test_process_inbound_creates_contact_message_and_log(db_session, monke
     assert len(contacts) == 1
     assert contacts[0].phone_number == "+15551230000"
     assert contacts[0].name == "Dana"
-    # "cost" is a qualifying signal.
-    assert contacts[0].pipeline_stage == "QUALIFIED"
+    # Asking what something costs is a question, not a qualification. This
+    # asserted QUALIFIED on the strength of the word "cost" appearing, which
+    # is the same rule that marked a lead's estimate as scheduled because
+    # they used the word "schedule". A new lead stays a new lead until the
+    # configured qualification is actually answered.
+    assert contacts[0].pipeline_stage == "NEW_LEAD"
 
     messages = (await db_session.execute(select(Message))).scalars().all()
     assert {m.sender for m in messages} == {"user", "agent"}

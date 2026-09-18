@@ -264,3 +264,28 @@ def test_a_booked_lead_is_not_walked_back_by_small_talk():
         webhook.evaluate_stage("ESTIMATE_SCHEDULED", "thanks!", Shop(), {})
         == "ESTIMATE_SCHEDULED"
     )
+
+
+def test_the_model_cannot_assert_a_qualification_the_record_lacks():
+    """The clamp that was not enough.
+
+    Keeping the analyzer out of the verified stages still let it land on
+    QUALIFIED, and the two candidates are compared with max() - so it could
+    raise anybody to QUALIFIED with no qualification data at all. A live
+    contact reached WON down this route from a test conversation about
+    wedding shoes.
+    """
+    from app.services import analyzer
+
+    # This is the mapping that did it: the model calls a chat CLOSED and the
+    # board reads it as a sale.
+    assert analyzer.STAGE_TO_PIPELINE["CLOSED"] == "WON"
+    assert analyzer.STAGE_TO_PIPELINE["READY_TO_BUY"] == "ESTIMATE_SENT"
+
+    # And the ceiling the conversation may reach without the data is below it.
+    class Shop:
+        agent_config = {"qualification_slots": [{"name": "project_type", "asks": "x"}]}
+
+    ceiling = webhook.evaluate_stage("NEW_LEAD", "I'll take it", Shop(), {})
+    assert ceiling == "NEW_LEAD"
+    assert webhook.STAGE_ORDER.index(ceiling) < webhook.STAGE_ORDER.index("QUALIFIED")

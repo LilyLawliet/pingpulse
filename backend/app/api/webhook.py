@@ -895,16 +895,27 @@ async def process_inbound_message(
     )
     previous_stage = contact.pipeline_stage
     from_analyzer = analyzer.STAGE_TO_PIPELINE.get(contact.sales_stage, previous_stage)
+    new_stage = evaluate_stage(
+        previous_stage, body, organization, contact.qualification
+    )
     # The model reading a conversation as NEGOTIATION or CLOSED is an opinion
     # about a conversation, not a quote that went out or money that changed
     # hands. It was allowed to move the board into both, which is the same
     # fault as the keyword route and harder to see, because it looks like
-    # understanding rather than a string match.
-    if from_analyzer in VERIFIED_ONLY:
-        from_analyzer = CONVERSATIONAL_CEILING
-    new_stage = evaluate_stage(
-        previous_stage, body, organization, contact.qualification
-    )
+    # understanding rather than a string match. A live contact reached WON
+    # this way from a test conversation about wedding shoes.
+    #
+    # Capped at what the conversation itself justifies rather than merely kept
+    # out of the verified stages: capping it at QUALIFIED still let it *raise*
+    # anybody to QUALIFIED, because the two candidates are compared with max()
+    # further down - so the model could still assert a qualification the
+    # record did not contain. The pipeline column is now decided by human
+    # moves, verified actions and the qualification data, and by nothing that
+    # reads a conversation. The model still drives `sales_stage`, which is how
+    # it talks rather than a claim about the business.
+    if from_analyzer in STAGE_ORDER and new_stage in STAGE_ORDER:
+        if STAGE_ORDER.index(from_analyzer) > STAGE_ORDER.index(new_stage):
+            from_analyzer = new_stage
     # Both candidates have to be on the ladder to be compared on it. On a
     # customised board they will not be, and the contact stays put rather than
     # being moved into a column that does not exist for this tenant.
