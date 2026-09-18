@@ -68,8 +68,27 @@ QUALIFYING_SIGNALS = (
     "quote",
     "plan",
 )
-DEMO_SIGNALS = ("demo", "call", "meeting", "schedule", "book", "appointment", "trial")
-CLOSING_SIGNALS = ("sign up", "purchase", "buy", "invoice", "contract", "let us start")
+# Stages that describe something which happened outside the conversation: an
+# appointment exists, a quote went out, money was agreed. None of them can be
+# earned by a customer typing a word, and all three used to be.
+#
+# "can I schedule an estimate?" contains "schedule", so it moved the lead to
+# ESTIMATE_SCHEDULED with nothing booked and no time chosen - the board then
+# said a thing that was not true, and the client believed it. The match was a
+# substring too, so "I'll bookmark that" did it as well.
+#
+# WON was worse, because it feeds the money panel: "do I have to purchase
+# today?" marked the deal won and put a figure in a forecast that nobody had
+# agreed to pay.
+#
+# These are now reachable only from a human moving the card, or from a backend
+# action that completed and was verified.
+VERIFIED_ONLY = ("ESTIMATE_SCHEDULED", "ESTIMATE_SENT", "WON")
+
+# The furthest a conversation on its own may carry a lead. Talking to somebody
+# and finding out what they need are both things the conversation really is
+# evidence of; everything past that is not.
+CONVERSATIONAL_CEILING = "QUALIFIED"
 
 # The default ladder the automatic advancement climbs. Only the default keys
 # appear here: a tenant who renamed their board to ENQUIRY / BOOKED_IN / DONE
@@ -95,30 +114,120 @@ MEMORY_FIELDS = (
 )
 
 
-def evaluate_stage(current_stage: str, customer_message: str) -> str:
+def evaluate_stage(
+    current_stage: str,
+    customer_message: str,
+    organization=None,
+    collected: dict | None = None,
+) -> str:
     """Return the stage the contact should be in after this message.
 
-    Stages only ever move forward - a later casual message must not demote a
-    lead that already booked a demo.
-    """
-    text = (customer_message or "").lower()
+    Only two moves are on offer here, and both are things the conversation is
+    genuinely evidence of: somebody messaged us, and we now know enough about
+    what they want.
 
+    QUALIFIED is decided by whether the configured qualification is actually
+    complete, not by whether the customer said "price". Asking what something
+    costs is a question, and it used to be enough on its own.
+
+    Stages only ever move forward - a later casual message must not demote a
+    lead who really does have an appointment.
+    """
     # A contact on a stage this ladder does not know - anyone on a customised
     # board - is left exactly where their operator put them.
     if current_stage not in STAGE_ORDER:
         return current_stage
 
-    target = current_stage
-    if any(signal in text for signal in CLOSING_SIGNALS):
-        target = "WON"
-    elif any(signal in text for signal in DEMO_SIGNALS):
-        target = "ESTIMATE_SCHEDULED"
-    elif any(signal in text for signal in QUALIFYING_SIGNALS):
-        target = "QUALIFIED"
+    # Already past what a conversation can justify. Leave them alone: a lead
+    # with a booking must not be walked back to QUALIFIED by small talk.
+    if STAGE_ORDER.index(current_stage) >= STAGE_ORDER.index(CONVERSATIONAL_CEILING):
+        return current_stage
 
-    current_index = STAGE_ORDER.index(current_stage) if current_stage in STAGE_ORDER else 0
+    # Staying put is the default. An inbound message is evidence the customer
+    # did something, not that we did, and advancing on every one of them would
+    # empty the "new lead" column within milliseconds of it filling.
+    target = current_stage
+
+    # Complete qualification is a fact about data we hold, and it is checkable
+    # by anybody looking at the record - which is the whole difference between
+    # this and matching a word.
+    if organization is not None:
+        from app.services import qualification
+
+        wanted = qualification.slots_for(organization)
+        # A shop with qualification switched off has no unanswered slots, and
+        # "nothing is missing" would otherwise read as "fully qualified" and
+        # promote every contact on their first message. No questions asked is
+        # not the same as every question answered.
+        if wanted and not qualification.missing(organization, collected):
+            target = CONVERSATIONAL_CEILING
+
+    current_index = STAGE_ORDER.index(current_stage)
     target_index = STAGE_ORDER.index(target)
     return STAGE_ORDER[max(current_index, target_index)]
+
+
+# What the customer hears when their conversation stops being automated.
+#
+# Deliberately narrow about what it claims. It says what we actually did -
+# stopped the automatic replies and flagged the conversation - and not that a
+# person has been notified, because the alert is handed to a worker and has
+# not been delivered yet at the moment this is sent. Claiming a notification
+# that later failed would be the same lie in a new place.
+#
+# It also never says "I am a person". The agent is not one, and a customer who
+# asked for a human is owed a straight answer about that.
+DEFAULT_HANDOFF_REPLY = (
+    "You're through to the automated assistant, so I've stopped replying here "
+    "and passed this conversation to the team."
+)
+
+
+def handoff_reply(organization) -> str:
+    """The tenant's own wording, or the honest default."""
+    config = (getattr(organization, "agent_config", None) or {}) if organization else {}
+    custom = str(config.get("handoff_message") or "").strip()
+    return custom or DEFAULT_HANDOFF_REPLY
+
+
+async def acknowledge_handoff(
+    db, organization, contact, channel, phone_number: str
+) -> bool:
+    """Send the one message a handed-over customer should get. Never raises.
+
+    Recorded as a message like any other, so the dashboard shows the operator
+    exactly what the customer was told before they picked the conversation up.
+    """
+    from app.services import outbox
+
+    text = handoff_reply(organization)
+    try:
+        outbound = Message(
+            organization_id=organization.id,
+            contact_id=contact.id,
+            sender="agent",
+            content=text,
+            delivery_status=outbox.QUEUED,
+        )
+        db.add(outbound)
+        await db.flush()
+
+        delivery = await outbox.deliver(
+            channel,
+            phone_number,
+            text,
+            [],
+            message_id=outbound.id,
+            organization_id=organization.id,
+            to_jid=(contact.contact_metadata or {}).get("wa_jid"),
+        )
+        outbound.delivery_status = delivery.status
+        outbound.twilio_sid = delivery.reference
+        await db.flush()
+        return bool(delivery.sent or delivery.queued)
+    except Exception as exc:  # noqa: BLE001 - the handover matters more
+        logger.warning("could not acknowledge the handoff to %s: %s", phone_number, exc)
+        return False
 
 
 async def resolve_organization(
@@ -476,11 +585,25 @@ async def process_inbound_message(
         )
         await db.commit()
 
+        # Said before returning, because returning is all this branch used to
+        # do. A customer who asks for a person and hears nothing back has been
+        # handed over as far as the database is concerned and ignored as far
+        # as they are concerned.
+        acknowledged = await acknowledge_handoff(
+            db, organization, contact, channel, phone_number
+        )
+        await db.commit()
+        await manager.broadcast(
+            ws_manager.EVENT_SYNC,
+            {"contact_id": str(contact.id), "organization_id": str(organization.id)},
+        )
+
         logger.info("handed %s to a person after %r", phone_number, escalation)
         return {
             "status": "escalated",
             "reason": escalation,
             "contact_id": str(contact.id),
+            "customer_told": acknowledged,
         }
 
     if not consent.agent_may_reply(contact):
@@ -772,7 +895,16 @@ async def process_inbound_message(
     )
     previous_stage = contact.pipeline_stage
     from_analyzer = analyzer.STAGE_TO_PIPELINE.get(contact.sales_stage, previous_stage)
-    new_stage = evaluate_stage(previous_stage, body)
+    # The model reading a conversation as NEGOTIATION or CLOSED is an opinion
+    # about a conversation, not a quote that went out or money that changed
+    # hands. It was allowed to move the board into both, which is the same
+    # fault as the keyword route and harder to see, because it looks like
+    # understanding rather than a string match.
+    if from_analyzer in VERIFIED_ONLY:
+        from_analyzer = CONVERSATIONAL_CEILING
+    new_stage = evaluate_stage(
+        previous_stage, body, organization, contact.qualification
+    )
     # Both candidates have to be on the ladder to be compared on it. On a
     # customised board they will not be, and the contact stays put rather than
     # being moved into a column that does not exist for this tenant.

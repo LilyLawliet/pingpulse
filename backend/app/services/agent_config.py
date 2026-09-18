@@ -31,11 +31,46 @@ DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sun
 # to that point. Deliberately blunt: the cost of handing over a conversation
 # that did not need it is a person reading one extra message, and the cost of
 # missing one is a sales pitch answering a complaint.
+# Words that mean this conversation has gone wrong. Matched on word
+# boundaries: "sue" as a bare substring fires on "issue", "tissue" and
+# "pursue", and an escalation nobody can explain is one the shop learns to
+# ignore.
 ESCALATION_SIGNALS = (
-    "refund", "complaint", "lawyer", "legal", "sue", "scam", "fraud",
-    "terrible", "worst", "angry", "furious", "unacceptable", "cancel my order",
-    "speak to a human", "speak to someone", "talk to a person", "manager",
+    "refund", "complaint", "complain", "lawyer", "legal", "sue", "suing",
+    "scam", "fraud", "terrible", "worst", "angry", "furious", "unacceptable",
+    "ridiculous", "manager", "supervisor",
 )
+
+_WORDS = re.compile(
+    r"\b(" + "|".join(re.escape(word) for word in ESCALATION_SIGNALS) + r")\b",
+    re.IGNORECASE,
+)
+
+# Asking for a person, in the ways people actually ask.
+#
+# The old list held "speak to a human" and "talk to a person" but not "talk to
+# a human" or "talk to someone", so the two commonest phrasings in English
+# missed it entirely. The agent then answered under a policy that tells it
+# "You are the shop. You answer now" - which is what a client meant when they
+# reported it presenting itself as a live team member. It was not pretending.
+# It was never told to stand down.
+_HUMAN_PATTERNS = (
+    r"\b(speak|talk|chat|connect|deal)\s+(to|with)\s+(a\s+|an\s+|the\s+)?"
+    r"(human|person|people|someone|somebody|agent|rep|representative|manager|"
+    r"supervisor|owner|staff|real\s+\w+)",
+    r"\b(put|get)\s+me\s+(through|onto|in\s+touch)",
+    r"\bi\s+(want|need|would\s+like)\s+(to\s+\w+\s+(to\s+|with\s+)?)?(a\s+)?"
+    r"(human|person|real\s+person|manager|supervisor)\b",
+    r"\b(is\s+this|are\s+you)\s+(a\s+)?(bot|robot|ai|machine|human|real|"
+    r"automated)",
+    r"\bam\s+i\s+(talking|speaking|chatting)\s+(to|with)\s+"
+    r"(a\s+)?(bot|robot|human|person|machine|computer)",
+    r"\bwho\s+am\s+i\s+(talking|speaking)\s+(to|with)",
+    r"\b(human|real\s+person)\s+please\b",
+    r"\bcancel\s+my\s+order\b",
+)
+
+_HUMAN = re.compile("|".join(_HUMAN_PATTERNS), re.IGNORECASE)
 
 _TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
@@ -103,15 +138,23 @@ def needs_escalation(text: str, organization=None) -> str | None:
     the ones a sales-tuned model is most inclined to smooth over.
     """
     lowered = (text or "").lower()
+
+    # A tenant's own words first: they added them because they know something
+    # about their trade that this list does not.
     config = (getattr(organization, "agent_config", None) or {}) if organization else {}
-    extra = tuple(
-        str(word).lower().strip()
-        for word in (config.get("escalate_on") or [])
-        if str(word).strip()
-    )
-    for signal in ESCALATION_SIGNALS + extra:
-        if signal in lowered:
-            return signal
+    for word in (config.get("escalate_on") or []):
+        candidate = str(word).lower().strip()
+        if candidate and candidate in lowered:
+            return candidate
+
+    asking = _HUMAN.search(lowered)
+    if asking:
+        return asking.group(0)
+
+    upset = _WORDS.search(lowered)
+    if upset:
+        return upset.group(0)
+
     return None
 
 

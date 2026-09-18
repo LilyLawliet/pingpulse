@@ -69,12 +69,17 @@ def google_calendar_link(
 
     This is a link builder, not a booking API: the customer picks and confirms
     in their own calendar, which needs no credentials from either side.
+
+    No time is invented. This used to default to 05:00 UTC tomorrow when the
+    caller passed no start, which is 1am on the US east coast - and a client
+    reported an appointment "confirmed" for 1am that their customer had never
+    chosen. Nobody had chosen it. A hardcoded hour had.
+
+    With no start, the link carries no date at all and the customer picks one,
+    which is the only honest thing a link can do.
     """
-    begins = start or (
-        datetime.now(timezone.utc).replace(hour=5, minute=0, second=0, microsecond=0)
-        + timedelta(days=1)
-    )
-    ends = begins + timedelta(minutes=duration_minutes)
+    begins = start
+    ends = begins + timedelta(minutes=duration_minutes) if begins else None
     stamp = "%Y%m%dT%H%M%SZ"
 
     details = note or "Introductory call"
@@ -83,15 +88,11 @@ def google_calendar_link(
     if phone:
         details = f"{details}\nWhatsApp: {phone}"
 
-    query = urlencode(
-        {
-            "action": "TEMPLATE",
-            "text": title,
-            "dates": f"{begins.strftime(stamp)}/{ends.strftime(stamp)}",
-            "details": details,
-        },
-        quote_via=quote_plus,
-    )
+    fields = {"action": "TEMPLATE", "text": title, "details": details}
+    if begins and ends:
+        fields["dates"] = f"{begins.strftime(stamp)}/{ends.strftime(stamp)}"
+
+    query = urlencode(fields, quote_via=quote_plus)
     return f"https://calendar.google.com/calendar/render?{query}"
 
 

@@ -168,7 +168,14 @@ async def test_a_refund_demand_stops_the_agent_and_records_why(
 
     assert result["status"] == "escalated"
     assert result["reason"] == "refund"
-    assert replies == [], "a complaint was answered by the agent"
+    # One message, and it is the handoff acknowledgement rather than a
+    # generated answer. This used to assert that nothing at all was sent,
+    # which was the customer being ignored at the moment they complained.
+    assert len(replies) == 1, "a complaint got either silence or a sales reply"
+    spoken = replies[0][2]
+    assert "passed this conversation to the team" in spoken, (
+        f"the agent answered the complaint instead of handing it over: {spoken!r}"
+    )
 
     contact = (
         await db_session.execute(

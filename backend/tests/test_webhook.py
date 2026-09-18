@@ -188,9 +188,14 @@ async def test_dispatch_failure_still_persists_the_reply(db_session, default_org
     "current,message,expected",
     [
         ("NEW_LEAD", "just saying hi", "NEW_LEAD"),
-        ("NEW_LEAD", "what is the price?", "QUALIFIED"),
-        ("NEW_LEAD", "can we book a demo", "ESTIMATE_SCHEDULED"),
-        ("QUALIFIED", "I want to buy", "WON"),
+        # These three used to assert the opposite, and the opposite is what
+        # the client reported. Asking a price is a question, booking a demo is
+        # a request, and wanting to buy is an intention - none of them is an
+        # appointment or a sale, and none of them may move the board on its
+        # own any more.
+        ("NEW_LEAD", "what is the price?", "NEW_LEAD"),
+        ("NEW_LEAD", "can we book a demo", "NEW_LEAD"),
+        ("QUALIFIED", "I want to buy", "QUALIFIED"),
         ("ESTIMATE_SCHEDULED", "how much again?", "ESTIMATE_SCHEDULED"),
         ("WON", "hello there", "WON"),
         # A contact on a board this ladder knows nothing about is left exactly
