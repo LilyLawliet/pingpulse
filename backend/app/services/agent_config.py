@@ -264,3 +264,205 @@ def next_sendable_time(organization, at: datetime | None = None) -> datetime:
     if candidate <= local:
         candidate += timedelta(days=1)
     return candidate.astimezone(timezone.utc)
+
+
+# --------------------------------------------------------------- validation
+# Everything above is written to survive a config it does not understand: a
+# duration of "soon" falls back to an hour, an unusable timezone falls back to
+# UTC. That tolerance is right at reply time, where the alternative is a
+# customer left with silence.
+#
+# It is wrong at save time. A shop that types its hours into the wrong shape
+# gets no error, no hours, and an agent that quietly never offers an
+# appointment again - and the settings page will happily show them back the
+# broken value as though it had taken. So the same data is judged twice, and
+# strictly here: refuse it while somebody is sitting in front of a form and
+# can fix it.
+#
+# Unknown keys at the top level are left alone. Tenants carry notes there that
+# predate this function, and a save that throws away what it does not
+# recognise is a worse failure than one that keeps it.
+
+# Keys whose value must be a list of strings. Written as a bare string these
+# do not raise - they iterate character by character, which turns "refund"
+# into six single-letter triggers, and `escalate_on` in particular then fires
+# on the letter "r" in "hello there". Every conversation escalates to a human
+# and nothing in the logs says why.
+_LIST_KEYS = ("services", "service_areas", "languages", "escalate_on", "qualification_slots")
+
+# Keys whose value is free text folded into the prompt.
+_TEXT_KEYS = ("pricing_rules", "never_promise", "notes", "handoff_message")
+
+# Minutes, and the range outside which a value is certainly a mistake. An
+# eight-hour ceiling on a visit and a thirty-day one on notice are not
+# opinions about how to run a business; they are the point past which the
+# number is a typo.
+_APPOINTMENT_NUMBERS = {
+    "duration_minutes": (5, 8 * 60),
+    "buffer_minutes": (0, 8 * 60),
+    "min_notice_minutes": (0, 30 * 24 * 60),
+}
+
+
+def _check_time(problems: list[str], where: str, value) -> time | None:
+    parsed = _parse_time(value)
+    if parsed is None:
+        problems.append(
+            where + " is not a time. Use 24-hour HH:MM, like 09:00 or 17:30."
+        )
+    return parsed
+
+
+def _check_business_hours(problems: list[str], hours) -> None:
+    if not isinstance(hours, dict):
+        problems.append(
+            "business_hours must be an object keyed by day name, like "
+            "monday: {open: 09:00, close: 17:00}."
+        )
+        return
+
+    for day, window in hours.items():
+        name = str(day).lower()
+        if name not in DAYS:
+            # A day this code will never look up. Ignored in silence before,
+            # so "mon" or "Tues" meant a shop that had set its hours and had
+            # none.
+            problems.append(
+                str(day) + " is not a day. Use one of: " + ", ".join(DAYS) + "."
+            )
+            continue
+        if window in (None, False, {}, ""):
+            continue  # Shut that day, said plainly.
+        if not isinstance(window, dict):
+            problems.append(
+                name + " must have an open and a close time, like "
+                "open 09:00, close 17:00."
+            )
+            continue
+
+        opens = _check_time(problems, name + " open", window.get("open"))
+        closes = _check_time(problems, name + " close", window.get("close"))
+        if opens is not None and closes is not None and closes <= opens:
+            # Appointments are never offered across midnight - that is how a
+            # customer was told 1am. A shop saving 17:00-09:00 would get a day
+            # that looks configured and can never be booked.
+            problems.append(
+                name + " closes at " + str(window.get("close")) + ", which is not "
+                "after " + str(window.get("open")) + ". Hours that run past "
+                "midnight cannot be used for appointments; split them across "
+                "two days."
+            )
+
+
+def _check_appointments(problems: list[str], appointments) -> None:
+    from app.models import APPOINTMENT_KINDS
+
+    if not isinstance(appointments, dict):
+        problems.append("appointments must be an object.")
+        return
+
+    known = set(_APPOINTMENT_NUMBERS) | {"enabled", "duration_by_kind", "default_kind"}
+    for key in appointments:
+        if key not in known:
+            problems.append(
+                "appointments has no setting called " + str(key) + ". It has: "
+                + ", ".join(sorted(known)) + "."
+            )
+
+    if "enabled" in appointments and not isinstance(appointments["enabled"], bool):
+        problems.append("appointments.enabled must be true or false.")
+
+    for key, (low, high) in _APPOINTMENT_NUMBERS.items():
+        if key not in appointments:
+            continue
+        value = appointments[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            problems.append("appointments." + key + " must be a number of minutes.")
+        elif not low <= value <= high:
+            problems.append(
+                "appointments." + key + " must be between " + str(low) + " and "
+                + str(high) + " minutes."
+            )
+
+    kind = appointments.get("default_kind")
+    if kind is not None and str(kind).lower() not in APPOINTMENT_KINDS:
+        problems.append(
+            str(kind) + " is not a kind of appointment. Use one of: "
+            + ", ".join(APPOINTMENT_KINDS) + "."
+        )
+
+    per_kind = appointments.get("duration_by_kind")
+    if per_kind is not None:
+        if not isinstance(per_kind, dict):
+            problems.append(
+                "appointments.duration_by_kind must be an object keyed by kind, "
+                "like phone: 15, onsite: 90."
+            )
+        else:
+            for name, minutes in per_kind.items():
+                if str(name).lower() not in APPOINTMENT_KINDS:
+                    problems.append(
+                        str(name) + " is not a kind of appointment. Use one of: "
+                        + ", ".join(APPOINTMENT_KINDS) + "."
+                    )
+                if isinstance(minutes, bool) or not isinstance(minutes, (int, float)):
+                    problems.append(
+                        "duration_by_kind." + str(name)
+                        + " must be a number of minutes."
+                    )
+                elif not 5 <= minutes <= 8 * 60:
+                    problems.append(
+                        "duration_by_kind." + str(name)
+                        + " must be between 5 and 480 minutes."
+                    )
+
+
+def _check_quiet_hours(problems: list[str], quiet) -> None:
+    if not isinstance(quiet, dict):
+        problems.append(
+            "quiet_hours must be an object with a start and an end, like "
+            "start 21:00, end 08:00."
+        )
+        return
+    for edge in ("start", "end"):
+        if quiet.get(edge) is not None:
+            _check_time(problems, "quiet_hours." + edge, quiet[edge])
+
+
+def validate(config) -> list[str]:
+    """Everything wrong with this config, in words a shop owner can act on.
+
+    An empty list means it is safe to store. Problems are returned rather than
+    raised so the caller can report all of them at once: a form that rejects
+    one field per attempt is how a person gives up halfway through setting
+    their opening hours.
+    """
+    if not isinstance(config, dict):
+        return ["Settings must be an object."]
+
+    problems: list[str] = []
+
+    if config.get("business_hours") is not None:
+        _check_business_hours(problems, config["business_hours"])
+    if config.get("appointments") is not None:
+        _check_appointments(problems, config["appointments"])
+    if config.get("quiet_hours") is not None:
+        _check_quiet_hours(problems, config["quiet_hours"])
+
+    for key in _LIST_KEYS:
+        value = config.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) or not isinstance(value, (list, tuple)):
+            problems.append(
+                key + " must be a list of separate entries, not one piece of text."
+            )
+        elif any(isinstance(item, (dict, list)) for item in value):
+            problems.append("Every entry in " + key + " must be a piece of text.")
+
+    for key in _TEXT_KEYS:
+        value = config.get(key)
+        if value is not None and not isinstance(value, str):
+            problems.append(key + " must be text.")
+
+    return problems

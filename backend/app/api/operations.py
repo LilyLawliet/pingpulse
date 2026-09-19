@@ -207,6 +207,32 @@ async def save_agent_config(
     if config is not None and not isinstance(config, dict):
         raise HTTPException(status_code=422, detail="agent_config must be an object")
 
+    # Judged strictly here, forgivingly at reply time. A shop that saves
+    # {"monday": "9-5"} gets no error today, no hours, and an agent that
+    # silently stops offering appointments - while the settings page shows the
+    # broken value back as though it had taken. Every problem is reported at
+    # once rather than one per attempt.
+    if config is not None:
+        problems = agent_config.validate(config)
+
+        # A clock with no location on it. The column defaults to "UTC", so a
+        # tenant who never touched it is indistinguishable from one who chose
+        # it - and "we close at 5" read in the wrong zone is precisely how a
+        # customer was offered an appointment at 1am. Asked for once, at the
+        # moment the answer first matters; a shop genuinely on UTC says so and
+        # is never asked again.
+        if any(key in config for key in ("business_hours", "quiet_hours")):
+            if payload.get("timezone") is None and organization.timezone == "UTC":
+                problems.append(
+                    "Set your timezone before setting hours. Times are stored "
+                    "against it, and the wrong zone moves every appointment "
+                    "you offer. Use an IANA name like America/New_York or "
+                    "Asia/Karachi - or UTC, if that is really where you are."
+                )
+
+        if problems:
+            raise HTTPException(status_code=422, detail=problems)
+
     zone = payload.get("timezone")
     if zone is not None:
         # Validated now rather than discovered at reply time, where a bad zone
