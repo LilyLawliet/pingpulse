@@ -630,3 +630,199 @@ def unverified_claims(
         )
 
     return problems
+
+
+# ---------------------------------------------------- offering and choosing
+# The agent never parses a date out of free text, and never constructs one.
+# It offers times that came out of `free_slots` - real gaps in a real diary -
+# and the customer picks one of those. Matching a reply against a short list
+# of known times is a small, checkable problem; understanding "the Tuesday
+# after next, late morning" is not, and getting it wrong is how somebody was
+# booked for 1am.
+#
+# The offer is remembered on the contact so the next message can be matched
+# against it, and it expires, because a customer answering "yes, the first
+# one" three days later means a different Tuesday.
+OFFER_KEY = "offered_slots"
+OFFER_VALID_MINUTES = 120
+
+# Checked in this order, and the order is the point: "one" used to be a
+# synonym for the first slot and it appears inside "the last one", so a
+# customer asking for the last time offered was given the first one. Both
+# times were real, which is what made it quiet.
+#
+# The bare number words are gone for the same reason - "two" is in "two weeks"
+# and "three" is in "three bedrooms". Digits and true ordinals only.
+_ORDINALS: tuple[tuple[str, int], ...] = (
+    ("last", -1),
+    ("first", 0),
+    ("1st", 0),
+    ("earliest", 0),
+    ("soonest", 0),
+    ("second", 1),
+    ("2nd", 1),
+    ("third", 2),
+    ("3rd", 2),
+    ("fourth", 3),
+    ("4th", 3),
+    ("fifth", 4),
+    ("5th", 4),
+    ("sixth", 5),
+    ("6th", 5),
+    ("1", 0),
+    ("2", 1),
+    ("3", 2),
+    ("4", 3),
+    ("5", 4),
+    ("6", 5),
+)
+
+_TIME_IN_TEXT = re.compile(
+    r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b(\d{1,2}):(\d{2})\b", re.IGNORECASE
+)
+
+
+def remember_offer(contact, slots: list[datetime]) -> None:
+    """Write down exactly what was offered, so a reply can be matched to it."""
+    metadata = dict(getattr(contact, "contact_metadata", None) or {})
+    metadata[OFFER_KEY] = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "slots": [slot.isoformat() for slot in slots],
+    }
+    contact.contact_metadata = metadata
+
+
+def remembered_offer(contact) -> list[datetime]:
+    """What this contact was last offered, if it is still fresh."""
+    metadata = getattr(contact, "contact_metadata", None) or {}
+    offer = metadata.get(OFFER_KEY) or {}
+    try:
+        made = datetime.fromisoformat(offer["at"])
+    except (KeyError, TypeError, ValueError):
+        return []
+    if made.tzinfo is None:
+        made = made.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - made > timedelta(minutes=OFFER_VALID_MINUTES):
+        return []
+
+    out = []
+    for raw in offer.get("slots") or []:
+        try:
+            moment = datetime.fromisoformat(raw)
+        except (TypeError, ValueError):
+            continue
+        out.append(moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc))
+    return out
+
+
+def forget_offer(contact) -> None:
+    metadata = dict(getattr(contact, "contact_metadata", None) or {})
+    metadata.pop(OFFER_KEY, None)
+    contact.contact_metadata = metadata
+
+
+def chosen_slot(text: str, offered: list[datetime], zone: ZoneInfo) -> datetime | None:
+    """Which of the offered times this reply picked, or None.
+
+    Returns None whenever there is any doubt. A customer who said something
+    ambiguous gets asked again, which costs one message; a wrong guess costs
+    them a morning.
+    """
+    if not offered:
+        return None
+    lowered = (text or "").lower()
+
+    # A day name that matches exactly one offered slot is unambiguous.
+    days = {slot: slot.astimezone(zone).strftime("%A").lower() for slot in offered}
+    named = [slot for slot, day in days.items() if day in lowered]
+
+    # A clock time mentioned in the message.
+    wanted_times: list[tuple[int, int]] = []
+    for match in _TIME_IN_TEXT.finditer(lowered):
+        if match.group(3):  # 12-hour with am/pm
+            hour = int(match.group(1)) % 12
+            if match.group(3).lower() == "pm":
+                hour += 12
+            wanted_times.append((hour, int(match.group(2) or 0)))
+        else:  # 24-hour
+            wanted_times.append((int(match.group(4)), int(match.group(5))))
+
+    if wanted_times:
+        pool = named or offered
+        matching = [
+            slot
+            for slot in pool
+            if (slot.astimezone(zone).hour, slot.astimezone(zone).minute) in wanted_times
+        ]
+        if len(matching) == 1:
+            return matching[0]
+        # A time that matches several days and no day was named: ambiguous.
+        return None
+
+    if len(named) == 1:
+        return named[0]
+    if len(named) > 1:
+        return None
+
+    # "the first one", "number 2", "the last one".
+    for word, index in _ORDINALS:
+        if re.search(rf"\b{re.escape(word)}\b", lowered):
+            try:
+                return offered[index]
+            except IndexError:
+                return None
+
+    return None
+
+
+def as_prompt_block(organization, contact, slots: list[datetime], appointment=None) -> str:
+    """What the agent is allowed to say about appointments this turn.
+
+    Either real times or none. There is deliberately no branch that produces
+    an encouraging sentence with no times behind it, because that is the gap
+    the model filled in by itself.
+    """
+    zone = agent_config.zone_of(organization)
+
+    if appointment is not None:
+        when = describe(appointment)
+        return (
+            "=== THIS CUSTOMER'S APPOINTMENT ===\n"
+            f"They have a confirmed {when}.\n"
+            "If they ask, tell them exactly that. Do not restate it in a different "
+            "form and do not add a time, a date or an address that is not in it.\n"
+            "To change or cancel it, ask them what they want and say you will see "
+            "to it - do not state that it has been changed or cancelled."
+        )
+
+    if not booking_enabled(organization):
+        return (
+            "=== APPOINTMENTS ===\n"
+            "This business has not set up appointment booking. Do NOT offer to book "
+            "anything, do NOT suggest times, and do NOT say an appointment exists. "
+            "Find out what they need and answer it here."
+        )
+
+    if not slots:
+        return (
+            "=== APPOINTMENTS ===\n"
+            "There is nothing free in the diary for the next few days. Say so plainly "
+            "and ask what times would suit them, so a person can look. Do NOT invent "
+            "a time and do NOT say anything is booked."
+        )
+
+    lines = []
+    for index, slot in enumerate(slots, start=1):
+        local = slot.astimezone(zone)
+        day = local.strftime("%A %d %B").replace(" 0", " ")
+        clock = local.strftime("%I:%M %p").lstrip("0").lower()
+        lines.append(f"  {index}. {day} at {clock}")
+
+    return (
+        "=== APPOINTMENTS ===\n"
+        "These times are genuinely free in the diary right now:\n"
+        + "\n".join(lines)
+        + "\nOffer some of these and let them choose. Use these exact times - do not "
+        "round them, shift them or invent others. Nothing is booked until they pick "
+        "one and you are told it succeeded, so do NOT say anything is confirmed yet."
+    )

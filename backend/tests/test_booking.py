@@ -518,3 +518,172 @@ async def test_a_failed_move_leaves_the_original_confirmed(booked_shop, db_sessi
     ).scalars().all()
     assert len(live) == 1, "the customer lost their appointment to a failed move"
     assert live[0].starts_at == at(9, 10)
+
+
+# -------------------------------------------------- offering and choosing
+from zoneinfo import ZoneInfo  # noqa: E402
+
+UTC = ZoneInfo("UTC")
+OFFERED = [
+    datetime(2026, 10, 6, 14, 0, tzinfo=timezone.utc),   # Tuesday 2pm
+    datetime(2026, 10, 6, 15, 30, tzinfo=timezone.utc),  # Tuesday 3:30pm
+    datetime(2026, 10, 7, 10, 0, tzinfo=timezone.utc),   # Wednesday 10am
+]
+
+
+@pytest.mark.parametrize(
+    "reply,expected",
+    [
+        ("the first one", 0),
+        ("number 2", 1),
+        ("2pm please", 0),
+        ("tuesday at 3:30pm", 1),
+        ("wednesday", 2),
+        ("10:00 on wednesday", 2),
+        ("the last one", 2),
+        ("15:30", 1),
+    ],
+)
+def test_a_customer_choice_maps_to_the_time_they_were_offered(reply, expected):
+    assert booking.chosen_slot(reply, OFFERED, UTC) == OFFERED[expected]
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "whenever suits you",
+        "yes please",
+        "sounds good",
+        "sometime next week",
+        "tuesday or wednesday",
+        "morning is better",
+        "",
+    ],
+)
+def test_an_unclear_answer_books_nothing(reply):
+    """None whenever there is doubt.
+
+    Asking again costs one message. Guessing costs somebody a morning, and
+    guessing is how a customer ended up with 1am.
+    """
+    assert booking.chosen_slot(reply, OFFERED, UTC) is None
+
+
+def test_a_time_that_matches_two_offered_days_is_not_a_choice():
+    """"2pm" when both Tuesday and Wednesday at 2pm were offered."""
+    two_days = [
+        datetime(2026, 10, 6, 14, 0, tzinfo=timezone.utc),
+        datetime(2026, 10, 7, 14, 0, tzinfo=timezone.utc),
+    ]
+
+    assert booking.chosen_slot("2pm", two_days, UTC) is None
+    # Naming the day resolves it.
+    assert booking.chosen_slot("tuesday 2pm", two_days, UTC) == two_days[0]
+
+
+def test_nothing_offered_means_nothing_chosen():
+    assert booking.chosen_slot("the first one", [], UTC) is None
+
+
+def test_an_offer_is_forgotten_once_it_is_stale(db_session):
+    """"Yes, the first one" three days later means a different Tuesday."""
+    contact = CRMContact(phone_number="+1")
+    booking.remember_offer(contact, OFFERED)
+    assert len(booking.remembered_offer(contact)) == 3
+
+    stale = dict(contact.contact_metadata)
+    stale[booking.OFFER_KEY]["at"] = (
+        datetime.now(timezone.utc) - timedelta(hours=6)
+    ).isoformat()
+    contact.contact_metadata = stale
+
+    assert booking.remembered_offer(contact) == []
+
+
+# ------------------------------------------------------- what the agent is told
+def test_a_shop_without_booking_is_told_not_to_offer_it(db_session):
+    organization = Organization(name="No Hours", sales_prompt="x")
+    block = booking.as_prompt_block(organization, None, [])
+
+    assert "not set up appointment booking" in block
+    assert "Do NOT offer to book" in block
+
+
+def test_an_empty_diary_says_so_rather_than_encouraging(db_session):
+    """There is deliberately no branch that sounds hopeful with no times
+    behind it, because that is the gap the model filled in by itself."""
+    organization = shop()
+    block = booking.as_prompt_block(organization, None, [])
+
+    assert "nothing free" in block
+    assert "do not say anything is booked" in block.lower()
+
+
+def test_offered_times_reach_the_prompt_exactly(db_session):
+    organization = shop()
+    block = booking.as_prompt_block(organization, None, OFFERED)
+
+    # No leading zero on the day: "Tuesday 06 October" reads like a receipt.
+    assert "Tuesday 6 October at 2:00 pm" in block
+    assert "Wednesday 7 October at 10:00 am" in block
+    assert "not say anything is confirmed" in block.lower()
+
+
+def test_a_booked_customer_is_described_from_the_record(db_session):
+    organization = shop()
+    appointment = Appointment(
+        starts_at=datetime(2026, 10, 6, 14, 0, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 10, 6, 15, 0, tzinfo=timezone.utc),
+        timezone_name="UTC",
+        kind="onsite",
+        location="12 Mill Lane",
+    )
+
+    block = booking.as_prompt_block(organization, None, [], appointment=appointment)
+
+    assert "site visit" in block
+    assert "2:00 pm" in block
+    assert "do not state that it has been changed or cancelled" in block
+
+
+# ------------------------------------------------- claims against the record
+def test_the_two_sentences_from_the_incident_are_both_caught():
+    """Verbatim from the conversation that started this."""
+    confirmed = (
+        "Your appointment is confirmed for September 19, 2026 at 1:00 AM EST "
+        "at your Miami property."
+    )
+    cancelled = (
+        "I am sorry for the confusion; I have cancelled the September 19 "
+        "appointment. I am a live team member here."
+    )
+
+    assert booking.unverified_claims(confirmed, appointment=None)
+    assert booking.unverified_claims(cancelled, cancelled=False)
+
+
+def test_a_claim_backed_by_the_record_is_allowed():
+    appointment = Appointment(
+        starts_at=datetime(2026, 10, 6, 14, 0, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 10, 6, 15, 0, tzinfo=timezone.utc),
+        timezone_name="UTC",
+        kind="onsite",
+    )
+
+    assert booking.unverified_claims(
+        "Your appointment is confirmed for Tuesday at 2pm.", appointment=appointment
+    ) == []
+    assert booking.unverified_claims(
+        "I have cancelled that for you.", cancelled=True
+    ) == []
+
+
+def test_ordinary_sentences_are_not_mistaken_for_claims():
+    """A guard that fires on normal conversation gets switched off."""
+    for innocent in (
+        "We are open Monday to Friday, nine to five.",
+        "I can offer Tuesday at 2pm or Wednesday at 10am - which suits you?",
+        "Bathroom remodels usually take two to three weeks.",
+        "Would you like me to look at what is free this week?",
+    ):
+        assert booking.unverified_claims(innocent) == [], innocent
