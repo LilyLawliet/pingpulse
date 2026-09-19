@@ -245,6 +245,40 @@ def unsupported_promises(reply: str, corpus: str) -> list[str]:
     return found
 
 
+# --------------------------------------------------------- claiming to be human
+# A reply may say "we" all it likes: the agent answers for the business, which
+# is the whole arrangement. What it may never say is that it is a person.
+#
+# Unconditional, and the only guard here that consults nothing. The others ask
+# the record a question - is there an appointment, is that price listed. This
+# one is false every time it is said, because of what is saying it.
+_NOT_HUMAN = re.compile(
+    r"(?:"
+    # "I am a live team member", "I'm a real person", "I am human"
+    r"\bI(?:'m|\s+am)\s+(?:a\s+|an\s+)?(?:real|live|actual|genuine|human)\s+"
+    r"(?:person|human|team\s+member|agent|rep|representative|employee|staff)\b"
+    r"|\bI(?:'m|\s+am)\s+(?:a\s+)?human\b"
+    # "I am not a bot"
+    r"|\bI(?:'m|\s+am)\s+not\s+(?:a\s+|an\s+)?(?:bot|robot|ai|a\.i\.|machine|"
+    r"computer|automated|chatbot)\b"
+    # "you are speaking with a real person"
+    r"|\byou(?:'re|\s+are)\s+(?:speaking|talking|chatting|dealing)\s+(?:to|with)\s+"
+    r"(?:a\s+|an\s+)?(?:real\s+|live\s+|actual\s+)?(?:person|human|team\s+member)\b"
+    # "this is a real person"
+    r"|\bthis\s+is\s+(?:a\s+)?(?:real|live|actual)\s+(?:person|human|team\s+member)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def claims_to_be_human(reply: str) -> str | None:
+    """The phrase in which this reply says it is a person, if any."""
+    if not reply:
+        return None
+    found = _NOT_HUMAN.search(reply)
+    return found.group(0) if found else None
+
+
 # --------------------------------------------------------------------------
 # Prompt construction
 # --------------------------------------------------------------------------
@@ -821,6 +855,18 @@ async def generate_reply(
             )
         )
 
+        # Saying it is a person. Judged without consulting anything, because
+        # it is false every time regardless of what the conversation was
+        # about. "I am a live team member here" reached a real customer, and
+        # the booking guard above only objected to the other half of that
+        # sentence.
+        pretending = claims_to_be_human(text)
+        if pretending:
+            problems.append(
+                f'you wrote "{pretending}"; you are not a person and must never say '
+                "you are. Answer as the business without claiming to be human"
+            )
+
         # A promised human callback is never acceptable — the agent answers now.
         handoff = sales_policy.contains_handoff(text)
         if handoff:
@@ -851,6 +897,10 @@ async def generate_reply(
 
         if unsupported_prices(corrected, price_corpus):
             raise RuntimeError("reply still quoted an unlisted price")
+        if settings.price_guard_enabled and unsupported_promises(corrected, price_corpus):
+            raise RuntimeError("reply still promised something the business has not offered")
+        if claims_to_be_human(corrected):
+            raise RuntimeError("reply still claimed to be a person")
         if sales_policy.contains_handoff(corrected):
             raise RuntimeError("reply still promised a human follow-up")
         if booking.unverified_claims(

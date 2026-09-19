@@ -19,6 +19,7 @@ in the first place.
 """
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -427,3 +428,168 @@ async def test_a_message_with_no_id_is_still_answered(db_session):
     """
     assert await webhook.already_handled(db_session, None, None) is False
     assert await webhook.already_handled(db_session, None, "") is False
+
+
+# --------------------------------------------------- it is not a person
+# "I am a live team member here" reached a real customer on 18 September, in
+# the same message as a cancellation that never happened. The booking guard
+# objects to the cancellation. Nothing objected to this half, and once a real
+# cancellation has occurred the whole sentence goes through.
+#
+# Every other guard consults the record: is there an appointment, is that
+# price listed, has this shop said it offers free estimates. This one needs no
+# state, because the answer does not depend on the conversation. The thing
+# writing the sentence is not a person.
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "I am a live team member here.",
+        "I'm a real person, not a bot.",
+        "I am human.",
+        "I'm not a bot!",
+        "You are speaking with a real person.",
+        "This is a live team member.",
+        "I am an actual human.",
+        "you are chatting with a human",
+        "I am a genuine employee of the company.",
+    ],
+)
+def test_the_agent_may_not_say_it_is_a_person(reply):
+    from app.services.llm_service import claims_to_be_human
+
+    assert claims_to_be_human(reply), f"{reply!r} was allowed"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        # Speaking for the business is the whole arrangement and must not be
+        # touched. Only the claim to be a human being is refused.
+        "We can come out on Tuesday.",
+        "One of our team will be at your property at 2pm.",
+        "I am the right person to ask about tiling.",
+        "I am a bathroom remodeling specialist.",
+        "Our team members are all licensed.",
+        "I am not sure about that, let me check.",
+        "I am happy to help.",
+        "A human will never touch your data.",
+        "I am not a plumber, but I can find out.",
+    ],
+)
+def test_speaking_for_the_business_is_still_allowed(reply):
+    from app.services.llm_service import claims_to_be_human
+
+    assert claims_to_be_human(reply) is None, f"{reply!r} was wrongly refused"
+
+
+def test_the_incident_sentence_is_refused_even_after_a_real_cancellation():
+    """The precise gap. Both halves of the message a customer actually got:
+    the cancellation guard clears once a cancellation really happens, and
+    without this check the rest of the sentence rides along with it."""
+    from app.services import booking
+    from app.services.llm_service import claims_to_be_human
+
+    sent = (
+        "I am sorry for the confusion; I have cancelled the September 19 "
+        "appointment. I am a live team member here."
+    )
+
+    assert booking.unverified_claims(sent, cancelled=True) == []
+    assert claims_to_be_human(sent) == "I am a live team member"
+
+
+# The detector above is only half of it. These drive the real reply path, so
+# that wiring the check into `guard` is what the test depends on rather than
+# the function merely existing.
+_PERSONHOOD_ORG = SimpleNamespace(
+    name="Beluga Group",
+    sales_prompt="Sell bathroom remodeling.",
+    target_tone="Warm",
+    product_rules="",
+    agent_config={},
+    timezone="America/New_York",
+)
+_PERSONHOOD_CONTACT = SimpleNamespace(
+    name="ZO",
+    phone_number="+13057483629",
+    pipeline_stage="LEAD",
+    category_interest=None,
+    city=None,
+    shoe_size=None,
+    colour_preference=None,
+    budget_note=None,
+)
+
+
+@pytest.mark.asyncio
+async def test_claiming_to_be_human_is_corrected_before_sending(monkeypatch):
+    from app.services import llm_service
+
+    calls = []
+
+    async def model(prompt):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return "I am a live team member here, happy to help."
+        return "Happy to help - what would you like to know?"
+
+    monkeypatch.setattr(llm_service, "_call_groq", model)
+
+    result = await llm_service.generate_reply(
+        _PERSONHOOD_ORG, _PERSONHOOD_CONTACT, [], "is this a real person?"
+    )
+
+    assert "live team member" not in result.text
+    assert len(calls) == 2, "the reply was not regenerated"
+
+
+@pytest.mark.asyncio
+async def test_a_model_that_insists_it_is_human_sends_nothing(monkeypatch):
+    """One corrective retry, then silence rather than a lie. The customer is
+    better served by no answer than by being told they are talking to a person
+    who does not exist."""
+    from app.services import llm_service
+
+    async def insists(prompt):
+        return "I'm a real person, I promise."
+
+    monkeypatch.setattr(llm_service, "_call_groq", insists)
+    monkeypatch.setattr(llm_service, "_call_gemini", insists)
+
+    result = await llm_service.generate_reply(
+        _PERSONHOOD_ORG, _PERSONHOOD_CONTACT, [], "are you a bot?"
+    )
+
+    assert "real person" not in result.text
+    assert result.provider == "none"
+
+
+@pytest.mark.asyncio
+async def test_a_model_that_insists_on_a_promise_sends_nothing(monkeypatch):
+    """The other half of the same gap. The rewrite used to be checked for
+    prices, handoffs, appointment claims and Roman Urdu - but not for the
+    promises added last week. A guard that only inspects the first attempt is
+    a retry, not a guard."""
+    from app.services import llm_service
+
+    org = SimpleNamespace(
+        name="Beluga Group",
+        sales_prompt="Sell bathroom remodeling.",
+        target_tone="Warm",
+        product_rules="Remodels start at $12,000.",
+        agent_config={},
+        timezone="America/New_York",
+    )
+
+    async def insists(prompt):
+        return "We offer a lifetime guarantee on all work."
+
+    monkeypatch.setattr(llm_service, "_call_groq", insists)
+    monkeypatch.setattr(llm_service, "_call_gemini", insists)
+
+    result = await llm_service.generate_reply(
+        org, _PERSONHOOD_CONTACT, [], "do you guarantee the work?"
+    )
+
+    assert "guarantee" not in result.text
+    assert result.provider == "none"
