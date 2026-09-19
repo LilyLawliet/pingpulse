@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.services import booking
 from app.deps import WRITE_ROLES, Tenant, current_org
 from app.models import STAGE_OPERATOR, SENDER_CUSTOMER, CRMContact, Message
 from app.schemas import MessageOut
@@ -131,6 +132,10 @@ async def list_contacts(
         # anything writes one without the other.
         contacts = [c for c in contacts if await _is_unread(db, c)]
 
+    # One query for the whole page. The board is drawn on every dashboard
+    # load, so a lookup per contact would be two hundred queries to show a
+    # column that is usually empty.
+    await _attach_appointments(db, contacts)
     return contacts
 
 
@@ -215,7 +220,25 @@ async def get_contact(
     tenant: Tenant = Depends(current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _get_contact(db, tenant, contact_id)
+    contact = await _get_contact(db, tenant, contact_id)
+    await _attach_appointments(db, [contact])
+    return contact
+
+
+async def _attach_appointments(db, contacts) -> None:
+    """Hang each contact's next confirmed appointment off the record.
+
+    Read from the appointments table rather than inferred from the pipeline
+    column. A lead standing in "Estimate scheduled" used to be the only
+    evidence that anything was booked, and the word "schedule" in a question
+    was enough to put them there - so the column said a thing that was not
+    true and the operator had no way to tell.
+    """
+    if not contacts:
+        return
+    found = await booking.upcoming_for_many(db, [c.id for c in contacts])
+    for contact in contacts:
+        contact.appointment = booking.as_summary(found.get(contact.id))
 
 
 @router.patch("/contacts/{contact_id}", response_model=CRMContactOut)

@@ -334,3 +334,97 @@ async def test_the_handler_never_raises_into_the_reply_path(remodeller, db_sessi
 
     assert turn.performed is None
     assert turn.prompt_block == ""
+
+
+# ------------------------------------------- what the dashboard can see
+@pytest.mark.asyncio
+async def test_the_contact_record_shows_the_appointment(client, org_a, db_session):
+    """The brief asks the contact to expose appointment status.
+
+    Everything else it names was already there - the customer, the history,
+    the next action, whether a person took over. The appointment was the one
+    that did not exist to show, and a lead standing in "Estimate scheduled"
+    was the only evidence anything was booked.
+    """
+    from sqlalchemy import select
+
+    from app.models import Organization
+    from app.services import booking as bk
+
+    organization = (
+        await db_session.execute(
+            select(Organization).where(Organization.id == org_a.organization_id)
+        )
+    ).scalars().one()
+    organization.timezone = "UTC"
+    organization.agent_config = {
+        "business_hours": OPEN_WEEKDAYS,
+        "appointments": {"min_notice_minutes": 0, "default_kind": "onsite"},
+    }
+    contact = CRMContact(
+        organization_id=organization.id, phone_number="+15550123", name="Dana"
+    )
+    db_session.add(contact)
+    await db_session.flush()
+
+    # Nothing booked yet.
+    empty = await client.get(
+        f"/api/v1/crm/contacts/{contact.id}", headers=org_a.headers
+    )
+    assert empty.status_code == 200
+    assert empty.json()["appointment"] is None
+
+    await bk.handle_turn(db_session, organization, contact, "what times are free?")
+    booked = await bk.handle_turn(db_session, organization, contact, "the first one")
+    assert booked.performed == "booked"
+    await db_session.commit()
+
+    response = await client.get(
+        f"/api/v1/crm/contacts/{contact.id}", headers=org_a.headers
+    )
+
+    assert response.status_code == 200
+    shown = response.json()["appointment"]
+    assert shown is not None
+    assert shown["status"] == "confirmed"
+    assert shown["kind"] == "onsite"
+    assert "site visit" in shown["description"]
+
+    # And on the board listing too, which is where an operator actually looks.
+    listed = await client.get("/api/v1/crm/contacts", headers=org_a.headers)
+    mine = [row for row in listed.json() if row["id"] == str(contact.id)]
+    assert mine and mine[0]["appointment"]["status"] == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_appointment_stops_showing(client, org_a, db_session):
+    """Cancelled is not upcoming. The record must not keep advertising it."""
+    from sqlalchemy import select
+
+    from app.models import Organization
+    from app.services import booking as bk
+
+    organization = (
+        await db_session.execute(
+            select(Organization).where(Organization.id == org_a.organization_id)
+        )
+    ).scalars().one()
+    organization.timezone = "UTC"
+    organization.agent_config = {
+        "business_hours": OPEN_WEEKDAYS,
+        "appointments": {"min_notice_minutes": 0},
+    }
+    contact = CRMContact(organization_id=organization.id, phone_number="+15550456")
+    db_session.add(contact)
+    await db_session.flush()
+
+    await bk.handle_turn(db_session, organization, contact, "what times are free?")
+    await bk.handle_turn(db_session, organization, contact, "the first one")
+    await bk.handle_turn(db_session, organization, contact, "cancel my appointment")
+    await db_session.commit()
+
+    response = await client.get(
+        f"/api/v1/crm/contacts/{contact.id}", headers=org_a.headers
+    )
+
+    assert response.json()["appointment"] is None

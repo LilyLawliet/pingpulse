@@ -196,6 +196,55 @@ def unsupported_prices(reply: str, product_rules: str) -> set[str]:
     return money_figures(reply) - catalogue
 
 
+# ---------------------------------------------------------- promises
+# Commitments a business can only make if it has said it makes them. Each is
+# a pattern to find in a reply and the word to look for in the shop's own
+# configuration - so a shop that offers free estimates may say so, and a shop
+# that has never mentioned one may not start.
+#
+# The price guard covers invented figures. These are the claims with no digits
+# in them, which commit the business just as firmly and were unguarded: a free
+# visit, a guarantee, a discount, an area served.
+_PROMISES: tuple[tuple[str, str, str], ...] = (
+    (r"\bfree\s+(consultation|estimate|quote|survey|visit|assessment|inspection)\b",
+     "free", "a free visit or quote"),
+    (r"\b(guarantee|guaranteed|warranty|warrantied)\b",
+     "guarantee", "a guarantee or warranty"),
+    (r"\b(discount|%\s*off|money[- ]back|refund guarantee)\b",
+     "discount", "a discount"),
+    (r"\bno[- ]obligation\b", "obligation", "a no-obligation offer"),
+    (r"\b(same[- ]day|next[- ]day|24[- ]hour)\s+(service|visit|response|turnaround)\b",
+     "same-day", "a same-day or next-day promise"),
+    (r"\b(fully\s+)?(licensed|insured|bonded|certified|accredited)\b",
+     "licensed", "a licensing or insurance claim"),
+    (r"\b(price\s+match|beat any (price|quote))\b", "price match", "a price match"),
+)
+
+_PROMISE_PATTERNS = tuple(
+    (re.compile(pattern, re.IGNORECASE), needle, description)
+    for pattern, needle, description in _PROMISES
+)
+
+
+def unsupported_promises(reply: str, corpus: str) -> list[str]:
+    """Commitments in this reply that the shop's own data does not support.
+
+    An empty corpus returns nothing. A shop that has configured no rules at
+    all is not a shop making false promises; it is one we know nothing about,
+    and refusing every sentence would leave it with an agent that cannot
+    speak.
+    """
+    if not reply or not corpus:
+        return []
+
+    haystack = corpus.lower()
+    found: list[str] = []
+    for pattern, needle, description in _PROMISE_PATTERNS:
+        if pattern.search(reply) and needle not in haystack:
+            found.append(description)
+    return found
+
+
 # --------------------------------------------------------------------------
 # Prompt construction
 # --------------------------------------------------------------------------
@@ -744,6 +793,18 @@ async def generate_reply(
                 problems.append(
                     "you quoted " + ", ".join(sorted(bad)) + " which is NOT in the price "
                     "list; quote only exact figures from the price list above, or omit it"
+                )
+
+        # Promises with no digits in them. Same rule as the prices above: the
+        # shop's own configuration decides, not the model's sense of what a
+        # helpful business would offer.
+        if settings.price_guard_enabled:
+            promised = unsupported_promises(text, price_corpus)
+            if promised:
+                problems.append(
+                    "you offered " + ", ".join(sorted(promised)) + " which this "
+                    "business has not said it offers; say only what the rules and "
+                    "knowledge above support"
                 )
 
         # A booking, a cancellation or a move may only be announced if one

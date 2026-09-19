@@ -503,6 +503,58 @@ async def upcoming_for(db, contact_id) -> Appointment | None:
     ).scalars().first()
 
 
+
+async def upcoming_for_many(db, contact_ids) -> dict:
+    """Next confirmed appointment per contact, for a whole board at once.
+
+    One query rather than one per contact: a lead list is drawn on every
+    dashboard load, and a feature that makes that slow is a feature somebody
+    turns off.
+    """
+    ids = [cid for cid in contact_ids if cid is not None]
+    if not ids:
+        return {}
+
+    now = datetime.now(timezone.utc)
+    rows = (
+        await db.execute(
+            select(Appointment)
+            .where(
+                Appointment.contact_id.in_(ids),
+                Appointment.status == APPOINTMENT_CONFIRMED,
+                Appointment.ends_at >= now,
+            )
+            .order_by(Appointment.starts_at.asc())
+        )
+    ).scalars().all()
+
+    # Earliest wins: the first row seen for a contact is their next one.
+    found: dict = {}
+    for row in rows:
+        found.setdefault(row.contact_id, row)
+    return found
+
+
+def as_summary(appointment) -> dict | None:
+    """What the dashboard shows about an appointment, including the words.
+
+    The sentence is rendered here rather than in the browser so that every
+    surface - dashboard, desktop build, anything later - says the same thing,
+    and so no client has to work out what "onsite" means to a customer.
+    """
+    if appointment is None:
+        return None
+    return {
+        "id": str(appointment.id),
+        "status": appointment.status,
+        "kind": appointment.kind,
+        "starts_at": appointment.starts_at,
+        "ends_at": appointment.ends_at,
+        "timezone": appointment.timezone_name,
+        "location": appointment.location,
+        "description": describe(appointment),
+    }
+
 # ------------------------------------------------------------------- wording
 KIND_WORDS = {
     "phone": "phone consultation",

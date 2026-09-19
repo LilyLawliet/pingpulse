@@ -289,3 +289,58 @@ def test_the_model_cannot_assert_a_qualification_the_record_lacks():
     ceiling = webhook.evaluate_stage("NEW_LEAD", "I'll take it", Shop(), {})
     assert ceiling == "NEW_LEAD"
     assert webhook.STAGE_ORDER.index(ceiling) < webhook.STAGE_ORDER.index("QUALIFIED")
+
+
+# ------------------------------------------- promises that are not numbers
+def test_a_shop_may_say_what_it_has_configured():
+    """Beluga's own prompt offers a free consultation, so the agent may too.
+
+    The corpus is the shop's configured rules and retrieved knowledge. This
+    is the same rule the price guard uses, applied to the claims with no
+    digits in them.
+    """
+    from app.services.llm_service import unsupported_promises
+
+    beluga = (
+        "Encourage qualified customers to schedule a free consultation or estimate. "
+        "Do not invent prices, availability or project details."
+    )
+
+    assert unsupported_promises("We offer a free consultation to start.", beluga) == []
+
+
+def test_a_shop_may_not_invent_a_promise_it_never_made():
+    from app.services.llm_service import unsupported_promises
+
+    bare = "We sell bathroom remodels in Miami."
+
+    assert unsupported_promises("We offer a free estimate.", bare)
+    assert unsupported_promises("We guarantee completion in three weeks.", bare)
+    assert unsupported_promises("There is 20% off this month.", bare)
+    assert unsupported_promises("We are fully licensed and insured.", bare)
+    assert unsupported_promises("Same-day service available.", bare)
+
+
+def test_an_ordinary_answer_is_not_a_promise():
+    """A guard that fires on normal sentences is a guard that gets removed."""
+    from app.services.llm_service import unsupported_promises
+
+    bare = "We sell bathroom remodels in Miami."
+    for innocent in (
+        "Bathroom remodels usually take two to three weeks.",
+        "I can look at what times are free this week.",
+        "We work with marble, porcelain and ceramic.",
+        "What is the approximate size of the room?",
+    ):
+        assert unsupported_promises(innocent, bare) == [], innocent
+
+
+def test_a_shop_that_configured_nothing_is_not_silenced():
+    """An empty corpus is a shop we know nothing about, not one lying.
+
+    Refusing every sentence would leave it with an agent that cannot speak,
+    which is a worse failure than the one being prevented.
+    """
+    from app.services.llm_service import unsupported_promises
+
+    assert unsupported_promises("We guarantee everything.", "") == []

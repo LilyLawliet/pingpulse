@@ -233,6 +233,12 @@ class CRMContactOut(BaseModel):
     opt_out: bool = False
     opt_out_at: datetime | None = None
 
+    # Their next confirmed appointment, or None. Read from the appointments
+    # table rather than inferred from the pipeline column: a lead standing in
+    # "Estimate scheduled" used to be the only evidence that anything was
+    # booked, and it was put there by the word "schedule" in a question.
+    appointment: dict | None = None
+
     created_at: datetime
 
 
