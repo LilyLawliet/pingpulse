@@ -231,6 +231,33 @@ async def acknowledge_handoff(
         return False
 
 
+async def already_handled(db, organization_id, message_sid: str | None) -> bool:
+    """Have we processed this exact delivery before?
+
+    Twilio retries a webhook that did not answer fast enough, and generating
+    a reply takes seconds, so a slow turn is redelivered as a matter of
+    course. Without this the customer's message is stored twice and answered
+    twice - and since booking became real, the second pass would try to book
+    the slot the first pass had just taken and tell them it was gone.
+
+    Keyed on the provider's own id. A message with no id cannot be
+    deduplicated and is processed, because dropping a real message is worse
+    than sending a rare duplicate.
+    """
+    if not message_sid:
+        return False
+    found = await db.scalar(
+        select(Message.id)
+        .where(
+            Message.organization_id == organization_id,
+            Message.twilio_sid == message_sid,
+            Message.sender == "user",
+        )
+        .limit(1)
+    )
+    return found is not None
+
+
 async def resolve_organization(
     db: AsyncSession, to_number: str
 ) -> tuple[Organization | None, ChannelConfig | None]:
@@ -486,6 +513,18 @@ async def process_inbound_message(
         metadata = dict(contact.contact_metadata or {})
         metadata["last_received_image_analysis"] = image_analysis
         contact.contact_metadata = metadata
+
+    # A redelivery of something already answered. Checked here, after the
+    # contact exists, so the sid lookup is scoped to one organization.
+    if await already_handled(db, organization.id, payload.message_sid):
+        logger.info(
+            "ignoring a repeat delivery of %s from %s", payload.message_sid, phone_number
+        )
+        return {
+            "status": "duplicate",
+            "contact_id": str(contact.id),
+            "twilio_sid": payload.message_sid,
+        }
 
     inbound = Message(
         organization_id=organization.id,

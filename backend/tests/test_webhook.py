@@ -152,7 +152,14 @@ async def test_second_message_reuses_existing_contact(db_session, default_org, m
 
     payload = TwilioWebhookPayload.model_validate(TWILIO_FORM)
     first = await process_inbound_message(db_session, payload)
-    second = await process_inbound_message(db_session, payload)
+
+    # A genuinely different message, with its own id. Sending the identical
+    # payload twice is a redelivery, not a second message, and is now
+    # recognised as one - so reusing it here would test the wrong thing.
+    again = TwilioWebhookPayload.model_validate(
+        {**TWILIO_FORM, "MessageSid": "SM_second_message", "Body": "and another thing"}
+    )
+    second = await process_inbound_message(db_session, again)
 
     assert second["new_contact"] is False
     assert first["contact_id"] == second["contact_id"]

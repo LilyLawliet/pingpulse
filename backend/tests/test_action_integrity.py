@@ -344,3 +344,86 @@ def test_a_shop_that_configured_nothing_is_not_silenced():
     from app.services.llm_service import unsupported_promises
 
     assert unsupported_promises("We guarantee everything.", "") == []
+
+
+# --------------------------------------------- a retry must not do it twice
+@pytest.mark.asyncio
+async def test_a_redelivered_webhook_is_processed_once(db_session, monkeypatch):
+    """Twilio retries what it did not hear back from quickly enough.
+
+    Generating a reply takes seconds, so a slow turn is redelivered as a
+    matter of course. Without this the customer's message is stored twice and
+    answered twice - and since booking became real, the second pass would try
+    to book the slot the first pass had just taken and tell them it was gone
+    to somebody else. It had gone to them.
+    """
+    from sqlalchemy import select
+
+    from app.models import ChannelConfig, Message, Organization
+    from app.schemas import TwilioWebhookPayload
+    from app.services import outbox
+
+    organization = Organization(name="Retry Co", sales_prompt="Sell things.")
+    db_session.add(organization)
+    await db_session.flush()
+
+    channel = ChannelConfig(
+        organization_id=organization.id,
+        channel="whatsapp",
+        provider="twilio",
+        whatsapp_provider="QR_SESSION",
+        phone_number="+15551110000",
+        session_status="AUTHENTICATED",
+    )
+    db_session.add(channel)
+    await db_session.flush()
+
+    sent: list = []
+
+    async def capture(*args, **kwargs):
+        sent.append(args)
+        return outbox.Delivery(status=outbox.SENT, reference="SM_out", detail="")
+
+    monkeypatch.setattr(outbox, "deliver", capture)
+
+    async def fake_generate(*args, **kwargs):
+        from app.services.llm_service import GenerationResult
+
+        return GenerationResult(
+            provider="groq", text="Sure, how can I help?", prompt_used="p", latency_ms=5
+        )
+
+    monkeypatch.setattr("app.api.webhook.llm_service.generate_reply", fake_generate)
+
+    payload = TwilioWebhookPayload(
+        From="whatsapp:+15559998888",
+        To="whatsapp:+15551110000",
+        Body="hello there",
+        MessageSid="SM-repeat-1",
+    )
+
+    first = await webhook.process_inbound_message(db_session, payload, channel)
+    second = await webhook.process_inbound_message(db_session, payload, channel)
+
+    assert second["status"] == "duplicate", "the repeat was answered again"
+
+    inbound = (
+        await db_session.execute(
+            select(Message).where(
+                Message.sender == "user", Message.twilio_sid == "SM-repeat-1"
+            )
+        )
+    ).scalars().all()
+    assert len(inbound) == 1, "the customer's message was stored twice"
+    assert len(sent) == 1, "the customer was answered twice"
+
+
+@pytest.mark.asyncio
+async def test_a_message_with_no_id_is_still_answered(db_session):
+    """Dropping a real message is worse than a rare duplicate.
+
+    Not every transport gives us an id, and refusing to process what we
+    cannot deduplicate would be silence for whoever sent it.
+    """
+    assert await webhook.already_handled(db_session, None, None) is False
+    assert await webhook.already_handled(db_session, None, "") is False
