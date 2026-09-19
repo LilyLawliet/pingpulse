@@ -1,0 +1,632 @@
+"""Appointments: checking a time is free, taking it, and giving it back.
+
+Every function here returns what actually happened. That is the whole design
+constraint, and it comes from what went wrong: a customer was told her
+appointment was confirmed for 1am on a date she never chose, and then told it
+had been cancelled. Neither statement was checkable, because there was nothing
+in the database that either one referred to.
+
+So nothing in this module reports success it has not verified. `book` returns
+an Appointment row or a Refusal explaining why not. `cancel` and `reschedule`
+do the same. A caller that wants to tell a customer something looks at the
+result, never at its own intention.
+
+Three rules the rest of the system depends on:
+
+*A slot is free only if the database says so at the moment of writing.*
+Checking availability and then inserting are two statements, and two customers
+can sit between them. The check here is a courtesy that produces good error
+messages; the guarantee is an exclusion constraint in PostgreSQL, and a clash
+that gets past the check is caught as an IntegrityError and reported as a
+clash rather than crashing.
+
+*Times are held in UTC and spoken in the shop's zone.* The zone is written
+onto the row, so a business that later moves timezone does not silently
+reschedule every appointment it has already agreed.
+
+*A cancellation updates, never deletes.* "Did you cancel that?" is a question
+somebody has to be able to answer afterwards.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+
+from app.models import (
+    APPOINTMENT_CANCELLED,
+    APPOINTMENT_CONFIRMED,
+    APPOINTMENT_KINDS,
+    Appointment,
+)
+from app.services import agent_config
+
+logger = logging.getLogger(__name__)
+
+# How long an appointment runs when the shop has not said. Half an hour is the
+# common case for a consultation and short enough that a wrong guess wastes
+# less of somebody's day than a long one would.
+DEFAULT_DURATION_MINUTES = 60
+
+# Quiet gap kept either side of an appointment. For a trade that travels to
+# the customer this is the drive; for a phone consultation it is usually zero.
+DEFAULT_BUFFER_MINUTES = 0
+
+# How far ahead a customer may book. A year out is almost always a typo.
+MAX_DAYS_AHEAD = 180
+
+# The shortest notice the shop will take. Booking something for nine minutes
+# from now is a promise nobody can keep.
+DEFAULT_MIN_NOTICE_MINUTES = 120
+
+# How many candidate slots to offer at once. A wall of times is not a choice.
+MAX_OFFERED_SLOTS = 6
+
+# Granularity of the offered times. On the hour and half hour reads like a
+# diary; every seven minutes reads like a machine.
+SLOT_STEP_MINUTES = 30
+
+
+@dataclass(frozen=True)
+class Refusal:
+    """Why something could not be done, in words a customer could be told.
+
+    `reason` is a stable key for code to branch on. `message` is the sentence,
+    and is deliberately free of blame and of internal vocabulary - a customer
+    reading "IntegrityError" has learned nothing.
+    """
+
+    reason: str
+    message: str
+
+    @property
+    def ok(self) -> bool:
+        return False
+
+
+@dataclass(frozen=True)
+class Booked:
+    """A real appointment, and the only thing that proves one exists."""
+
+    appointment: Appointment
+
+    @property
+    def ok(self) -> bool:
+        return True
+
+
+# ------------------------------------------------------------------ settings
+def _config(organization) -> dict:
+    return (getattr(organization, "agent_config", None) or {}) if organization else {}
+
+
+def duration_minutes(organization, kind: str | None = None) -> int:
+    """How long this kind of appointment takes at this shop.
+
+    A phone consultation and a site visit are rarely the same length, and a
+    shop that has said so should not have both booked as an hour.
+    """
+    config = _config(organization).get("appointments") or {}
+    per_kind = config.get("duration_by_kind") or {}
+    if kind and isinstance(per_kind, dict) and per_kind.get(kind):
+        try:
+            return max(5, int(per_kind[kind]))
+        except (TypeError, ValueError):
+            pass
+    try:
+        return max(5, int(config.get("duration_minutes", DEFAULT_DURATION_MINUTES)))
+    except (TypeError, ValueError):
+        return DEFAULT_DURATION_MINUTES
+
+
+def buffer_minutes(organization) -> int:
+    config = _config(organization).get("appointments") or {}
+    try:
+        return max(0, int(config.get("buffer_minutes", DEFAULT_BUFFER_MINUTES)))
+    except (TypeError, ValueError):
+        return DEFAULT_BUFFER_MINUTES
+
+
+def min_notice_minutes(organization) -> int:
+    config = _config(organization).get("appointments") or {}
+    try:
+        return max(0, int(config.get("min_notice_minutes", DEFAULT_MIN_NOTICE_MINUTES)))
+    except (TypeError, ValueError):
+        return DEFAULT_MIN_NOTICE_MINUTES
+
+
+def default_kind(organization) -> str:
+    config = _config(organization).get("appointments") or {}
+    kind = str(config.get("default_kind") or "onsite").lower()
+    return kind if kind in APPOINTMENT_KINDS else "onsite"
+
+
+def booking_enabled(organization) -> bool:
+    """Whether this shop takes appointments at all.
+
+    A shop with no business hours configured cannot have its availability
+    checked, and offering times against hours nobody set would be inventing
+    them - which is the fault this module exists to end.
+    """
+    config = _config(organization)
+    if config.get("appointments", {}).get("enabled") is False:
+        return False
+    return bool(config.get("business_hours"))
+
+
+# ------------------------------------------------------------- opening hours
+def _window_for(organization, day: date) -> tuple[time, time] | None:
+    """The shop's open and close on this local date, or None if shut."""
+    hours = (_config(organization).get("business_hours") or {}).get(
+        agent_config.DAYS[day.weekday()]
+    )
+    if not hours:
+        return None
+    opens = agent_config._parse_time(hours.get("open"))
+    closes = agent_config._parse_time(hours.get("close"))
+    if opens is None or closes is None:
+        return None
+    if closes <= opens:
+        # Spans midnight. Appointments are not offered across a day boundary -
+        # "Tuesday at 1am" is how this went wrong in the first place.
+        return None
+    return opens, closes
+
+
+def within_business_hours(organization, starts_at: datetime, ends_at: datetime) -> bool:
+    """Does this whole appointment fall inside one day's opening hours?"""
+    zone = agent_config.zone_of(organization)
+    local_start = starts_at.astimezone(zone)
+    local_end = ends_at.astimezone(zone)
+
+    if local_start.date() != local_end.date():
+        return False
+
+    window = _window_for(organization, local_start.date())
+    if window is None:
+        return False
+    opens, closes = window
+    return local_start.time() >= opens and local_end.time() <= closes
+
+
+# --------------------------------------------------------------- the diary
+async def live_appointments(
+    db, organization_id, since: datetime, until: datetime
+) -> list[Appointment]:
+    """Confirmed appointments overlapping this span. Nothing else counts."""
+    rows = (
+        await db.execute(
+            select(Appointment).where(
+                Appointment.organization_id == organization_id,
+                Appointment.status == APPOINTMENT_CONFIRMED,
+                Appointment.ends_at > since,
+                Appointment.starts_at < until,
+            )
+        )
+    ).scalars().all()
+    return list(rows)
+
+
+def _clashes(
+    starts_at: datetime,
+    ends_at: datetime,
+    taken: list[Appointment],
+    buffer: int,
+    ignore_id=None,
+) -> Appointment | None:
+    """The appointment this one would run into, if any.
+
+    The buffer is applied to the existing appointments rather than to the new
+    one, so a shop with a thirty-minute travel buffer keeps half an hour clear
+    on both sides of every visit it has already agreed.
+    """
+    gap = timedelta(minutes=buffer)
+    for held in taken:
+        if ignore_id is not None and held.id == ignore_id:
+            continue
+        if starts_at < _aware(held.ends_at) + gap and ends_at > _aware(held.starts_at) - gap:
+            return held
+    return None
+
+
+def _aware(moment: datetime) -> datetime:
+    """Naive from SQLite, aware from PostgreSQL. Both mean UTC."""
+    return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment
+
+
+async def is_free(
+    db, organization, starts_at: datetime, ends_at: datetime, ignore_id=None
+) -> Refusal | None:
+    """None if the slot can be taken, or the reason it cannot.
+
+    Every check a customer could trip over, in the order they would hit them,
+    so the first answer they get is the most useful one.
+    """
+    now = datetime.now(timezone.utc)
+
+    if ends_at <= starts_at:
+        return Refusal("backwards", "That appointment would end before it started.")
+
+    notice = min_notice_minutes(organization)
+    if starts_at < now + timedelta(minutes=notice):
+        hours = max(1, round(notice / 60))
+        return Refusal(
+            "too_soon",
+            f"That is too soon - appointments need at least {hours} hour"
+            f"{'s' if hours != 1 else ''} notice.",
+        )
+
+    if starts_at > now + timedelta(days=MAX_DAYS_AHEAD):
+        return Refusal(
+            "too_far",
+            f"That is further ahead than bookings are taken ({MAX_DAYS_AHEAD} days).",
+        )
+
+    if not within_business_hours(organization, starts_at, ends_at):
+        return Refusal("closed", "The business is not open at that time.")
+
+    buffer = buffer_minutes(organization)
+    taken = await live_appointments(
+        db,
+        organization.id,
+        starts_at - timedelta(minutes=buffer + 1),
+        ends_at + timedelta(minutes=buffer + 1),
+    )
+    if _clashes(starts_at, ends_at, taken, buffer, ignore_id=ignore_id):
+        return Refusal("taken", "That time has already been booked.")
+
+    return None
+
+
+async def free_slots(
+    db,
+    organization,
+    *,
+    from_time: datetime | None = None,
+    days: int = 7,
+    kind: str | None = None,
+    limit: int = MAX_OFFERED_SLOTS,
+) -> list[datetime]:
+    """Real times this shop could actually see somebody, soonest first.
+
+    Built from the shop's own hours and its own diary. If it returns nothing,
+    the honest answer to "when are you free?" is that there is nothing to
+    offer - not a time invented to fill the silence.
+    """
+    if not booking_enabled(organization):
+        return []
+
+    zone = agent_config.zone_of(organization)
+    now = datetime.now(timezone.utc)
+    start_from = max(from_time or now, now + timedelta(minutes=min_notice_minutes(organization)))
+
+    length = timedelta(minutes=duration_minutes(organization, kind))
+    buffer = buffer_minutes(organization)
+
+    window_end = start_from + timedelta(days=days)
+    taken = await live_appointments(db, organization.id, start_from, window_end)
+
+    found: list[datetime] = []
+    for offset in range(days + 1):
+        day = (start_from.astimezone(zone) + timedelta(days=offset)).date()
+        window = _window_for(organization, day)
+        if window is None:
+            continue
+        opens, closes = window
+
+        cursor = datetime.combine(day, opens, tzinfo=zone).astimezone(timezone.utc)
+        day_ends = datetime.combine(day, closes, tzinfo=zone).astimezone(timezone.utc)
+
+        # Start on a tidy boundary rather than at whatever minute it is now.
+        if cursor < start_from:
+            minutes = (start_from - cursor).total_seconds() / 60
+            steps = int(minutes // SLOT_STEP_MINUTES) + 1
+            cursor = cursor + timedelta(minutes=steps * SLOT_STEP_MINUTES)
+
+        while cursor + length <= day_ends:
+            if not _clashes(cursor, cursor + length, taken, buffer):
+                found.append(cursor)
+                if len(found) >= limit:
+                    return found
+            cursor += timedelta(minutes=SLOT_STEP_MINUTES)
+
+    return found
+
+
+# ------------------------------------------------------------- the operations
+async def book(
+    db,
+    organization,
+    contact,
+    starts_at: datetime,
+    *,
+    kind: str | None = None,
+    location: str | None = None,
+    notes: str | None = None,
+    source: str = "agent",
+) -> Booked | Refusal:
+    """Take a slot, or say why it could not be taken. Never claims success.
+
+    The row is written as confirmed in one statement so the exclusion
+    constraint arbitrates. Two customers asking for the same time at the same
+    moment both pass the availability check above; exactly one of them gets
+    past this.
+    """
+    if not booking_enabled(organization):
+        return Refusal(
+            "not_configured",
+            "Appointments are not set up for this business yet.",
+        )
+
+    chosen_kind = (kind or default_kind(organization)).lower()
+    if chosen_kind not in APPOINTMENT_KINDS:
+        chosen_kind = default_kind(organization)
+
+    ends_at = starts_at + timedelta(minutes=duration_minutes(organization, chosen_kind))
+
+    refusal = await is_free(db, organization, starts_at, ends_at)
+    if refusal is not None:
+        return refusal
+
+    appointment = Appointment(
+        organization_id=organization.id,
+        contact_id=contact.id,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        timezone_name=str(agent_config.zone_of(organization)),
+        kind=chosen_kind,
+        status=APPOINTMENT_CONFIRMED,
+        location=(location or None),
+        notes=(notes or None),
+        source=source,
+    )
+    # Inside a savepoint, so a clash undoes the appointment and nothing else.
+    # A plain rollback here would discard everything else pending on this
+    # session - including the customer's own inbound message, which is written
+    # earlier in the same request. Losing the message that asked for the
+    # booking would be a far stranger bug than the clash it came from.
+    try:
+        async with db.begin_nested():
+            db.add(appointment)
+            await db.flush()
+    except IntegrityError:
+        # Somebody else took it between the check and the write. This is the
+        # case the constraint exists for, and it must read to the customer as
+        # a taken slot rather than as an error.
+        logger.info("slot %s was taken during booking for %s", starts_at, contact.id)
+        return Refusal("taken", "That time has just been booked by somebody else.")
+
+    return Booked(appointment)
+
+
+async def cancel(db, appointment, *, source: str = "agent") -> Booked | Refusal:
+    """Cancel a real appointment. Nothing here invents one to cancel."""
+    if appointment is None:
+        return Refusal("not_found", "There is no appointment booked to cancel.")
+    if appointment.status == APPOINTMENT_CANCELLED:
+        return Refusal("already_cancelled", "That appointment was already cancelled.")
+    if appointment.status != APPOINTMENT_CONFIRMED:
+        return Refusal(
+            "not_confirmed", "There is no confirmed appointment to cancel."
+        )
+
+    appointment.status = APPOINTMENT_CANCELLED
+    appointment.cancelled_at = datetime.now(timezone.utc)
+    appointment.source = source
+    await db.flush()
+    return Booked(appointment)
+
+
+async def reschedule(
+    db, organization, appointment, starts_at: datetime, *, source: str = "agent"
+) -> Booked | Refusal:
+    """Move an appointment, leaving exactly one live row behind.
+
+    The old row is cancelled and a new one written, chained by `replaces_id`.
+    Cancelling first is what makes the new time bookable when somebody moves
+    an appointment by an hour and the two would otherwise overlap each other.
+    """
+    if appointment is None:
+        return Refusal("not_found", "There is no appointment booked to move.")
+    if appointment.status != APPOINTMENT_CONFIRMED:
+        return Refusal("not_confirmed", "There is no confirmed appointment to move.")
+
+    ends_at = starts_at + timedelta(
+        minutes=duration_minutes(organization, appointment.kind)
+    )
+    refusal = await is_free(
+        db, organization, starts_at, ends_at, ignore_id=appointment.id
+    )
+    if refusal is not None:
+        return refusal
+
+    previous_status = appointment.status
+    moved = Appointment(
+        organization_id=organization.id,
+        contact_id=appointment.contact_id,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        timezone_name=appointment.timezone_name,
+        kind=appointment.kind,
+        status=APPOINTMENT_CONFIRMED,
+        location=appointment.location,
+        notes=appointment.notes,
+        source=source,
+        replaces_id=appointment.id,
+    )
+
+    # Both halves in one savepoint. A move is a single change from the
+    # customer's point of view, and the half-done version of it - their old
+    # appointment cancelled, the new one refused - is the worst outcome
+    # available: they would be left with nothing, having asked for a change.
+    try:
+        async with db.begin_nested():
+            appointment.status = APPOINTMENT_CANCELLED
+            appointment.cancelled_at = datetime.now(timezone.utc)
+            await db.flush()
+            db.add(moved)
+            await db.flush()
+    except IntegrityError:
+        appointment.status = previous_status
+        appointment.cancelled_at = None
+        logger.info("reschedule to %s clashed for contact %s", starts_at, appointment.contact_id)
+        return Refusal("taken", "That time has just been booked by somebody else.")
+
+    return Booked(moved)
+
+
+# ------------------------------------------------------------- what they have
+async def upcoming_for(db, contact_id) -> Appointment | None:
+    """The contact's next confirmed appointment, or None.
+
+    Every confirmation, reminder and answer to "when am I booked?" reads this
+    rather than assembling a date from the conversation.
+    """
+    now = datetime.now(timezone.utc)
+    return (
+        await db.execute(
+            select(Appointment)
+            .where(
+                Appointment.contact_id == contact_id,
+                Appointment.status == APPOINTMENT_CONFIRMED,
+                Appointment.ends_at >= now,
+            )
+            .order_by(Appointment.starts_at.asc())
+            .limit(1)
+        )
+    ).scalars().first()
+
+
+# ------------------------------------------------------------------- wording
+KIND_WORDS = {
+    "phone": "phone consultation",
+    "onsite": "site visit",
+    "video": "video call",
+    "other": "appointment",
+}
+
+
+def describe(appointment) -> str:
+    """The confirmation sentence, rendered from the row and nothing else.
+
+    Includes the kind, because "confirmed for Tuesday at 2pm" told one
+    customer nothing about whether somebody was going to ring her or turn up
+    at her house.
+    """
+    zone = ZoneInfo(appointment.timezone_name or "UTC")
+    local = _aware(appointment.starts_at).astimezone(zone)
+
+    # %-d and %-I are not portable to Windows, so the padding is stripped by
+    # hand rather than by a format code that works on one developer's machine.
+    day = local.strftime("%A %d %B").replace(" 0", " ")
+    clock = local.strftime("%I:%M %p").lstrip("0").lower()
+    label = KIND_WORDS.get(appointment.kind, "appointment")
+
+    where = f" at {appointment.location}" if appointment.location else ""
+    return f"{label} on {day} at {clock}{where}"
+
+
+# ------------------------------------------------- claims the agent may not make
+# Prompt wording is not a control. The model was told plainly that it was the
+# shop and that it must not promise a callback, and it still wrote "I am a
+# live team member here" - so the sentences that assert a booking are checked
+# against the record before they are allowed out.
+#
+# This is the same shape as the banned-handoff check and the price guard: the
+# output is inspected rather than trusted, because the failure mode is a
+# confident sentence rather than an error.
+_BOOKING_CLAIMS = re.compile(
+    r"\b("
+    r"appointment is (now )?(confirmed|booked|scheduled|set)"
+    r"|you('re| are) (all )?(booked|scheduled|confirmed)"
+    r"|i('ve| have) (now )?(booked|scheduled|confirmed|reserved)"
+    r"|(booking|appointment) (is )?confirmed"
+    r"|confirmed for \w+"
+    r"|see you (on|at) \w+"
+    r"|we('ll| will) see you (on|at)"
+    r"|your (visit|estimate|consultation) (is|on)"
+    r")",
+    re.IGNORECASE,
+)
+
+_CANCEL_CLAIMS = re.compile(
+    r"\b("
+    r"i('ve| have) (now )?cancell?ed"
+    r"|(has|have) been cancell?ed"
+    r"|(booking|appointment) (is )?cancell?ed"
+    r"|cancell?ed (your|the) (appointment|booking|visit)"
+    r")",
+    re.IGNORECASE,
+)
+
+_MOVE_CLAIMS = re.compile(
+    r"\b("
+    r"i('ve| have) (now )?(moved|rescheduled|changed)"
+    r"|(has|have) been (moved|rescheduled)"
+    r"|(booking|appointment) (is )?(moved|rescheduled)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def claims_appointment(text: str) -> str | None:
+    """The phrase asserting a booking exists, or None."""
+    found = _BOOKING_CLAIMS.search(text or "")
+    return found.group(0) if found else None
+
+
+def claims_cancellation(text: str) -> str | None:
+    """The phrase asserting something was cancelled, or None.
+
+    "I am sorry for the confusion; I have cancelled the September 19
+    appointment" was written about an appointment that never existed, so this
+    matters as much as the booking claim and was the half nobody reported.
+    """
+    found = _CANCEL_CLAIMS.search(text or "")
+    return found.group(0) if found else None
+
+
+def claims_reschedule(text: str) -> str | None:
+    found = _MOVE_CLAIMS.search(text or "")
+    return found.group(0) if found else None
+
+
+def unverified_claims(
+    text: str, *, appointment=None, cancelled: bool = False, moved: bool = False
+) -> list[str]:
+    """Every claim in this reply that the record does not support.
+
+    `appointment` is the contact's live appointment, freshly read. `cancelled`
+    and `moved` say whether this turn actually performed one of those
+    operations - a reply may only announce an action the backend just took.
+    """
+    problems: list[str] = []
+
+    booked = claims_appointment(text)
+    if booked and appointment is None:
+        problems.append(
+            f'you wrote "{booked}", but there is no confirmed appointment for this '
+            "customer; never state that a booking exists unless it does"
+        )
+
+    said_cancelled = claims_cancellation(text)
+    if said_cancelled and not cancelled:
+        problems.append(
+            f'you wrote "{said_cancelled}", but nothing was cancelled; never say an '
+            "appointment has been cancelled unless it has"
+        )
+
+    said_moved = claims_reschedule(text)
+    if said_moved and not moved:
+        problems.append(
+            f'you wrote "{said_moved}", but nothing was rescheduled; never say an '
+            "appointment has been moved unless it has"
+        )
+
+    return problems

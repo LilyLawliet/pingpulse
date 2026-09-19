@@ -736,6 +736,103 @@ class SystemError(Base):
     created_at: Mapped[datetime] = _now_column()
 
 
+# ---------------------------------------------------------------- appointments
+# What an appointment can be. The distinction matters to the customer more than
+# to us: somebody expecting a phone call at 2pm and somebody expecting a van at
+# their house at 2pm want very different things from the same row, and the
+# client's own complaint began with a confirmation that named neither.
+APPOINTMENT_KINDS = ("phone", "onsite", "video", "other")
+
+# Confirmed means it exists and is expected to happen. Pending means the
+# booking operation has not completed yet and nobody may be told it has.
+# Failed is kept rather than deleted, because "we tried to book you and it did
+# not work" is a thing somebody has to be able to find out about afterwards.
+APPOINTMENT_STATUSES = ("pending", "confirmed", "cancelled", "failed")
+
+APPOINTMENT_CONFIRMED = "confirmed"
+APPOINTMENT_PENDING = "pending"
+APPOINTMENT_CANCELLED = "cancelled"
+APPOINTMENT_FAILED = "failed"
+
+
+class Appointment(Base):
+    """One booking, and the only thing allowed to say one exists.
+
+    Every confirmation the customer reads is rendered from a row here. That is
+    the whole point of the table: the agent used to assemble a date and a time
+    out of nothing and state them as fact, and there was no record to check it
+    against - so "is my appointment confirmed?" had no answer except whatever
+    the model wrote next.
+
+    Times are stored in UTC and rendered in the organization's zone. The zone
+    is copied onto the row rather than read from the organization at display
+    time, because a shop that moves timezone must not silently reschedule
+    every appointment it has already agreed with somebody.
+
+    A cancelled row is updated, never deleted. A customer who asks "did you
+    cancel that?" is owed an answer, and a missing row cannot give one.
+    """
+
+    __tablename__ = "appointments"
+    __table_args__ = (
+        Index("ix_appointments_org_start", "organization_id", "starts_at"),
+        Index("ix_appointments_contact", "contact_id", "starts_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("crm_contacts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # The zone this was agreed in, frozen at the moment of agreement.
+    timezone_name: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="UTC", server_default="UTC"
+    )
+
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="onsite", server_default="onsite"
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
+
+    # Where, for anything the customer has to be present at. Free text because
+    # an address, a site name and "your Miami property" are all answers a shop
+    # might legitimately give.
+    location: Mapped[str | None] = mapped_column(String(300))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    # Who arranged it: the agent, a person on the dashboard, or an import.
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="agent", server_default="agent"
+    )
+
+    # Why it failed, when it did. Read by the operator, not the customer.
+    failure_reason: Mapped[str | None] = mapped_column(String(300))
+
+    # The appointment this one replaced, so a reschedule is a chain rather
+    # than two unrelated rows nobody can tell apart.
+    replaces_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("appointments.id", ondelete="SET NULL")
+    )
+
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _now_column()
+
+    contact: Mapped["CRMContact"] = relationship()
+
+    @property
+    def is_live(self) -> bool:
+        """Does this row mean somebody is expected? Only confirmed counts."""
+        return self.status == APPOINTMENT_CONFIRMED
+
+
 class StageEvent(Base):
     """One contact moving from one column to another, and when.
 
