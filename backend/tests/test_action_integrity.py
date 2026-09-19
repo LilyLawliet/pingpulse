@@ -593,3 +593,75 @@ async def test_a_model_that_insists_on_a_promise_sends_nothing(monkeypatch):
 
     assert "guarantee" not in result.text
     assert result.provider == "none"
+
+
+# ------------------------------------------ "stop by tomorrow" is not an opt-out
+# Found while auditing follow-ups and opt-out against the running code. "stop"
+# was matched as a standalone word in any message of six words or fewer, and
+# for a bathroom remodeller "can you stop by tomorrow?" is how a customer asks
+# for a site visit. It set the flag, cleared the follow-up token, and stopped
+# everything outbound for good. The shop sees a lead that went quiet.
+#
+# The opt-in list had the mirror of it, and worse: a false positive there
+# resumes messaging somebody who asked us to stop. "when can you start" is the
+# commonest question a remodelling customer asks.
+@pytest.mark.parametrize(
+    "message",
+    [
+        "stop",
+        "STOP",
+        "Stop.",
+        "please stop",
+        "stop messaging me",
+        "stop texting me please",
+        "stop sending me texts",
+        "stop all messages",
+        "stop contacting me",
+        "unsubscribe",
+        "remove me from your list",
+        "opt out",
+        "do not message me",
+        "cancel subscription",
+    ],
+)
+def test_a_real_opt_out_is_still_honoured(message):
+    """The reason the rule cannot simply be narrowed to an exact match: people
+    do write "please stop" and "stop texting me"."""
+    from app.services import consent
+
+    assert consent.is_opt_out(message), f"{message!r} was missed"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "stop by tomorrow?",
+        "can you stop by tomorrow",
+        "when can you stop by?",
+        "stop by the shop",
+        "could you stop by",
+        "stop by around 3",
+        "dont stop sending pictures",
+    ],
+)
+def test_asking_someone_to_visit_is_not_asking_them_to_go_away(message):
+    from app.services import consent
+
+    assert not consent.is_opt_out(message), f"{message!r} silently ended the relationship"
+
+
+@pytest.mark.parametrize(
+    "message", ["when can you start", "start the work next week", "start on monday"]
+)
+def test_asking_when_work_begins_does_not_resume_messaging(message):
+    """Worse than the opt-out side: this one messages somebody who said no."""
+    from app.services import consent
+
+    assert not consent.is_opt_in(message), f"{message!r} opted a customer back in"
+
+
+@pytest.mark.parametrize("message", ["start", "resume", "subscribe", "unstop", "please start again"])
+def test_a_real_opt_in_still_works(message):
+    from app.services import consent
+
+    assert consent.is_opt_in(message), f"{message!r} was missed"

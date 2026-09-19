@@ -53,6 +53,48 @@ OPT_IN_KEYWORDS = ("start", "unstop", "resume", "subscribe")
 
 _WORDS = re.compile(r"[a-z]+")
 
+# Words on the lists above that are also ordinary verbs. Everything else there
+# - "unsubscribe", "remove me", "opt out" - means one thing in any sentence it
+# appears in, and is matched as it always was.
+#
+# These two do not. "can you stop by tomorrow?" is how a customer of a
+# remodelling company asks for a site visit, and it used to end the
+# relationship: flag set, follow-up token cleared, nothing outbound ever
+# again, and a lead that simply looked like it went quiet. "when can you
+# start" did the mirror of it, turning messaging back on for somebody who had
+# asked us to stop.
+_AMBIGUOUS = ("stop", "start")
+
+# What may sit alongside a bare verb without changing what it means. Somebody
+# who wants the messages to end writes "stop", "please stop", "stop texting
+# me now" - not a sentence with a day of the week in it.
+_FILLER = frozenset(
+    {
+        "please", "now", "immediately", "just", "pls", "plz", "thanks", "thank",
+        "you", "ok", "okay", "yes", "no", "and", "the", "this", "these", "all",
+        "any", "more", "me", "my", "i", "it", "to", "with",
+        "text", "texts", "texting", "message", "messages", "messaging", "msg",
+        "msgs", "sms", "send", "sending", "sent", "email", "emails", "call",
+        "calls", "calling", "contact", "contacting", "everything", "further",
+        "future", "again", "anymore", "receiving", "receive", "hearing", "hear",
+        "from", "your", "yours", "us", "subscription", "list", "reply",
+    }
+)
+
+
+def _bare_verb(normalised: str, keyword: str) -> bool:
+    """Is `keyword` the whole point of this message, rather than a word in it?
+
+    True for "stop", "please stop", "stop texting me now". False for "stop by
+    tomorrow", because "by" and "tomorrow" are doing work that a person asking
+    to be left alone would not need.
+    """
+    words = normalised.split()
+    if keyword not in words:
+        return False
+    return all(word == keyword or word in _FILLER for word in words)
+
+
 
 def _normalised(text: str) -> str:
     return " ".join(_WORDS.findall((text or "").lower()))
@@ -63,7 +105,15 @@ def _says(text: str, keywords: tuple[str, ...]) -> bool:
     if not normalised:
         return False
     padded = f" {normalised} "
-    return any(f" {keyword} " in padded for keyword in keywords)
+    for keyword in keywords:
+        if f" {keyword} " not in padded:
+            continue
+        # An ordinary verb has to be the whole message to count. Everything
+        # else on the lists means one thing wherever it appears.
+        if keyword in _AMBIGUOUS and not _bare_verb(normalised, keyword):
+            continue
+        return True
+    return False
 
 
 def is_opt_out(text: str) -> bool:
