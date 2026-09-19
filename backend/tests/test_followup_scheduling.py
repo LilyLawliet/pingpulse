@@ -330,6 +330,13 @@ async def test_the_worker_stores_the_nudge_and_announces_it(tmp_path, monkeypatc
     url = f"sqlite+aiosqlite:///{tmp_path.as_posix()}/worker.db"
     monkeypatch.setattr(settings, "database_url", url)
 
+    # This test is about the worker writing the nudge down, and it must not
+    # start passing or failing according to what time it is run at. Quiet
+    # hours are pinned open here and tested on their own elsewhere.
+    from app.services import agent_config
+
+    monkeypatch.setattr(agent_config, "in_quiet_hours", lambda *a, **k: False)
+
     engine = create_async_engine(url)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)

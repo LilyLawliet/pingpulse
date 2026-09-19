@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -213,3 +213,54 @@ def as_prompt_block(organization, at: datetime | None = None) -> str:
     # A block with only its heading is worse than no block: it spends attention
     # and says nothing.
     return "\n".join(lines) if len(lines) > 1 else ""
+
+
+# ------------------------------------------------------------- quiet hours
+# When an automated message must not arrive. Nothing here affects a reply to
+# somebody who just wrote in - answering a customer at 3am is fine, because
+# they chose the hour. This is only for messages the system starts itself.
+DEFAULT_QUIET_START = time(21, 0)
+DEFAULT_QUIET_END = time(8, 0)
+
+
+def quiet_window(organization) -> tuple[time, time]:
+    """The shop's own quiet hours, or a civilised default."""
+    config = (getattr(organization, "agent_config", None) or {}) if organization else {}
+    hours = config.get("quiet_hours") or {}
+    start = _parse_time(hours.get("start")) or DEFAULT_QUIET_START
+    end = _parse_time(hours.get("end")) or DEFAULT_QUIET_END
+    return start, end
+
+
+def in_quiet_hours(organization, at: datetime | None = None) -> bool:
+    """Is it a time of night we should not be messaging anybody?"""
+    start, end = quiet_window(organization)
+    local = (at or datetime.now(timezone.utc)).astimezone(zone_of(organization))
+    current = local.time()
+
+    if start <= end:
+        return start <= current < end
+    # Spans midnight, which the default does: 21:00 to 08:00.
+    return current >= start or current < end
+
+
+def next_sendable_time(organization, at: datetime | None = None) -> datetime:
+    """The next moment an automated message may go out, in UTC.
+
+    Returns `at` unchanged when it is already fine, so a caller can compare
+    the two to find out whether anything was deferred.
+    """
+    moment = at or datetime.now(timezone.utc)
+    if not in_quiet_hours(organization, moment):
+        return moment
+
+    zone = zone_of(organization)
+    _, end = quiet_window(organization)
+    local = moment.astimezone(zone)
+
+    candidate = local.replace(
+        hour=end.hour, minute=end.minute, second=0, microsecond=0
+    )
+    if candidate <= local:
+        candidate += timedelta(days=1)
+    return candidate.astimezone(timezone.utc)

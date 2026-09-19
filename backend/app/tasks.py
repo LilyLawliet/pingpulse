@@ -24,6 +24,8 @@ from sqlalchemy import select
 from app.config import settings
 from app.services import consent
 
+from app.services import agent_config
+
 logger = logging.getLogger(__name__)
 
 celery_app = Celery("pingpulse", broker=settings.redis_url, backend=settings.redis_url)
@@ -204,8 +206,24 @@ async def _announce(contact, nudge, body: str) -> None:
 CANCELLED = "cancelled"
 OPTED_OUT = "opted out"
 
+# Not a refusal so much as a postponement: the caller re-queues for the hour
+# the shop is willing to send at. Dropping it would lose a lead to a clock.
+QUIET = "quiet hours"
 
-def refuse_followup(contact, token: str, attempt: int, manual: bool) -> str | None:
+# Somebody with a site visit on Thursday does not need "still thinking about
+# it?" on Wednesday. Worse than noise - it tells them the business has lost
+# track of them.
+ALREADY_BOOKED = "already booked"
+
+
+def refuse_followup(
+    contact,
+    token: str,
+    attempt: int,
+    manual: bool,
+    organization=None,
+    appointment=None,
+) -> str | None:
     """Why this queued nudge must not go out, or None if it may.
 
     Separated from the task that sends it because the task owns a database
@@ -238,6 +256,17 @@ def refuse_followup(contact, token: str, attempt: int, manual: bool) -> str | No
     # end of NUDGES in the worker.
     if not manual and attempt > MAX_FOLLOWUPS:
         return f"past the {MAX_FOLLOWUPS}-nudge cap"
+
+    # A confirmed appointment answers the question the nudge was going to ask.
+    # An operator who presses follow-up anyway has looked at the conversation
+    # and decided, so this gate is for the automatic sequence only.
+    if not manual and appointment is not None:
+        return ALREADY_BOOKED
+
+    # Last, because it is the only one the caller can act on rather than
+    # simply obey: everything above means never, and this one means not yet.
+    if organization is not None and agent_config.in_quiet_hours(organization):
+        return QUIET
 
     return None
 
@@ -273,7 +302,50 @@ async def _run_followup(
                 return "contact gone"
 
             metadata = dict(contact.contact_metadata or {})
-            refusal = refuse_followup(contact, token, attempt, manual)
+
+            from app.models import Organization
+            from app.services import booking
+
+            organization = await session.get(Organization, contact.organization_id)
+            appointment = await booking.upcoming_for(session, contact.id)
+
+            refusal = refuse_followup(
+                contact,
+                token,
+                attempt,
+                manual,
+                organization=organization,
+                appointment=appointment,
+            )
+            if refusal == QUIET:
+                # Deferred, not dropped. Sent when the shop is willing to send.
+                #
+                # A broker that cannot take the re-queue loses this one nudge,
+                # which is the same trade the rest of the queueing here makes:
+                # never raise into a path whose failure is invisible to the
+                # customer and whose success was only ever a convenience.
+                when = agent_config.next_sendable_time(organization)
+                try:
+                    schedule_customer_followup.apply_async(
+                        args=[
+                            str(contact.id),
+                            str(contact.organization_id),
+                            token,
+                            attempt,
+                        ],
+                        eta=when,
+                    )
+                    logger.info(
+                        "follow-up %d for %s held until %s (quiet hours)",
+                        attempt,
+                        contact.id,
+                        when.isoformat(timespec="minutes"),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "could not hold follow-up %d for %s: %s", attempt, contact.id, exc
+                    )
+                return QUIET
             if refusal is not None:
                 if refusal == OPTED_OUT:
                     # Drop the token too, so the rest of the queued sequence
