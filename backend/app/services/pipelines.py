@@ -173,3 +173,22 @@ async def contacts_in_use(db, organization_id, key: str) -> int:
             )
         )
     ) or 0
+
+
+async def stage_with_outcome(db, organization_id, outcome: str) -> str | None:
+    """The key of this board's column meaning `outcome`, or None.
+
+    A tenant may rename "Estimate scheduled" to "Booked in" or "Site visit
+    agreed", so the column that means an appointment exists cannot be found by
+    its label or by a hardcoded key. `outcome` is the stable answer to what a
+    column means, which is exactly what is needed when a confirmed booking has
+    to move a lead onto a board nobody here designed.
+
+    None when the board has no such column: a tenant who deleted it has said
+    they do not track that, and inventing the column back would put contacts
+    somewhere they cannot see.
+    """
+    for stage in await stages_for(db, organization_id):
+        if stage.outcome == outcome:
+            return stage.key
+    return None

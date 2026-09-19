@@ -826,3 +826,278 @@ def as_prompt_block(organization, contact, slots: list[datetime], appointment=No
         "round them, shift them or invent others. Nothing is booked until they pick "
         "one and you are told it succeeded, so do NOT say anything is confirmed yet."
     )
+
+
+# ------------------------------------------------------------ the turn itself
+# Intent words, and they mean something different here than they used to. The
+# old rule read "schedule" in a customer's message and moved the lead to
+# ESTIMATE_SCHEDULED - the word *was* the event. These trigger a lookup: is
+# there an appointment, is that time free, is the qualification complete. The
+# record changes only if the lookup says it may.
+_WANTS_CANCEL = re.compile(
+    r"\b(cancel|call it off|drop the|don'?t (want|need) the)\b.{0,40}"
+    r"\b(appointment|booking|visit|estimate|consultation|slot|it)\b"
+    r"|\bcancel (it|that|my appointment|the appointment)\b",
+    re.IGNORECASE,
+)
+
+_WANTS_MOVE = re.compile(
+    r"\b(reschedul\w*|re-?book|move|change|shift|push)\b.{0,40}"
+    r"\b(appointment|booking|visit|estimate|consultation|slot|time|it)\b"
+    r"|\b(different|another|earlier|later) (time|day|slot)\b",
+    re.IGNORECASE,
+)
+
+_WANTS_BOOKING = re.compile(
+    r"\b("
+    # Naming the thing.
+    r"book|booking|schedul\w*|appointment|consultation|estimate|survey|"
+    r"viewing|site visit|home visit"
+    # Asking when.
+    r"|when (can|could|are|do|would) you"
+    r"|what (times?|days?|slots?)"
+    r"|which (times?|days?|slots?)"
+    r"|any (times?|days?|slots?|openings?)"
+    r"|(times?|days?|slots?) (are |is )?(free|available|open)"
+    r"|availab\w*"
+    r"|free (on|this|next|tomorrow|today)"
+    # Asking somebody to come.
+    r"|come (out|round|over|and see|to see|by)"
+    r"|(can|could) (you|someone|somebody) come"
+    r"|send (someone|somebody)"
+    r"|pop (round|over|by)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass
+class TurnResult:
+    """What this turn did about appointments, and what to tell the agent.
+
+    `performed` is the only thing that may license the agent to announce an
+    action, and it is set from a completed operation rather than from an
+    intention.
+    """
+
+    prompt_block: str = ""
+    appointment: "Appointment | None" = None
+    performed: str | None = None          # "booked" | "cancelled" | "moved"
+    refusal: "Refusal | None" = None
+    offered: list = None                  # noqa: RUF012 - set in __post_init__
+
+    def __post_init__(self):
+        if self.offered is None:
+            self.offered = []
+
+    @property
+    def booked(self) -> bool:
+        return self.performed == "booked"
+
+    @property
+    def cancelled(self) -> bool:
+        return self.performed == "cancelled"
+
+    @property
+    def moved(self) -> bool:
+        return self.performed == "moved"
+
+
+def wants_cancel(text: str) -> bool:
+    return bool(_WANTS_CANCEL.search(text or ""))
+
+
+def wants_move(text: str) -> bool:
+    return bool(_WANTS_MOVE.search(text or ""))
+
+
+def wants_booking(text: str) -> bool:
+    return bool(_WANTS_BOOKING.search(text or ""))
+
+
+def _missing_for_booking(organization, contact) -> list:
+    """Configured questions still unanswered, which hold a booking back.
+
+    A shop that asks for the property address before sending somebody out is
+    asking for a reason, and a booking made without it is a van with nowhere
+    to go.
+    """
+    from app.services import qualification
+
+    # Only what this shop explicitly asked for. `slots_for` falls back to six
+    # sensible defaults so the agent has something to ask about in
+    # conversation, and gating bookings on those would stop every shop that
+    # never opened the settings page from taking a single appointment -
+    # including the ones that took them happily before any of this existed.
+    #
+    # A gate is a promise the shop made to itself. It only exists once they
+    # make it.
+    config = _config(organization)
+    if not isinstance(config.get("qualification_slots"), list):
+        return []
+    if not config["qualification_slots"]:
+        return []
+
+    return qualification.missing(organization, contact.qualification)
+
+
+async def handle_turn(db, organization, contact, text: str) -> TurnResult:
+    """Do the appointment work for one inbound message. Never raises.
+
+    Returns what actually happened. The caller puts `prompt_block` in front of
+    the model and passes `performed` to the reply guard, so a sentence
+    announcing a booking can only survive if a booking was made.
+    """
+    try:
+        return await _handle_turn(db, organization, contact, text)
+    except Exception as exc:  # noqa: BLE001 - never at the cost of a reply
+        logger.warning("appointment handling failed for %s: %s", contact.id, exc)
+        return TurnResult()
+
+
+async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
+    existing = await upcoming_for(db, contact.id)
+    zone = agent_config.zone_of(organization)
+
+    # ---------------------------------------------------------- cancelling
+    if wants_cancel(text):
+        if existing is None:
+            return TurnResult(
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    "They asked to cancel, and there is NO appointment booked for "
+                    "them. Say plainly that you cannot find a booking in their name, "
+                    "and do NOT say anything has been cancelled."
+                ),
+                refusal=Refusal("not_found", "There is no appointment booked to cancel."),
+            )
+        result = await cancel(db, existing)
+        if result.ok:
+            forget_offer(contact)
+            return TurnResult(
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    f"Their {describe(existing)} has been CANCELLED, just now, "
+                    "successfully. Confirm that plainly and briefly."
+                ),
+                performed="cancelled",
+            )
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"The cancellation did NOT go through: {result.message} "
+                "Tell them what you see and do not claim it is cancelled."
+            ),
+            appointment=existing,
+            refusal=result,
+        )
+
+    # -------------------------------------------------------- rescheduling
+    if wants_move(text) and existing is not None:
+        picked = chosen_slot(text, remembered_offer(contact), zone)
+        if picked is not None:
+            result = await reschedule(db, organization, existing, picked)
+            if result.ok:
+                forget_offer(contact)
+                return TurnResult(
+                    prompt_block=(
+                        "=== APPOINTMENTS ===\n"
+                        f"Their appointment has been MOVED, just now, successfully. "
+                        f"It is now: {describe(result.appointment)}. Confirm exactly "
+                        "that and nothing else."
+                    ),
+                    appointment=result.appointment,
+                    performed="moved",
+                )
+            return TurnResult(
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    f"The move did NOT happen: {result.message} They still have "
+                    f"their original {describe(existing)}. Say so, and offer to "
+                    "look at other times."
+                ),
+                appointment=existing,
+                refusal=result,
+            )
+
+        slots = await free_slots(db, organization, days=7)
+        remember_offer(contact, slots)
+        block = as_prompt_block(organization, contact, slots)
+        return TurnResult(
+            prompt_block=(
+                block
+                + f"\n\nThey want to move their existing {describe(existing)}. "
+                "Nothing has changed yet - offer these times and let them pick one."
+            ),
+            appointment=existing,
+            offered=slots,
+        )
+
+    # ------------------------------------------------------------- booking
+    if existing is not None:
+        # They already have one. Answer from the record rather than offering
+        # a second appointment nobody asked for.
+        return TurnResult(
+            prompt_block=as_prompt_block(organization, contact, [], appointment=existing),
+            appointment=existing,
+        )
+
+    # A customer picking a slot does not say "book" - they say "the first one"
+    # or "Tuesday at 2". So the standing offer is consulted before intent is,
+    # and answering one of our own questions counts as wanting to book.
+    picked = chosen_slot(text, remembered_offer(contact), zone)
+
+    if picked is None and not wants_booking(text):
+        return TurnResult()
+
+    if not booking_enabled(organization):
+        return TurnResult(prompt_block=as_prompt_block(organization, contact, []))
+    if picked is not None:
+        # Everything the shop said it needs before sending somebody out.
+        outstanding = _missing_for_booking(organization, contact)
+        if outstanding:
+            name, asks = outstanding[0]
+            return TurnResult(
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    f"They chose a time, and it is still free - but this business "
+                    f"needs to know {asks or name} before an appointment can be "
+                    "made. Ask them for that one thing. Nothing is booked yet, so "
+                    "do NOT say it is."
+                ),
+                refusal=Refusal("needs_qualification", f"Still need: {asks or name}"),
+            )
+
+        result = await book(db, organization, contact, picked)
+        if result.ok:
+            forget_offer(contact)
+            return TurnResult(
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    f"BOOKED, just now, successfully: {describe(result.appointment)}. "
+                    "Confirm exactly that - the same day, the same time, the same "
+                    "kind of appointment. Do not add a detail that is not in it."
+                ),
+                appointment=result.appointment,
+                performed="booked",
+            )
+
+        slots = await free_slots(db, organization, days=7)
+        remember_offer(contact, slots)
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"That time could NOT be booked: {result.message}\n"
+                + as_prompt_block(organization, contact, slots)
+                + "\nSay what happened and offer these instead. Nothing is booked."
+            ),
+            refusal=result,
+            offered=slots,
+        )
+
+    slots = await free_slots(db, organization, days=7)
+    remember_offer(contact, slots)
+    return TurnResult(
+        prompt_block=as_prompt_block(organization, contact, slots),
+        offered=slots,
+    )

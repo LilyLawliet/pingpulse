@@ -17,6 +17,7 @@ from app.config import settings
 from app.models import SENDER_CUSTOMER, SENDER_OPERATOR, Contact, Message, Organization
 from app.services import agent_config
 from app.schemas import GenerationResult
+from app.services import booking
 from app.services import sales_policy
 
 logger = logging.getLogger(__name__)
@@ -682,6 +683,9 @@ async def generate_reply(
     memory_block: str = "",
     policy_block: str = "",
     last_resort: str = "",
+    appointment=None,
+    did_cancel: bool = False,
+    did_move: bool = False,
 ) -> GenerationResult:
     """Build the prompt, try Groq, fall back to Gemini, and time both attempts."""
     prompt = build_prompt(
@@ -742,6 +746,20 @@ async def generate_reply(
                     "list; quote only exact figures from the price list above, or omit it"
                 )
 
+        # A booking, a cancellation or a move may only be announced if one
+        # happened. This is the check that would have stopped "Your
+        # appointment is confirmed for September 19, 2026 at 1:00 AM EST"
+        # leaving the building: there was no appointment, and no amount of
+        # instruction in the prompt had prevented the sentence.
+        problems.extend(
+            booking.unverified_claims(
+                text,
+                appointment=appointment,
+                cancelled=did_cancel,
+                moved=did_move,
+            )
+        )
+
         # A promised human callback is never acceptable — the agent answers now.
         handoff = sales_policy.contains_handoff(text)
         if handoff:
@@ -774,6 +792,10 @@ async def generate_reply(
             raise RuntimeError("reply still quoted an unlisted price")
         if sales_policy.contains_handoff(corrected):
             raise RuntimeError("reply still promised a human follow-up")
+        if booking.unverified_claims(
+            corrected, appointment=appointment, cancelled=did_cancel, moved=did_move
+        ):
+            raise RuntimeError("reply still claimed an appointment that does not exist")
         if expects_english and is_roman_urdu(corrected):
             raise RuntimeError("reply still came back in Roman Urdu")
         return corrected

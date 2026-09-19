@@ -29,6 +29,7 @@ from app.models import (
 )
 from app.schemas import TwilioWebhookPayload
 from app.services import (
+    booking,
     agent_config,
     analyzer,
     consent,
@@ -719,9 +720,22 @@ async def process_inbound_message(
         },
     )
 
-    # Vision, and a booking link when they asked to talk to someone.
+    # Appointments, done before the prompt exists.
+    #
+    # This is the ordering that matters. The model used to be handed a booking
+    # link and left to describe what it meant, and it described an appointment
+    # confirmed for 1am. Now the checking, booking, cancelling and moving all
+    # happen here against the real diary, and what reaches the prompt is a
+    # report of what occurred.
+    appointment_turn = await booking.handle_turn(db, organization, contact, body)
+
     extra_blocks = [vision.as_prompt_block(image_analysis, bool(stored_media))]
-    if booking_only or analysis.get("wants_meeting") or scheduling.looks_like_b2b(body):
+    if appointment_turn.prompt_block:
+        extra_blocks.append(appointment_turn.prompt_block)
+    elif booking_only or analysis.get("wants_meeting") or scheduling.looks_like_b2b(body):
+        # A B2B caller wanting a sales call is a different thing from a
+        # customer booking a site visit, and the link is still the right
+        # answer for it - now only when there is no real diary in play.
         extra_blocks.append(
             scheduling.as_prompt_block(
                 organization.name,
@@ -740,6 +754,12 @@ async def process_inbound_message(
         knowledge=knowledge,
         memory_block=customer_memory.as_prompt_block(memory, contact),
         policy_block=sales_policy.as_prompt_block(analysis),
+        # What the reply is allowed to claim. A sentence announcing a booking,
+        # a cancellation or a move survives only if one actually happened on
+        # this turn - checked against these rather than against the prompt.
+        appointment=appointment_turn.appointment,
+        did_cancel=appointment_turn.cancelled,
+        did_move=appointment_turn.moved,
         # If both providers are down the customer still gets a real answer built
         # from retrieved facts — never a promise that a human will call back.
         last_resort=sales_policy.deterministic_reply(
@@ -898,6 +918,14 @@ async def process_inbound_message(
     new_stage = evaluate_stage(
         previous_stage, body, organization, contact.qualification
     )
+
+    # The one thing that may put a lead in the column meaning "booked": a row
+    # in the appointments table, written and confirmed a moment ago. The word
+    # "schedule" in a question used to be enough.
+    if appointment_turn.booked:
+        booked_stage = await pipelines.stage_with_outcome(db, organization.id, "booked")
+        if booked_stage:
+            new_stage = booked_stage
     # The model reading a conversation as NEGOTIATION or CLOSED is an opinion
     # about a conversation, not a quote that went out or money that changed
     # hands. It was allowed to move the board into both, which is the same
