@@ -1,11 +1,11 @@
 {
-  "version": "1.3.4",
-  "notes": "The WhatsApp panel now tells you the truth about a pairing. A phone shows as linked only once PingPulse has confirmed it, not the moment the scan lands, and if that phone is already connected to another business it says so plainly instead of leaving you to guess why nothing arrives. The setup form's example prices also follow the currency you picked.",
-  "pub_date": "2026-09-21T16:24:44+00:00",
+  "version": "1.3.5",
+  "notes": "Long links no longer push the dashboard sideways. A booking link used to print in full and overflow the conversation, putting a horizontal scrollbar across the whole board; links now show their destination and open when clicked. The agent also hands a booking request to you when it has no opening hours to work from, and tells the customer a team member will follow up - but only once the alert has somewhere to go.",
+  "pub_date": "2026-09-21T19:48:59+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjE1cDZUUkEwSkR4M20xbDhZZTYvdk1iM0NFT0tjSFJTajVGazk0ampkbmFBWUU5TXdBL1FobFBmWHVRV1pBblYvTnhCR2F0UGd0cVdXZzh4bWh0SFE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDA3ODgzCWZpbGU6UGluZ1B1bHNlXzEuMy40X3g2NC1zZXR1cC5leGUKTThaZ0VxTWt1S1NZd0YzRkxQMytvRy9DdEY5NUtVV3lYWGlMOTBkS0tXZG1RT2Jjc0drQnJLSzRPekRYbFNRa0VaYzRiZ2tEZFpPZDVjUlNiNUtJQXc9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.3.4_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjJPUFZPdFhDNlJzbWpycE01VjhBaE90cWxuaTdTckRmbkxNNmdZc2NoNVVWY08xUDF4bXBmYWhCNko5Tk9YZGpCN2d0Vk4wYVljOW1hdERKT2M1L2dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDIwMTM4CWZpbGU6UGluZ1B1bHNlXzEuMy41X3g2NC1zZXR1cC5leGUKSjFnY1RrM09WbUw4cHdPaHQ1Y1RXbEhvaURFSnh0Z3EyOWdFaElQZ1BKUnFuQ2hCaW55VnZwTmNwYjBkWnZDdWFldWVnaG0yYmhVMXBCb1UyQ2JNQUE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.3.5_x64-setup.exe"
     }
   }
 }

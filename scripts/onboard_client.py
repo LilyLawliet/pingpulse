@@ -142,6 +142,25 @@ async def upsert_organization(session, args) -> Organization:
     if args.domain:
         organization.primary_domain = args.domain
 
+    # Somewhere for the alerts to go. Every event is on by default, so without
+    # this the shop is subscribed to everything and reachable by nothing -
+    # which is exactly the state a live client was found in.
+    # Read defensively: this function is called with a partial namespace by
+    # the tests and by anything else driving onboarding programmatically, and
+    # an optional flag must not make it a required one.
+    alert_email = (getattr(args, "alert_email", "") or "").strip()
+    if alert_email:
+        from app.services import notifications
+
+        config = dict(organization.notify_config or {})
+        config.setdefault("events", notifications.defaults()["events"])
+        config["email"] = alert_email
+        organization.notify_config = notifications.clean_config(config)
+        if notifications.email_for(organization):
+            ok(f"alerts go to {alert_email}")
+        else:
+            note(f"{alert_email!r} is not an address alerts can reach")
+
     await session.flush()
     ok(f"currency {args.currency}, language {args.language}")
     return organization
@@ -305,6 +324,12 @@ async def show(args) -> int:
 
         print(f"\n  {organization.name}")
         print(f"    currency / language : {organization.default_currency} / {organization.default_language}")
+        from app.services import notifications as _notify
+
+        print(
+            "    alerts go to        : "
+            + (_notify.email_for(organization) or "NOBODY - pass --alert-email")
+        )
         print(f"    knowledge documents : {len(documents)}")
         for channel in channels:
             byok = "client's own Twilio" if channel.account_sid else "platform Twilio"
@@ -406,6 +431,12 @@ def main() -> int:
     parser.add_argument("--prompt", help="Override the preset entirely")
     parser.add_argument("--price-list", help="Text file of products and prices")
     parser.add_argument("--domain", help="The client's website")
+    parser.add_argument(
+        "--alert-email",
+        default="",
+        help="Where this client's alerts go. Without it they get none: the "
+        "account address is a synthetic internal identifier, not a mailbox.",
+    )
     parser.add_argument("--knowledge", help="Folder of .txt/.md policies and FAQs")
 
     parser.add_argument("--days", type=int, default=180, help="Token validity, default 180")

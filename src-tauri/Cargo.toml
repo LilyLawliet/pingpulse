@@ -1,6 +1,6 @@
 [package]
 name = "pingpulse"
-version = "1.3.4"
+version = "1.3.5"
 description = "PingPulse — WhatsApp AI sales agent dashboard"
 authors = ["PingPulse"]
 license = ""
