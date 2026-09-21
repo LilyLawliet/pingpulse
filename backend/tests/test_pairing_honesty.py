@@ -182,10 +182,17 @@ async def test_a_pairing_onto_somebody_elses_number_does_not_500(
 
 
 @pytest.mark.asyncio
-async def test_a_clashing_pairing_says_what_is_wrong(client, db_session, monkeypatch):
-    """Not silently swallowed either. The operator scanned a code and it
-    worked, so every explanation they reach for on their own is wrong - the
-    reason has to be on the screen."""
+async def test_a_clashing_pairing_is_still_a_live_session(
+    client, db_session, monkeypatch
+):
+    """A duplicate number is not a dead phone.
+
+    An earlier version of this fix recorded the clash as the session status,
+    which made the header read "Not connected" - while that session was
+    authenticated and still answering customers, because inbound routes by
+    session id and does not consult the number at all. Two separate facts, and
+    squeezing them into one field made the interface lie in a new direction.
+    """
     monkeypatch.setattr(settings, "wa_qr_shared_secret", "the-secret")
 
     await _channel(db_session, "First Shop", "923097209908")
@@ -203,9 +210,63 @@ async def test_a_clashing_pairing_says_what_is_wrong(client, db_session, monkeyp
     )
 
     await db_session.refresh(second)
-    assert second.session_status == "NUMBER_IN_USE"
+    assert second.session_status == "AUTHENTICATED"
+    assert second.session_connected_at is not None
     # And it did not take the number off the organization that holds it.
     assert second.phone_number == "+923097209908"
+
+
+@pytest.mark.asyncio
+async def test_the_clash_is_reported_on_the_channel(org_a, org_b, db_session):
+    """The operator scanned a code and it worked, so every explanation they
+    reach for on their own is wrong. The reason has to be on the screen.
+
+    Derived when the channel is read, not stored, so that resolving the clash
+    clears it without anybody remembering to.
+    """
+    from app.models import ChannelConfig
+
+    for organization_id, number in (
+        (org_a.organization_id, "+923097209908"),
+        (org_b.organization_id, "923097209908"),
+    ):
+        db_session.add(
+            ChannelConfig(
+                organization_id=uuid.UUID(organization_id),
+                channel="whatsapp",
+                provider="twilio",
+                phone_number=number,
+                whatsapp_provider="QR_SESSION",
+                session_status="AUTHENTICATED",
+            )
+        )
+    await db_session.commit()
+
+    listed = (await org_a.get("/api/v1/organizations/active/channels")).json()
+
+    assert listed, "no channel came back"
+    assert listed[0]["number_conflict"], "the duplicate handset was not reported"
+
+
+@pytest.mark.asyncio
+async def test_a_number_nobody_else_holds_is_not_flagged(org_a, db_session):
+    from app.models import ChannelConfig
+
+    db_session.add(
+        ChannelConfig(
+            organization_id=uuid.UUID(org_a.organization_id),
+            channel="whatsapp",
+            provider="twilio",
+            phone_number="+13055550123",
+            whatsapp_provider="QR_SESSION",
+            session_status="AUTHENTICATED",
+        )
+    )
+    await db_session.commit()
+
+    listed = (await org_a.get("/api/v1/organizations/active/channels")).json()
+
+    assert listed[0]["number_conflict"] is None
 
 
 @pytest.mark.asyncio

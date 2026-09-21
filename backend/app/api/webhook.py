@@ -1317,35 +1317,37 @@ async def qr_session_status(request: Request, db: AsyncSession = Depends(get_db)
                 )
             )
             if owner is not None:
-                # Another organization holds this handset. A foreseeable
-                # conflict, not a server error: raising here 500s into a
-                # caller that does not retry, and the pairing is then lost for
-                # good. Recorded as a state an operator can see instead.
+                # Another organization holds this handset. The session is
+                # genuinely up and genuinely receiving, so the status stays
+                # AUTHENTICATED - saying otherwise would tell the operator
+                # their phone is dead while it answers customers. The clash is
+                # reported separately, worked out when the channel is read.
+                #
+                # The number is simply not taken from its current owner. A
+                # foreseeable conflict, and not a reason to 500 into a caller
+                # that does not retry.
                 logger.warning(
-                    "channel %s paired with %s, which organization %s already holds",
+                    "channel %s paired with %s, which organization %s already holds; "
+                    "leaving the number where it is",
                     channel.id,
                     reported,
                     owner,
                 )
-                channel.session_status = "NUMBER_IN_USE"
-                await db.commit()
             else:
                 channel.phone_number = reported
                 try:
                     await db.commit()
                 except IntegrityError:
-                    # Lost a race with another pairing. The session is still
-                    # up and already recorded as such; only the number is
-                    # unknown, so say that rather than failing the callback.
+                    # Lost a race with another pairing.
                     await db.rollback()
                     logger.warning(
                         "could not store %s for channel %s: already taken",
                         reported,
                         channel.id,
                     )
-                    channel = await db.get(ChannelConfig, channel.id)
-                    channel.session_status = "NUMBER_IN_USE"
-                    await db.commit()
+                    # The session is up and already recorded as such. Only
+                    # the number could not be stored, and the channel keeps
+                    # the one it had.
 
     if status_value == "AUTHENTICATED":
         # The transport is back. Anything parked while it was gone goes out

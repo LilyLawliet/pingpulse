@@ -216,9 +216,7 @@ export default function WhatsAppSettings({ onChanged }) {
                         ? 'Paired phone · session active'
                         : channel.session_status === 'DISCONNECTED'
                           ? 'Paired phone · disconnected, re-scan needed'
-                          : channel.session_status === 'NUMBER_IN_USE'
-                            ? 'Paired phone · this number belongs to another business'
-                            : 'Paired phone · waiting for a scan'}
+                          : 'Paired phone · waiting for a scan'}
                     </>
                   ) : (
                     <>
@@ -230,6 +228,21 @@ export default function WhatsAppSettings({ onChanged }) {
                   )}
                 </p>
               </div>
+              {/* A duplicate handset. Said separately from the session
+                  status, because the session may be perfectly alive: this is
+                  about two businesses claiming one phone, and the one that
+                  scanned last is the one messages reach. */}
+              {channel.number_conflict && (
+                <p className="order-last flex w-full basis-full items-start gap-2 rounded-lg bg-crit/10 px-3 py-2 text-2xs text-crit">
+                  <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+                  <span>
+                    This phone is also connected to {channel.number_conflict}. One
+                    handset cannot serve two businesses — whichever scanned it last
+                    receives the messages. Disconnect it from the other one.
+                  </span>
+                </p>
+              )}
+
               <div className="ml-auto flex items-center gap-1.5">
                 {channel.whatsapp_provider === 'QR_SESSION' &&
                   channel.session_status !== 'AUTHENTICATED' && (
@@ -257,21 +270,6 @@ export default function WhatsAppSettings({ onChanged }) {
                   {channel.session_status === 'AUTHENTICATED' ? (
                     <p className="flex items-center gap-2 text-xs text-accent">
                       <Check size={14} /> Linked. This phone now sends and receives.
-                    </p>
-                  ) : channel.session_status === 'NUMBER_IN_USE' ? (
-                    /* The phone paired; PingPulse cannot use it. Another
-                       business already holds this number, and until one of
-                       them gives it up nothing will route here. Worth saying
-                       in full: the scan worked, so every other explanation
-                       the operator reaches for is wrong. */
-                    <p className="flex items-start gap-2 text-xs text-crit">
-                      <TriangleAlert size={14} className="mt-0.5 shrink-0" />
-                      <span>
-                        This phone is already connected to another business in
-                        PingPulse. The scan worked, but messages cannot be routed
-                        to two places at once. Disconnect it there first, or pair
-                        a different phone.
-                      </span>
                     </p>
                   ) : pairing.status === 'AUTHENTICATED' ? (
                     /* The bridge has the session; PingPulse has not recorded

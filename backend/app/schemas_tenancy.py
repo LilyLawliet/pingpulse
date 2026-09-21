@@ -134,6 +134,10 @@ class ChannelConfigOut(BaseModel):
     # QR_SESSION only; null for Twilio channels.
     session_status: str | None = None
     session_connected_at: datetime | None = None
+    # The name of another organization holding this same phone, if one does.
+    # Worked out when the channel is read rather than stored: a stored flag
+    # would outlive the conflict and nothing would ever clear it.
+    number_conflict: str | None = None
     # Never serialised: the auth token is write-only.
     account_sid: str | None = None
 

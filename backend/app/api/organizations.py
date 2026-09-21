@@ -259,6 +259,40 @@ async def remove_member(
 
 
 # ------------------------------- Channels ---------------------------------
+async def _flag_number_conflicts(db: AsyncSession, channels) -> None:
+    """Note any channel whose phone another organization also holds.
+
+    The unique constraint is on the stored string, so one handset written two
+    ways - "+923097209908" and "923097209908" - sits on two organizations
+    without anything objecting. It stays invisible until the phone is paired,
+    at which point inbound routes by session id to whichever channel was
+    scanned, and the other organization's number silently means nothing.
+
+    Read from the channels table each time rather than stored, so it clears
+    itself the moment somebody resolves it.
+    """
+    if not channels:
+        return
+
+    everything = (
+        await db.execute(
+            select(ChannelConfig.phone_number, ChannelConfig.id, Organization.name)
+            .join(Organization, Organization.id == ChannelConfig.organization_id)
+        )
+    ).all()
+
+    for channel in channels:
+        channel.number_conflict = next(
+            (
+                name
+                for number, other_id, name in everything
+                if other_id != channel.id
+                and whatsapp.same_number(number, channel.phone_number)
+            ),
+            None,
+        )
+
+
 @router.get("/active/channels", response_model=list[ChannelConfigOut])
 async def list_channels(
     tenant: Tenant = Depends(current_org), db: AsyncSession = Depends(get_db)
@@ -268,7 +302,9 @@ async def list_channels(
         .where(ChannelConfig.organization_id == tenant.id)
         .order_by(ChannelConfig.created_at)
     )
-    return result.scalars().all()
+    channels = result.scalars().all()
+    await _flag_number_conflicts(db, channels)
+    return channels
 
 
 @router.post("/active/channels", response_model=ChannelConfigOut, status_code=201)
