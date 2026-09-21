@@ -115,7 +115,12 @@ body::before {
     @apply text-[10px] font-semibold uppercase tracking-[0.16em] text-faint;
   }
   .panel {
-    @apply flex min-h-0 flex-col rounded-xl border border-edge bg-panel;
+    /* `min-w-0` matters as much as `min-h-0`. A flex child defaults to
+       min-width:auto, so a panel refuses to shrink below its widest content -
+       and one unbreakable 148-character URL in a conversation widened the
+       whole column and put a horizontal scrollbar across the entire board.
+       Wrapping the text fixed that URL; this fixes the class of problem. */
+    @apply flex min-h-0 min-w-0 flex-col rounded-xl border border-edge bg-panel;
     /* One hairline of light along the top edge. On black this is what makes a
        panel read as a raised surface; a drop shadow would not, since there is
        nothing darker than the ground for it to fall on. */

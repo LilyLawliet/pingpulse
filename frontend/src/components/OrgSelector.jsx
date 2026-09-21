@@ -1,13 +1,6 @@
 import { useState } from 'react'
 import { Building2, Plus, Save, X } from 'lucide-react'
 import { api } from '../api.js'
-import WhatsAppSettings from './WhatsAppSettings.jsx'
-import KnowledgeSettings from './KnowledgeSettings.jsx'
-import LearningSettings from './LearningSettings.jsx'
-import AgentSettings from './AgentSettings.jsx'
-import PipelineEditor from './PipelineEditor.jsx'
-import ErrorLog from './ErrorLog.jsx'
-import NotificationSettings from './NotificationSettings.jsx'
 
 const EMPTY = {
   name: '',
@@ -65,7 +58,16 @@ const LANGUAGES = [
  * Business switcher plus the setup sheet: who you are, how you sound, what you
  * sell, and how the agent should push a conversation forward.
  */
-export default function OrgSelector({ organizations, selectedId, onSelect, onSaved }) {
+export default function OrgSelector({
+  organizations,
+  selectedId,
+  onSelect,
+  onSaved,
+  // Editing opens the setup page. The sheet below is only for creating a
+  // business, which is the one thing that cannot be done on a page about
+  // the business that already exists.
+  onEdit,
+}) {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(EMPTY)
   const [editingId, setEditingId] = useState(null)
@@ -148,7 +150,7 @@ export default function OrgSelector({ organizations, selectedId, onSelect, onSav
           // header. Both looked for this id and found nothing, so both were
           // buttons that did nothing at all.
           id="pp-settings"
-          onClick={openEdit}
+          onClick={() => (onEdit ? onEdit() : openEdit())}
           disabled={!selectedId}
           className="rounded-lg border border-edge px-2.5 py-1.5 text-xs text-dim transition-colors hover:border-edge-hi hover:text-ink disabled:opacity-40"
         >
@@ -252,43 +254,6 @@ export default function OrgSelector({ organizations, selectedId, onSelect, onSav
                 />
               </label>
 
-              {/* Both of these belong to an organization, so they can only be
-                  set up once the business itself exists. */}
-              {editingId && (
-                <div className="border-t border-edge pt-4">
-                  <KnowledgeSettings />
-                </div>
-              )}
-              {editingId && (
-                <div className="border-t border-edge pt-4">
-                  <AgentSettings />
-                </div>
-              )}
-              {editingId && (
-                <div className="border-t border-edge pt-4">
-                  <PipelineEditor />
-                </div>
-              )}
-              {editingId && (
-                <div className="border-t border-edge pt-4">
-                  <LearningSettings />
-                </div>
-              )}
-              {editingId && (
-                <div className="border-t border-edge pt-4">
-                  <WhatsAppSettings />
-                </div>
-              )}
-              {editingId && (
-                <div className="border-t border-edge pt-4">
-                  <NotificationSettings />
-                </div>
-              )}
-              {editingId && (
-                <div className="border-t border-edge pt-4">
-                  <ErrorLog />
-                </div>
-              )}
             </div>
 
             <footer className="flex items-center gap-3 border-t border-edge px-5 py-4">

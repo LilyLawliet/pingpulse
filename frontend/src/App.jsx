@@ -7,6 +7,7 @@ import {
   FlaskConical,
   Inbox,
   LogOut,
+  Settings,
   Sparkles,
 } from 'lucide-react'
 import useMonitorSocket from './useMonitorSocket.js'
@@ -19,6 +20,7 @@ import ConversationThread from './components/ConversationThread.jsx'
 import PipelineBoard from './components/PipelineBoard.jsx'
 import MetricStrip from './components/MetricStrip.jsx'
 import OrgSelector from './components/OrgSelector.jsx'
+import SettingsPage from './components/SettingsPage.jsx'
 import PulseLine from './components/PulseLine.jsx'
 import BrandMark from './components/BrandMark.jsx'
 import WhatsNew, { hasUnseenUpgrades } from './components/WhatsNew.jsx'
@@ -76,6 +78,33 @@ function filtering(filters) {
   )
 }
 
+/**
+ * A header link: an icon and the word for what it opens.
+ *
+ * The header was five bare icons. Each one opens a different full-screen
+ * panel, and the only explanation was a `title` - which is a tooltip, which is
+ * not an explanation for anybody who does not already know what they are
+ * looking for.
+ */
+function NavLink({ icon: Icon, label, onClick, badge = false, muted = false }) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      className={`relative flex items-center gap-1.5 rounded-lg border border-edge px-2 py-1.5 text-[11px] font-semibold transition-colors hover:border-edge-hi hover:text-ink sm:px-2.5 ${
+        muted ? 'text-faint' : 'text-dim'
+      }`}
+    >
+      <Icon size={13} className="shrink-0" />
+      <span className="hidden sm:inline">{label}</span>
+      {badge && (
+        <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-panel" />
+      )}
+    </button>
+  )
+}
+
+
 export default function App() {
   const [signedIn, setSignedIn] = useState(Boolean(auth.token))
 
@@ -118,6 +147,7 @@ function Dashboard({ onSignedOut }) {
   const [showProspects, setShowProspects] = useState(false)
   const [showAnalytics, setShowAnalytics] = useState(false)
   const [showBoard, setShowBoard] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   // Null until we know. Shown only once we are sure nothing can reach
   // them, so the warning never flashes up during a normal load.
   const [alertsReach, setAlertsReach] = useState(null)
@@ -394,6 +424,9 @@ function Dashboard({ onSignedOut }) {
 
         <div className="ml-auto flex flex-wrap items-center gap-3">
           <OrgSelector
+            // Editing a business is now a page of its own. The switcher keeps
+            // only the thing it is for: choosing one, or adding another.
+            onEdit={() => setShowSettings(true)}
             organizations={organizations}
             selectedId={selectedOrg}
             onSelect={async (id) => {
@@ -444,7 +477,7 @@ function Dashboard({ onSignedOut }) {
 
           {alertsReach === false && (
             <button
-              onClick={() => document.getElementById('pp-settings')?.click()}
+              onClick={() => setShowSettings(true)}
               title="Nothing can reach you when this page is closed"
               className="flex items-center gap-1.5 rounded-full border border-warn/25 bg-warn/10 px-3 py-1.5 text-[11px] font-semibold text-warn transition-colors hover:bg-warn/15"
             >
@@ -460,7 +493,7 @@ function Dashboard({ onSignedOut }) {
           */}
           {alertsLost > 0 && (
             <button
-              onClick={() => document.getElementById('pp-settings')?.click()}
+              onClick={() => setShowSettings(true)}
               title={`${alertsLost} alert${alertsLost === 1 ? '' : 's'} could not be delivered - open alert settings to see why`}
               className="flex items-center gap-1.5 rounded-full border border-crit/25 bg-crit/10 px-3 py-1.5 text-[11px] font-semibold text-crit transition-colors hover:bg-crit/15"
             >
@@ -474,54 +507,28 @@ function Dashboard({ onSignedOut }) {
 
           <ConnectionStatus />
 
-          <button
-            onClick={() => setShowBoard(true)}
-            title="Your board"
-            className="rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
-          >
-            <Columns3 size={13} />
-          </button>
-
-          <button
-            onClick={() => setShowAnalytics(true)}
-            title="How it is going"
-            className="rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
-          >
-            <ChartNoAxesColumn size={13} />
-          </button>
-
-          <button
-            onClick={() => setShowSandbox(true)}
-            title="Try it out — nothing is sent"
-            className="rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
-          >
-            <FlaskConical size={13} />
-          </button>
-
-          <button
+          <NavLink icon={Settings} label="Setup" onClick={() => setShowSettings(true)} />
+          <NavLink icon={Columns3} label="Board" onClick={() => setShowBoard(true)} />
+          <NavLink icon={ChartNoAxesColumn} label="Analytics" onClick={() => setShowAnalytics(true)} />
+          <NavLink icon={FlaskConical} label="Try it" onClick={() => setShowSandbox(true)} />
+          <NavLink
+            icon={Sparkles}
+            label="What's new"
+            badge={unseen}
             onClick={() => {
               setShowUpgrades(true)
               setUnseen(false)
             }}
-            title="What's new"
-            className="relative rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
-          >
-            <Sparkles size={13} />
-            {unseen && (
-              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-panel" />
-            )}
-          </button>
-
-          <button
+          />
+          <NavLink
+            icon={LogOut}
+            label="Sign out"
+            muted
             onClick={() => {
               auth.clear()
               onSignedOut()
             }}
-            title="Sign out"
-            className="rounded-lg border border-edge p-1.5 text-faint transition-colors hover:border-edge-hi hover:text-ink"
-          >
-            <LogOut size={13} />
-          </button>
+          />
         </div>
       </header>
 
@@ -551,7 +558,7 @@ function Dashboard({ onSignedOut }) {
         />
         {contacts.length === 0 && !filtering(filters) ? (
           <SetupChecklist
-            onOpenSettings={() => document.getElementById('pp-settings')?.click()}
+            onOpenSettings={() => setShowSettings(true)}
           />
         ) : (
         <ConversationThread
@@ -581,6 +588,12 @@ function Dashboard({ onSignedOut }) {
           }}
         />
       </main>
+
+      <SettingsPage
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        onSaved={loadOrganizations}
+      />
 
       {showUpgrades && <WhatsNew onClose={() => setShowUpgrades(false)} />}
       {showSandbox && <AgentSandbox onClose={() => setShowSandbox(false)} />}
