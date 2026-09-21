@@ -990,6 +990,10 @@ NOTIFY_EVENTS: tuple[tuple[str, str, bool], ...] = (
     ("delivery_failure", "A message could not be delivered", True),
     ("opt_out", "Somebody asked to stop being messaged", True),
     ("new_lead", "A new person messaged for the first time", False),
-    ("unanswered", "The agent could not answer something", False),
+    # On by default. It was off, and it is the event that fires when the agent
+    # is out of its depth - which is the exact moment a person needs to know.
+    # A customer asked for a human, the agent could not give them one, and
+    # nobody was told anything.
+    ("unanswered", "The agent could not answer something", True),
 )
 NOTIFY_KEYS = tuple(key for key, _, _ in NOTIFY_EVENTS)

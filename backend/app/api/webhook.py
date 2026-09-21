@@ -768,11 +768,53 @@ async def process_inbound_message(
     # confirmed for 1am. Now the checking, booking, cancelling and moving all
     # happen here against the real diary, and what reaches the prompt is a
     # report of what occurred.
+    # Can the agent actually finish what this customer is asking for?
+    #
+    # The case that produced the incident: somebody asks to book, the shop has
+    # never set its opening hours, so there is nothing to offer and nothing
+    # the agent can do. Forbidden from saying a colleague would follow up, it
+    # invented a time instead - and then, asked to cancel it, said it was a
+    # live team member.
+    #
+    # Handing over is only honest if somebody is told, so the alert is raised
+    # here and its destination checked before the agent is allowed to mention
+    # a person at all.
+    handed_to_a_person = False
+    if booking.wants_booking(body) and not booking.booking_enabled(organization):
+        handed_to_a_person = await notifications.can_reach(db, organization)
+        await notifications.raise_and_send(
+            db,
+            organization,
+            "unanswered",
+            "Someone wants to book and the agent cannot",
+            f"{contact.name or phone_number} asked to book: {body.strip()[:200]}"
+            "\n\nThis business has no opening hours set, so the agent has no times "
+            "to offer and has not booked anything. "
+            + (
+                "They have been told a person will come back to them with times."
+                if handed_to_a_person
+                else "They have NOT been promised a callback, because this "
+                "organization has no alert address or device - so nothing "
+                "would have been behind the promise."
+            ),
+            contact_id=contact.id,
+        )
+
     appointment_turn = await booking.handle_turn(db, organization, contact, body)
 
     extra_blocks = [vision.as_prompt_block(image_analysis, bool(stored_media))]
     if appointment_turn.prompt_block:
         extra_blocks.append(appointment_turn.prompt_block)
+    if handed_to_a_person:
+        # Said plainly, and only here. The guard lets a handoff phrase through
+        # for this turn because the alert behind it has already been raised.
+        extra_blocks.append(
+            "A colleague has just been alerted about this booking request. "
+            "You MAY tell the customer that a team member will get back to them "
+            "with available times. Do NOT offer a time yourself, do NOT say "
+            "anything is booked, and never claim to be a person."
+        )
+
     elif booking_only or analysis.get("wants_meeting") or scheduling.looks_like_b2b(body):
         # A B2B caller wanting a sales call is a different thing from a
         # customer booking a site visit, and the link is still the right
@@ -801,6 +843,7 @@ async def process_inbound_message(
         appointment=appointment_turn.appointment,
         did_cancel=appointment_turn.cancelled,
         did_move=appointment_turn.moved,
+        handoff_allowed=handed_to_a_person,
         # If both providers are down the customer still gets a real answer built
         # from retrieved facts — never a promise that a human will call back.
         last_resort=sales_policy.deterministic_reply(

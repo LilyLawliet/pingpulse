@@ -38,14 +38,16 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import settings
 from app.models import (
     NOTIFY_EVENTS,
     NOTIFY_KEYS,
     Notification,
+    OrganizationMember,
     PushSubscription,
+    User,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,6 +119,63 @@ def email_for(organization) -> str:
     config = getattr(organization, "notify_config", None) or {}
     address = (config.get("email") or "").strip()
     return address if "@" in address else ""
+
+
+async def address_for(db, organization) -> str:
+    """Where this organization's alerts actually go.
+
+    The configured address if there is one, and otherwise the account that
+    owns the business. That fallback is the whole point: notify_config was {}
+    for a live client, every event on by default with nowhere to send any of
+    them, and the first anybody knew was a customer being told the agent was a
+    person.
+
+    Owners before admins, and only active accounts. An address that cannot
+    receive is the same as no address, so the placeholder check applies here
+    too.
+    """
+    configured = email_for(organization)
+    if configured:
+        return configured
+
+    rows = (
+        await db.execute(
+            select(OrganizationMember.role, User.email)
+            .join(User, User.id == OrganizationMember.user_id)
+            .where(
+                OrganizationMember.organization_id == organization.id,
+                OrganizationMember.role.in_(("OWNER", "ADMIN")),
+                User.is_active.is_(True),
+            )
+        )
+    ).all()
+
+    for wanted in ("OWNER", "ADMIN"):
+        for role, email in rows:
+            if role == wanted and usable_address(email):
+                return usable_address(email)
+    return ""
+
+
+async def can_reach(db, organization) -> bool:
+    """Is there anybody on the other end of an alert?
+
+    Asked before the agent is allowed to tell a customer that a person will
+    get back to them. Promising a callback nobody was told about is the same
+    failure as confirming an appointment nobody booked - it is just slower to
+    find out about, because the customer waits for a call instead of turning
+    up to a visit.
+    """
+    if email_available() and await address_for(db, organization):
+        return True
+    if push_available():
+        devices = await db.scalar(
+            select(func.count(PushSubscription.id)).where(
+                PushSubscription.organization_id == organization.id
+            )
+        )
+        return bool(devices)
+    return False
 
 
 def clean_config(raw: dict) -> dict:
@@ -352,11 +411,11 @@ async def _send_push(db, notification: Notification) -> str:
     return f"{sent} of {len(devices)}"
 
 
-async def _send_email(organization, notification: Notification) -> str:
-    """One plain message to the address the shop gave us."""
+async def _send_email(db, organization, notification: Notification) -> str:
+    """One plain message, to the shop's address or the owner's account."""
     if not email_available():
         return "not configured"
-    address = email_for(organization)
+    address = await address_for(db, organization)
     if not address:
         return "no address"
 
@@ -372,7 +431,8 @@ async def _send_email(organization, notification: Notification) -> str:
         f"{notification.body}\n\n"
         f"Open the dashboard: {settings.dashboard_url}\n\n"
         "You are getting this because alerts are switched on for "
-        f"{organization.name}. Turn them off in your business settings."
+        f"{organization.name}, and this is the account that owns it. Change "
+        "the address or turn them off in your business settings."
     )
 
     try:
@@ -430,7 +490,7 @@ async def deliver(db, organization, notification: Notification) -> dict:
 
     if not previous or _failed(previous.get("email")):
         try:
-            result["email"] = await _send_email(organization, notification)
+            result["email"] = await _send_email(db, organization, notification)
         except Exception as exc:  # noqa: BLE001
             logger.warning("email delivery failed: %s", exc)
             result["email"] = f"failed: {type(exc).__name__}"

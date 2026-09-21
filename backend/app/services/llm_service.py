@@ -769,6 +769,7 @@ async def generate_reply(
     appointment=None,
     did_cancel: bool = False,
     did_move: bool = False,
+    handoff_allowed: bool = False,
 ) -> GenerationResult:
     """Build the prompt, try Groq, fall back to Gemini, and time both attempts."""
     prompt = build_prompt(
@@ -867,8 +868,12 @@ async def generate_reply(
                 "you are. Answer as the business without claiming to be human"
             )
 
-        # A promised human callback is never acceptable — the agent answers now.
-        handoff = sales_policy.contains_handoff(text)
+        # A promised human callback is acceptable only when one was really
+        # arranged. `handoff_allowed` is set by the caller *after* the alert
+        # has been raised and found somewhere to go - so the sentence is
+        # backed by a delivered instruction to a person, not by the model
+        # deciding it would be a comforting thing to say.
+        handoff = None if handoff_allowed else sales_policy.contains_handoff(text)
         if handoff:
             problems.append(
                 f'you wrote "{handoff}"; never promise that a person will follow up, '
@@ -901,7 +906,7 @@ async def generate_reply(
             raise RuntimeError("reply still promised something the business has not offered")
         if claims_to_be_human(corrected):
             raise RuntimeError("reply still claimed to be a person")
-        if sales_policy.contains_handoff(corrected):
+        if not handoff_allowed and sales_policy.contains_handoff(corrected):
             raise RuntimeError("reply still promised a human follow-up")
         if booking.unverified_claims(
             corrected, appointment=appointment, cancelled=did_cancel, moved=did_move

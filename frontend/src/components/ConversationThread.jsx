@@ -66,6 +66,47 @@ function DeliveryMark({ message }) {
   )
 }
 
+// Anything that looks like a link, so a transcript can show it as one.
+const LINK = /(https?:\/\/[^\s]+)/g
+
+/**
+ * A message, with its links clickable and readable.
+ *
+ * The calendar links this agent sends are around 150 characters of url-encoded
+ * query string. Printed in full they overflowed the bubble - there is no
+ * whitespace in a URL to wrap at - and put a horizontal scrollbar across the
+ * whole dashboard.
+ *
+ * Shown by host instead, because what an operator needs from a transcript is
+ * that a booking link went out, not what its `details` parameter contained.
+ * The full URL stays in the title attribute and in the href, so nothing is
+ * hidden from anybody who wants it.
+ */
+function withLinks(content) {
+  return (content || '').split(LINK).map((piece, index) => {
+    if (index % 2 === 0) return piece
+    let label = piece
+    try {
+      const url = new URL(piece)
+      label = url.hostname.replace(/^www\./, '') + (url.pathname === '/' ? '' : url.pathname)
+    } catch {
+      /* not a URL after all — show it as typed */
+    }
+    return (
+      <a
+        key={`${index}-${piece}`}
+        href={piece}
+        target="_blank"
+        rel="noreferrer"
+        title={piece}
+        className="underline decoration-dotted underline-offset-2 hover:opacity-80"
+      >
+        {label.length > 48 ? `${label.slice(0, 48)}…` : label}
+      </a>
+    )
+  })
+}
+
 function Bubble({ message }) {
   const fromCustomer = message.sender === 'user'
   // A person took over and typed this. Shown differently from the agent's own
@@ -94,7 +135,12 @@ function Bubble({ message }) {
             <Sparkles size={10} /> AI agent
           </span>
         )}
-        <p className="whitespace-pre-wrap text-[13px] leading-relaxed">{message.content}</p>
+        {/* `break-words` alone does not break a 150-character URL, which is
+            one unbreakable token; `anywhere` is what stops it overflowing the
+            bubble and scrolling the entire board sideways. */}
+        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[13px] leading-relaxed">
+          {withLinks(message.content)}
+        </p>
 
         {(message.media_urls || []).length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
