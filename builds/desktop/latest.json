@@ -1,11 +1,11 @@
 {
-  "version": "1.3.3",
-  "notes": "Your alerts now tell you what became of them. Every alert shows whether it reached you, and when one did not, why - instead of failing quietly where nobody could see it.",
-  "pub_date": "2026-09-17T12:49:07+00:00",
+  "version": "1.3.4",
+  "notes": "The WhatsApp panel now tells you the truth about a pairing. A phone shows as linked only once PingPulse has confirmed it, not the moment the scan lands, and if that phone is already connected to another business it says so plainly instead of leaving you to guess why nothing arrives. The setup form's example prices also follow the currency you picked.",
+  "pub_date": "2026-09-21T16:24:44+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMndDb2JYRENhVEtTWG9JU3VOaWVBMVRTOGpTWWRNWS9MWlh4cTlNOHpxMm9oa0t2LzIwdDd2dWx0SFhCZ241QXRsa1FreTBjSDlCMElnZVp2MnNyY2dNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg5NjQ5MzQ3CWZpbGU6UGluZ1B1bHNlXzEuMy4zX3g2NC1zZXR1cC5leGUKUW5kck4zUzgzSTBkS3haL2lwRnd1K2ZpdlNxaFNYTnM2SzBOb1NKNTNhbnNLL1A5M1NGbG5FM0pZcHAyQk5KT0d2NlZQNHBydjJrYThhdHY5Q2tVRGc9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.3.3_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjE1cDZUUkEwSkR4M20xbDhZZTYvdk1iM0NFT0tjSFJTajVGazk0ampkbmFBWUU5TXdBL1FobFBmWHVRV1pBblYvTnhCR2F0UGd0cVdXZzh4bWh0SFE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDA3ODgzCWZpbGU6UGluZ1B1bHNlXzEuMy40X3g2NC1zZXR1cC5leGUKTThaZ0VxTWt1S1NZd0YzRkxQMytvRy9DdEY5NUtVV3lYWGlMOTBkS0tXZG1RT2Jjc0drQnJLSzRPekRYbFNRa0VaYzRiZ2tEZFpPZDVjUlNiNUtJQXc9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.3.4_x64-setup.exe"
     }
   }
 }
