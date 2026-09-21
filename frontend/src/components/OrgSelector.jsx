@@ -19,6 +19,37 @@ const EMPTY = {
 }
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'PKR', 'AED', 'SAR', 'INR', 'TRY', 'NGN', 'ZAR']
+
+// An example priced in the currency the shop actually picked. This used to be
+// one fixed string in rupees, left over from the first shop it was written
+// for, sitting above a dropdown that defaults to USD - so the very first
+// thing a new business read was an example that contradicted its own form.
+//
+// Amounts per currency rather than one set with the code swapped: "USD
+// 12,000-45,000" for a pair of shoes is a worse example than the one it
+// replaced, and an example nobody believes teaches nothing.
+const EXAMPLE_PRICES = {
+  USD: ['120', '450', '150'],
+  EUR: ['110', '420', '140'],
+  GBP: ['95', '360', '120'],
+  PKR: ['12,000', '45,000', '15,000'],
+  AED: ['450', '1,650', '550'],
+  SAR: ['450', '1,700', '560'],
+  INR: ['10,000', '38,000', '12,500'],
+  TRY: ['4,000', '15,000', '5,000'],
+  NGN: ['180,000', '700,000', '230,000'],
+  ZAR: ['2,200', '8,300', '2,800'],
+}
+
+function sellingExample(currency) {
+  const code = EXAMPLE_PRICES[currency] ? currency : 'USD'
+  const [low, high, delivery] = EXAMPLE_PRICES[code]
+  return (
+    `Designer sneakers and heels, ${code} ${low}\u2013${high}. ` +
+    `Free delivery over ${code} ${delivery}.`
+  )
+}
+
 const LANGUAGES = [
   ['en', 'English'],
   ['ur', 'Urdu'],
@@ -183,7 +214,7 @@ export default function OrgSelector({ organizations, selectedId, onSelect, onSav
                   rows={3}
                   {...field('product_rules')}
                   className={inputClass}
-                  placeholder="Designer sneakers and heels, PKR 12,000–45,000. Free delivery over PKR 15,000."
+                  placeholder={sellingExample(form.default_currency)}
                 />
               </label>
 
