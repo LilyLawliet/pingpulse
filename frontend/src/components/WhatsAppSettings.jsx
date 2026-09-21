@@ -100,7 +100,11 @@ export default function WhatsAppSettings({ onChanged }) {
   // screen; polling also catches the moment the phone links.
   useEffect(() => {
     if (!pairing?.channelId) return undefined
-    if (pairing.status === 'AUTHENTICATED') return undefined
+    // Keeps polling until the *channel* is authenticated, not until the bridge
+    // says so. The bridge reporting a live session is the start of the story:
+    // it still has to reach the API, and when that call failed the session ran
+    // for days with nothing in PingPulse aware of it.
+    if (connected?.session_status === 'AUTHENTICATED') return undefined
 
     let cancelled = false
     const tick = async () => {
@@ -127,7 +131,7 @@ export default function WhatsAppSettings({ onChanged }) {
       cancelled = true
       clearInterval(timer)
     }
-  }, [pairing?.channelId, pairing?.status, load, onChanged])
+  }, [pairing?.channelId, connected?.session_status, load, onChanged])
 
   const beginPairing = async (channelId) => {
     setError(null)
@@ -212,7 +216,9 @@ export default function WhatsAppSettings({ onChanged }) {
                         ? 'Paired phone · session active'
                         : channel.session_status === 'DISCONNECTED'
                           ? 'Paired phone · disconnected, re-scan needed'
-                          : 'Paired phone · waiting for a scan'}
+                          : channel.session_status === 'NUMBER_IN_USE'
+                            ? 'Paired phone · this number belongs to another business'
+                            : 'Paired phone · waiting for a scan'}
                     </>
                   ) : (
                     <>
@@ -248,9 +254,34 @@ export default function WhatsAppSettings({ onChanged }) {
 
               {pairing?.channelId === channel.id && (
                 <div className="mt-3 w-full basis-full border-t border-edge pt-3">
-                  {pairing.status === 'AUTHENTICATED' ? (
+                  {channel.session_status === 'AUTHENTICATED' ? (
                     <p className="flex items-center gap-2 text-xs text-accent">
                       <Check size={14} /> Linked. This phone now sends and receives.
+                    </p>
+                  ) : channel.session_status === 'NUMBER_IN_USE' ? (
+                    /* The phone paired; PingPulse cannot use it. Another
+                       business already holds this number, and until one of
+                       them gives it up nothing will route here. Worth saying
+                       in full: the scan worked, so every other explanation
+                       the operator reaches for is wrong. */
+                    <p className="flex items-start gap-2 text-xs text-crit">
+                      <TriangleAlert size={14} className="mt-0.5 shrink-0" />
+                      <span>
+                        This phone is already connected to another business in
+                        PingPulse. The scan worked, but messages cannot be routed
+                        to two places at once. Disconnect it there first, or pair
+                        a different phone.
+                      </span>
+                    </p>
+                  ) : pairing.status === 'AUTHENTICATED' ? (
+                    /* The bridge has the session; PingPulse has not recorded
+                       it yet. Normally a second or two. If it stays here, the
+                       callback is failing and nothing will route - which is
+                       the state a shop sat in for days while this said the
+                       phone was linked and sending. */
+                    <p className="flex items-center gap-2 text-xs text-warn">
+                      <Loader2 size={13} className="animate-spin" /> Phone scanned.
+                      Confirming with PingPulse…
                     </p>
                   ) : pairing.qr ? (
                     <div className="flex items-start gap-4">

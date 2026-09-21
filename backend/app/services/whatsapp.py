@@ -18,6 +18,8 @@ move a tenant onto the other transport.
 
 from __future__ import annotations
 
+import re
+
 import logging
 
 import httpx
@@ -137,3 +139,42 @@ async def active_channel(db, organization_id):
         )
     )
     return result.scalars().first()
+
+
+# --------------------------------------------------------------- numbers
+# Everything that is not a digit or a leading plus. WhatsApp reports a number
+# bare ("923097209908"), a person types it dialled ("+92 309 720 9908"), and
+# Twilio prefixes it ("whatsapp:+923097209908"). Three spellings of one phone.
+_NOT_A_NUMBER = re.compile(r"[^0-9+]")
+
+
+def normalise_number(raw: str | None) -> str:
+    """One spelling per phone, so a uniqueness rule can mean what it says.
+
+    The unique constraint is on the stored string, which made "+923097209908"
+    and "923097209908" two different numbers - and let two organizations claim
+    one handset. The clash only surfaced when the phone was paired and the
+    bridge wrote back the bare form, by which point the failure was a 500
+    inside a callback nobody was watching.
+
+    Leaves a number with no country code alone rather than guessing one. A
+    wrong guess here routes a customer's message to the wrong business, which
+    is worse than a number that fails to match.
+    """
+    if not raw:
+        return ""
+    cleaned = _NOT_A_NUMBER.sub("", str(raw).replace("whatsapp:", "").strip())
+    if not cleaned:
+        return ""
+
+    # A plus is only meaningful at the front, and only once.
+    digits = cleaned.lstrip("+")
+    if not digits:
+        return ""
+    return "+" + digits
+
+
+def same_number(left: str | None, right: str | None) -> bool:
+    """Are these two spellings of the same phone?"""
+    normalised = normalise_number(left)
+    return bool(normalised) and normalised == normalise_number(right)

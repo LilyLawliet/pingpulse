@@ -284,17 +284,28 @@ async def add_channel(
     """
     tenant.require_role(ADMIN_ROLES)
 
-    number = payload.phone_number.replace("whatsapp:", "").strip()
-    clash = await db.execute(
-        select(ChannelConfig).where(
-            ChannelConfig.channel == payload.channel,
-            ChannelConfig.phone_number == number,
-            # A number this organization already holds is not a clash: it is
-            # the row about to be replaced below.
-            ChannelConfig.organization_id != tenant.id,
+    # One spelling per phone. Compared raw, "+923097209908" and "923097209908"
+    # are two different numbers, and two organizations claimed the same
+    # handset that way - discovered only when it was paired and the bridge
+    # wrote back the bare form onto a constraint that refused it.
+    number = whatsapp.normalise_number(payload.phone_number)
+    if not number:
+        raise HTTPException(
+            status_code=422, detail="That does not look like a phone number."
         )
-    )
-    if clash.scalar_one_or_none() is not None:
+
+    others = (
+        await db.execute(
+            select(ChannelConfig).where(
+                ChannelConfig.channel == payload.channel,
+                # A number this organization already holds is not a clash: it
+                # is the row about to be replaced below.
+                ChannelConfig.organization_id != tenant.id,
+            )
+        )
+    ).scalars().all()
+
+    if any(whatsapp.same_number(number, other.phone_number) for other in others):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="That number is already connected to an organization",

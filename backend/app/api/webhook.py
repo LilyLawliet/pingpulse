@@ -28,6 +28,8 @@ from app.models import (
     Organization,
 )
 from app.schemas import TwilioWebhookPayload
+from sqlalchemy.exc import IntegrityError
+
 from app.services import (
     booking,
     agent_config,
@@ -1285,13 +1287,65 @@ async def qr_session_status(request: Request, db: AsyncSession = Depends(get_db)
     if channel is None:
         return {"ok": False, "error": "unknown session"}
 
+    # The status first, alone, and committed before anything that can fail.
+    # These used to share a transaction with the number below, so a number we
+    # could not store discarded the far more important fact that the session
+    # is up - which is exactly what happened in production: a successful
+    # pairing recorded as GENERATING_QR, permanently.
     channel.session_status = status_value[:24]
     if status_value == "AUTHENTICATED":
         channel.session_connected_at = datetime.now(timezone.utc)
-        # The bridge learns the real number only after pairing.
-        if body.get("phoneNumber"):
-            channel.phone_number = str(body["phoneNumber"]).replace("whatsapp:", "")
     await db.commit()
+
+    # Then the number, which is allowed to fail. The bridge learns the real
+    # one only after pairing, and it may already belong to somebody else.
+    if status_value == "AUTHENTICATED" and body.get("phoneNumber"):
+        reported = whatsapp.normalise_number(body["phoneNumber"])
+        # Looked up whether or not this channel needs the number written. The
+        # conflict is that two organizations hold one handset, and that is
+        # true regardless of which spelling each of them stored - which is
+        # exactly the production case, where the channel already had the
+        # number and the clash was invisible from this row alone.
+        if reported:
+            owner = await db.scalar(
+                select(ChannelConfig.organization_id).where(
+                    ChannelConfig.channel == channel.channel,
+                    ChannelConfig.phone_number.in_(
+                        (reported, reported.lstrip("+"))
+                    ),
+                    ChannelConfig.id != channel.id,
+                )
+            )
+            if owner is not None:
+                # Another organization holds this handset. A foreseeable
+                # conflict, not a server error: raising here 500s into a
+                # caller that does not retry, and the pairing is then lost for
+                # good. Recorded as a state an operator can see instead.
+                logger.warning(
+                    "channel %s paired with %s, which organization %s already holds",
+                    channel.id,
+                    reported,
+                    owner,
+                )
+                channel.session_status = "NUMBER_IN_USE"
+                await db.commit()
+            else:
+                channel.phone_number = reported
+                try:
+                    await db.commit()
+                except IntegrityError:
+                    # Lost a race with another pairing. The session is still
+                    # up and already recorded as such; only the number is
+                    # unknown, so say that rather than failing the callback.
+                    await db.rollback()
+                    logger.warning(
+                        "could not store %s for channel %s: already taken",
+                        reported,
+                        channel.id,
+                    )
+                    channel = await db.get(ChannelConfig, channel.id)
+                    channel.session_status = "NUMBER_IN_USE"
+                    await db.commit()
 
     if status_value == "AUTHENTICATED":
         # The transport is back. Anything parked while it was gone goes out
