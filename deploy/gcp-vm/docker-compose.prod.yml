@@ -10,10 +10,12 @@
 #     443 is exposed to the internet.
 #   * Caddy replaces the ngrok tunnel and terminates real TLS, which is what
 #     Twilio requires and what makes the webhook URL permanent.
-#   * There is NO frontend service. The dashboard ships inside the Tauri
-#     desktop app and runs on the operator's machine, so the server is an
-#     API only — a browser hitting the domain gets a status line, never a
-#     login form or customer data.
+#   * There is NO frontend *service*, but the dashboard IS served. The API
+#     mounts the built bundle at /app itself (see main.py), so it needs no
+#     container of its own. The bare domain still answers with a status line
+#     and nothing else; the dashboard lives one path down, at
+#     https://{$DOMAIN}/app/, and is the same build that ships inside the
+#     Tauri desktop app.
 #   * Migrations do NOT run on container start. `deploy.sh` runs them as an
 #     explicit, gated step so a failed migration stops the deploy instead of
 #     leaving a half-started API.

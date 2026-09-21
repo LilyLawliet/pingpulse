@@ -5,12 +5,19 @@
 # what makes the Twilio webhook URL permanent — the reason ngrok existed.
 #
 # ---------------------------------------------------------------------------
-# This server does NOT serve the dashboard
+# The dashboard is served, but not at the root
 # ---------------------------------------------------------------------------
-# The React dashboard ships inside the Tauri desktop app and runs on the
-# operator's own machine. Nothing here serves it, so opening the domain in a
-# browser exposes no interface, no login form and no customer data — only a
-# status line saying the engine is alive.
+# PingPulse launched on both desktop and the browser. The React dashboard
+# ships inside the Tauri desktop app AND is served here at /app — the same
+# build in both places, mounted by the API itself rather than by a container
+# of its own.
+#
+# The bare domain is still only a status line. Nothing at the root advertises
+# that a dashboard exists, and finding /app buys nothing on its own: an access
+# token is what unlocks data, and the API checks it identically for the
+# browser and the desktop app.
+#
+#     https://{$DOMAIN}/app/
 #
 # A short list stays reachable from the internet, and each has a reason:
 #

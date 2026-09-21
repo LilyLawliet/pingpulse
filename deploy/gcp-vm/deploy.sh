@@ -221,7 +221,8 @@ $COMPOSE ps --format 'table {{.Name}}\t{{.Status}}'
 
 cat <<NEXT
 
-  API            https://${DOMAIN}          (no dashboard is served here)
+  API            https://${DOMAIN}          (the bare domain is a status line)
+  Dashboard      https://${DOMAIN}/app/     (same build as the desktop app)
   Health         https://${DOMAIN}/health
   Deep health    https://${DOMAIN}/health?deep=1
   Twilio webhook https://${DOMAIN}/api/v1/whatsapp/webhook

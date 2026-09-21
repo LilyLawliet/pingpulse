@@ -29,9 +29,11 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
+import tarfile
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(r"D:\pingpulse")
@@ -49,6 +51,23 @@ VM_ZONE = os.environ.get("PINGPULSE_ZONE", "me-central1-b")
 GCP_PROJECT = os.environ.get("PINGPULSE_PROJECT", "pingpulse-508212")
 REMOTE_UPDATES = "/opt/pingpulse/data/updates"
 GCLOUD = os.environ.get("GCLOUD", r"D:\google-cloud-sdk\bin\gcloud.cmd")
+
+# The browser dashboard at /app, which is the same bundle the desktop app was
+# just built around.
+#
+# It used to be published by deploy.sh alone, which copies from frontend/dist
+# *on the VM* — and frontend/dist is in .gitignore, so it never arrived there.
+# The desktop app bakes the bundle in at build time and kept moving; /app sat
+# on whatever had been copied across by hand once, months earlier, and nothing
+# reported the gap because both looked fine from their own side.
+#
+# Publishing it from here rather than from deploy.sh is what makes main.py's
+# claim true: one build, shipped to both places in the same step, so they
+# cannot drift apart again.
+DIST = ROOT / "frontend" / "dist"
+REMOTE_WEB = "/opt/pingpulse/data/web"
+REMOTE_DIST = "/opt/pingpulse/app/frontend/dist"
+PUBLIC_APP_URL = f"{BACKEND_URL.rstrip('/')}/app"
 
 
 def run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -180,6 +199,98 @@ def publish(version: str, installer: pathlib.Path) -> None:
     print("  uploaded")
 
 
+def bundled_assets() -> list[str]:
+    """The asset filenames the freshly built index.html actually asks for.
+
+    Vite puts a content hash in every filename, so this is the one string that
+    distinguishes this build from the one before it — and the only honest way
+    to check which build a server is really handing out.
+    """
+    index = (DIST / "index.html").read_text(encoding="utf-8")
+    return re.findall(r"assets/index-[A-Za-z0-9_-]+\.(?:js|css)", index)
+
+
+def publish_web() -> bool:
+    """Put the same bundle behind /app.
+
+    Copied over the top rather than replacing the directory: asset filenames
+    carry a content hash, so the old ones are inert, and a browser that loaded
+    the page a second before the switch can still fetch the assets that page
+    was promised. deploy.sh does the same thing for the same reason.
+
+    It also lands in the VM's checkout of frontend/dist, so a later deploy.sh
+    republishes this bundle instead of reverting /app to an older one.
+
+    Not fatal. The desktop app is the product; the browser copy is the
+    convenience, and a release that reached every desktop client should not be
+    reported as failed because one copy step did not.
+    """
+    if not (DIST / "index.html").is_file():
+        print("  !! no frontend/dist — /app keeps the bundle it already has")
+        return False
+
+    print("  publishing the browser dashboard ...")
+    archive = OUT / "dashboard.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        for path in sorted(DIST.rglob("*")):
+            if path.is_file():
+                tar.add(path, arcname=str(path.relative_to(DIST)).replace("\\", "/"))
+
+    remote = (
+        f"sudo mkdir -p {REMOTE_WEB} {REMOTE_DIST} && "
+        f"sudo tar -xzf /tmp/dashboard.tar.gz -C {REMOTE_DIST} && "
+        f"sudo cp -r {REMOTE_DIST}/. {REMOTE_WEB}/ && "
+        f"sudo chmod -R a+rX {REMOTE_WEB} && "
+        "rm -f /tmp/dashboard.tar.gz"
+    )
+    try:
+        run([
+            GCLOUD, "compute", "scp", str(archive),
+            f"{VM_NAME}:/tmp/dashboard.tar.gz",
+            f"--zone={VM_ZONE}", f"--project={GCP_PROJECT}", "--quiet",
+        ])
+        run([
+            GCLOUD, "compute", "ssh", VM_NAME, f"--zone={VM_ZONE}",
+            f"--project={GCP_PROJECT}", "--quiet", "--command", remote,
+        ])
+    except subprocess.CalledProcessError as exc:
+        print(f"  !! could not publish /app: {exc}")
+        return False
+    finally:
+        archive.unlink(missing_ok=True)
+    return True
+
+
+def confirm_web() -> bool:
+    """Ask /app for its page and check it names this build's assets.
+
+    Deliberately not sending X-PingPulse-Device: this is a check, and a check
+    that claims a licence seat costs a client one every time a release goes
+    out.
+    """
+    import urllib.request
+
+    wanted = bundled_assets()
+    if not wanted:
+        print("  !! the built index.html references no hashed assets")
+        return False
+
+    try:
+        request = urllib.request.Request(f"{PUBLIC_APP_URL}/")
+        page = urllib.request.urlopen(request, timeout=60).read().decode("utf-8")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  !! could not fetch {PUBLIC_APP_URL}/: {exc}")
+        return False
+
+    missing = [name for name in wanted if name not in page]
+    if missing:
+        print(f"  !! /app is serving an older bundle — it does not reference {missing}")
+        return False
+
+    print(f"  verified — {PUBLIC_APP_URL}/ is serving this build")
+    return True
+
+
 def confirm(version: str, installer: pathlib.Path) -> bool:
     """Fetch what a client would fetch, and check it before trusting it.
 
@@ -258,12 +369,26 @@ def main() -> int:
         print("  PUBLISH FAILED VERIFICATION — check before saying it shipped.")
         return 1
 
+    # The browser copy, from the same dist the installer was just built
+    # around. Reported separately and never fatal: the desktop release is
+    # already verified in front of clients by this point, and saying it failed
+    # because /app did not copy would be a worse lie than the one this whole
+    # step exists to prevent.
+    web = publish_web() and confirm_web()
+
     print()
     print(f"  PingPulse {args.version} is live.")
     print()
     print("  Existing clients update themselves on their next launch; nobody runs")
     print("  an installer. A brand-new machine gets builds/desktop/PingPulse_Setup.exe")
     print("  once, and never again.")
+    print()
+    if web:
+        print(f"  In a browser: {PUBLIC_APP_URL}/")
+    else:
+        print(f"  {PUBLIC_APP_URL}/ was NOT updated — it is still serving an older")
+        print("  bundle. The desktop release above is fine; only the browser copy")
+        print("  needs another run.")
     print()
     return 0
 

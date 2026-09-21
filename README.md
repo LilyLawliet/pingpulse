@@ -223,9 +223,22 @@ depends on `backend` being healthy — so the stack starts strictly in order:
 
 ## 6. The dashboard
 
-`http://localhost:3000` is built for the business owner, not the operator, so it
-deliberately shows no model names, latencies, prompts or infrastructure health — that
-detail stays on the API (`/api/v1/logs`, `/health`) for whoever needs it.
+PingPulse launched on both desktop and the browser, and the dashboard is one build
+served three ways:
+
+| Where | Address |
+|---|---|
+| **Production, in a browser** | <https://pingpulse.duckdns.org/app/> |
+| **Production, desktop app** | the Tauri app, which updates itself |
+| **Local development** | `cd frontend && npm run dev` → `http://localhost:5173` |
+
+The same `frontend/dist` goes to all three, so there is no second version to keep in
+step. `scripts/make_release.py` builds it once, ships it to both production copies and
+then verifies each as a client would.
+
+It is built for the business owner, not the operator, so it deliberately shows no model
+names, latencies, prompts or infrastructure health — that detail stays on the API
+(`/api/v1/logs`, `/health`) for whoever needs it.
 
 Three panes, left to right: **Conversations** (everyone talking to you, with a live
 typing indicator while the agent writes), the **thread** itself, and the **Pipeline**
