@@ -41,3 +41,7 @@ demo/
 builds/desktop/*.exe
 builds/desktop/*.msi
 builds/desktop/*.sig
+
+# Personal Claude Code settings, including the production-deploy grant.
+# Machine-local on purpose: it should not travel with the repository.
+.claude/settings.local.json
