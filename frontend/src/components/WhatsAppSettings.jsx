@@ -78,7 +78,9 @@ export default function WhatsAppSettings({ onChanged }) {
       await api.addChannel({
         channel: 'whatsapp',
         provider: 'twilio',
-        phone_number: form.phone_number.trim(),
+        // Null for a QR pairing: the handset reports its own number when the
+        // session authenticates, and the server refuses a typed one anyway.
+        phone_number: provider === 'TWILIO' ? form.phone_number.trim() : null,
         whatsapp_provider: provider,
         // Only meaningful for Twilio; the QR path pairs a phone instead.
         account_sid: provider === 'TWILIO' ? sid || null : null,
@@ -207,7 +209,14 @@ export default function WhatsAppSettings({ onChanged }) {
                 <Check size={13} className="text-accent" />
               </span>
               <div className="min-w-0">
-                <p className="font-mono text-[13px] text-ink">{channel.phone_number}</p>
+                {/* A QR channel has no number until the handset reports one,
+                    and an empty line here reads as a missing number rather
+                    than as one still on its way. */}
+                {channel.phone_number ? (
+                  <p className="font-mono text-[13px] text-ink">{channel.phone_number}</p>
+                ) : (
+                  <p className="text-[13px] text-dim">Number arrives with the scan</p>
+                )}
                 <p className="flex items-center gap-1.5 text-2xs text-faint">
                   {channel.whatsapp_provider === 'QR_SESSION' ? (
                     <>
@@ -259,7 +268,7 @@ export default function WhatsAppSettings({ onChanged }) {
                   onClick={() => disconnect(channel.id)}
                   disabled={busy}
                   className="rounded-lg p-1.5 text-faint transition-colors hover:bg-panel-2 hover:text-crit disabled:opacity-40"
-                  aria-label={`Disconnect ${channel.phone_number}`}
+                  aria-label={`Disconnect ${channel.phone_number || 'this connection'}`}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -368,17 +377,27 @@ export default function WhatsAppSettings({ onChanged }) {
           ))}
         </div>
 
-        <label className="block">
-          <span className="eyebrow mb-1.5 block">
-            {provider === 'TWILIO' ? 'WhatsApp number' : 'Phone number to pair'}
-          </span>
-          <input
-            {...field('phone_number')}
-            className={inputClass}
-            placeholder="+14155238886"
-            spellCheck={false}
-          />
-        </label>
+        {/*
+          Only Twilio asks for the number.
+
+          Scanning a QR already identifies the handset - the bridge reads its
+          number off the session the moment it authenticates - so asking for it
+          first made the operator type a fact the system was about to be told,
+          and made that typed copy the one the uniqueness rule was enforced
+          against. Two organizations ended up holding one phone, written
+          "+923097209908" and "923097209908", and neither spelling collided.
+        */}
+        {provider === 'TWILIO' && (
+          <label className="block">
+            <span className="eyebrow mb-1.5 block">WhatsApp number</span>
+            <input
+              {...field('phone_number')}
+              className={inputClass}
+              placeholder="+14155238886"
+              spellCheck={false}
+            />
+          </label>
+        )}
 
         <div className={`grid grid-cols-2 gap-3 ${provider === 'TWILIO' ? '' : 'hidden'}`}>
           <label className="block">
@@ -410,19 +429,26 @@ export default function WhatsAppSettings({ onChanged }) {
           </p>
         ) : (
           <p className="text-2xs text-faint">
-            No credentials needed. After saving, a QR code appears here — scan it from
-            WhatsApp on the phone under Linked devices. You only scan once.
+            Nothing to type. A QR code appears here — scan it from WhatsApp on the
+            phone you want to use, under Linked devices. The number is read from
+            that phone, and you only scan once.
           </p>
         )}
 
         <button
           type="button"
           onClick={connect}
-          disabled={busy || !form.phone_number.trim()}
+          disabled={busy || (provider === 'TWILIO' && !form.phone_number.trim())}
           className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           <Plug size={13} />{' '}
-          {busy ? 'Connecting…' : connected ? 'Replace connection' : 'Connect number'}
+          {busy
+            ? 'Connecting…'
+            : connected
+              ? 'Replace connection'
+              : provider === 'TWILIO'
+                ? 'Connect number'
+                : 'Show QR code'}
         </button>
       </div>
 

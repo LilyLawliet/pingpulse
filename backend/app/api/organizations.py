@@ -320,12 +320,22 @@ async def add_channel(
     """
     tenant.require_role(ADMIN_ROLES)
 
+    provider_name = (payload.whatsapp_provider or "TWILIO").upper()
+
     # One spelling per phone. Compared raw, "+923097209908" and "923097209908"
     # are two different numbers, and two organizations claimed the same
     # handset that way - discovered only when it was paired and the bridge
     # wrote back the bare form onto a constraint that refused it.
     number = whatsapp.normalise_number(payload.phone_number)
-    if not number:
+
+    if provider_name == whatsapp.QR_SESSION:
+        # Not asked for, and not taken if offered. The handset reports its own
+        # number the moment the session authenticates, so a typed one is a
+        # second copy of a fact that is about to arrive - and the copy the
+        # uniqueness rule would be enforced against. Typing it is how one
+        # phone came to be claimed by two organizations under two spellings.
+        number = None
+    elif not number:
         raise HTTPException(
             status_code=422, detail="That does not look like a phone number."
         )
@@ -341,7 +351,10 @@ async def add_channel(
         )
     ).scalars().all()
 
-    if any(whatsapp.same_number(number, other.phone_number) for other in others):
+    # `same_number` is false for an unknown number, so a pairing in flight
+    # never collides with anything. The real check happens when the scan
+    # reports the number, against the row that already holds it.
+    if number and any(whatsapp.same_number(number, other.phone_number) for other in others):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="That number is already connected to an organization",
@@ -369,7 +382,7 @@ async def add_channel(
             "replacing %s channel %s with a new %s connection",
             whatsapp.provider_of(previous),
             previous.phone_number,
-            (payload.whatsapp_provider or "TWILIO").upper(),
+            provider_name,
         )
         await db.delete(previous)
 
@@ -380,7 +393,7 @@ async def add_channel(
         channel=payload.channel,
         provider=payload.provider,
         phone_number=number,
-        whatsapp_provider=(payload.whatsapp_provider or 'TWILIO').upper(),
+        whatsapp_provider=provider_name,
         account_sid=payload.account_sid,
         auth_token=payload.auth_token,
     )

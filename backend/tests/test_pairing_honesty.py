@@ -69,7 +69,17 @@ def test_different_numbers_are_still_different():
 @pytest.mark.asyncio
 async def test_a_second_organization_cannot_claim_one_handset(org_a, org_b):
     """Caught while somebody is typing it in, rather than days later inside a
-    callback that fails and is never retried."""
+    callback that fails and is never retried.
+
+    Written against QR pairing, which is where the production fault happened.
+    The QR path no longer takes a typed number at all - the handset reports its
+    own - so the two-spellings trap has been removed rather than guarded, and
+    the equivalent case now lives in test_pairing_needs_no_number.py, where the
+    clash is checked against the number the scan reports.
+
+    Twilio still accepts a typed number, because there is no scan to learn one
+    from, so the guard still has to hold here.
+    """
     first = await org_a._client.post(
         "/api/v1/organizations/active/channels",
         headers=org_a.headers,
@@ -77,7 +87,7 @@ async def test_a_second_organization_cannot_claim_one_handset(org_a, org_b):
             "channel": "whatsapp",
             "provider": "twilio",
             "phone_number": "+923097209908",
-            "whatsapp_provider": "QR_SESSION",
+            "whatsapp_provider": "TWILIO",
         },
     )
     assert first.status_code in (200, 201), first.text
@@ -90,7 +100,7 @@ async def test_a_second_organization_cannot_claim_one_handset(org_a, org_b):
             "channel": "whatsapp",
             "provider": "twilio",
             "phone_number": "923097209908",
-            "whatsapp_provider": "QR_SESSION",
+            "whatsapp_provider": "TWILIO",
         },
     )
 
@@ -106,7 +116,8 @@ async def test_a_number_that_is_not_one_is_refused(org_a):
             "channel": "whatsapp",
             "provider": "twilio",
             "phone_number": "not a phone",
-            "whatsapp_provider": "QR_SESSION",
+            # Twilio, because that is the only path that still takes one.
+            "whatsapp_provider": "TWILIO",
         },
     )
 

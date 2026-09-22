@@ -111,7 +111,9 @@ class MemberOut(BaseModel):
 
 # ------------------------------ Channels ----------------------------------
 class ChannelConfigCreate(BaseModel):
-    phone_number: str = Field(min_length=3, max_length=50)
+    # Optional, because a QR pairing learns the number from the scan. Twilio
+    # still needs it supplied - there is no handset to read it off.
+    phone_number: str | None = Field(default=None, max_length=50)
     channel: str = Field(default="whatsapp", max_length=30)
     provider: str = Field(default="twilio", max_length=30)
     # TWILIO or QR_SESSION. Defaults to the sanctioned transport.
@@ -128,7 +130,8 @@ class ChannelConfigOut(BaseModel):
     channel: str
     provider: str
     whatsapp_provider: str = "TWILIO"
-    phone_number: str
+    # Null while a QR pairing is waiting to be scanned.
+    phone_number: str | None = None
     is_active: bool
     created_at: datetime
     # QR_SESSION only; null for Twilio channels.

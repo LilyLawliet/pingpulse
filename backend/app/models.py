@@ -336,7 +336,13 @@ class ChannelConfig(Base):
     provider: Mapped[str] = mapped_column(
         String(30), nullable=False, default="twilio", server_default="twilio"
     )
-    phone_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    # Null until a QR pairing has been scanned. The handset reports its own
+    # number when the session authenticates, so asking the operator to type it
+    # first only created a second, unverified copy of a fact the bridge was
+    # about to supply - and that copy is what let one handset be claimed twice
+    # under two spellings. A Twilio channel still supplies it, because there is
+    # no scan to learn it from.
+    phone_number: Mapped[str | None] = mapped_column(String(50), index=True)
 
     # How this number is connected. Both providers write to the same tables,
     # so switching never hides or loses a conversation.
