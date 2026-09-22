@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BookOpen, Check, FileText, Loader2, Trash2, TriangleAlert, Upload } from 'lucide-react'
+import {
+  BookOpen,
+  CalendarCheck,
+  Check,
+  FileText,
+  Loader2,
+  Trash2,
+  TriangleAlert,
+  Upload,
+} from 'lucide-react'
 import { api } from '../api.js'
 
 const ACCEPT = '.pdf,.docx,.txt,.md'
@@ -25,6 +34,8 @@ export default function KnowledgeSettings() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)
+  // What the last upload did to the opening hours, reported by the server.
+  const [hours, setHours] = useState(null)
   const [dragging, setDragging] = useState(false)
   const picker = useRef(null)
 
@@ -54,12 +65,17 @@ export default function KnowledgeSettings() {
     setBusy(true)
     setError(null)
     setNote(null)
+    setHours(null)
     const done = []
 
     for (const file of chosen) {
       try {
         const result = await api.uploadKnowledge(file)
         done.push(`${result.filename}: ${result.passages_indexed} passage(s)`)
+        // Reading the opening hours out of the file changes whether the agent
+        // can book at all, which is far too big a thing to leave the owner to
+        // discover. The server says in plain words what it did; show it.
+        if (result.opening_hours) setHours(result.opening_hours)
       } catch (err) {
         // The server writes these for a shop owner, not an engineer — a scan
         // with no text layer explains itself. Show it as it came.
@@ -230,6 +246,27 @@ export default function KnowledgeSettings() {
       )}
       {note && !error && (
         <p className="rounded-lg bg-accent/10 px-3 py-2 text-xs text-accent">{note}</p>
+      )}
+
+      {/*
+        What the file did to the shop's opening hours, which decides whether
+        the agent can offer an appointment or has to hand over to a person.
+        Green when the hours were taken and booking is on; amber otherwise,
+        because "nothing was applied" is the case somebody has to act on.
+      */}
+      {hours && !error && (
+        <p
+          className={`flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
+            hours.applied ? 'bg-accent/10 text-accent' : 'bg-warn/10 text-warn'
+          }`}
+        >
+          {hours.applied ? (
+            <CalendarCheck size={13} className="mt-0.5 shrink-0" />
+          ) : (
+            <TriangleAlert size={13} className="mt-0.5 shrink-0" />
+          )}
+          {hours.detail}
+        </p>
       )}
 
       {sources.length > 0 && (

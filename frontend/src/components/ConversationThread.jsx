@@ -132,7 +132,7 @@ function Bubble({ message }) {
         )}
         {!fromCustomer && !fromOperator && (
           <span className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
-            <Sparkles size={10} /> AI agent
+            <Sparkles size={10} /> PingPulse
           </span>
         )}
         {/* `break-words` alone does not break a 150-character URL, which is

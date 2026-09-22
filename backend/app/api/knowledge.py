@@ -11,13 +11,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
-from app.models import KnowledgeDocument
+from app.models import KnowledgeDocument, Organization
 from app.schemas_tenancy import (
     KnowledgeDocumentCreate,
     KnowledgeDocumentOut,
     RetrievedChunk,
 )
-from app.services import catalogue, documents, retrieval, whatsapp
+from app.services import (
+    agent_config,
+    catalogue,
+    documents,
+    opening_hours,
+    retrieval,
+    whatsapp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +52,85 @@ async def add_document(
     )
     await db.refresh(document)
     return document
+
+
+async def _adopt_opening_hours(db, organization_id, text: str) -> dict:
+    """Take the opening hours out of an uploaded document and use them.
+
+    A shop uploads the sheet that says when it is open, and until now that
+    sentence reached the knowledge base and nothing else. The agent could
+    recite the hours to a customer while `business_hours` - the field the
+    booking code actually reads - stayed empty, so booking stayed off and the
+    agent had to hand every appointment to a person. The document said one
+    thing and the product did another.
+
+    Three things stop this writing hours it should not:
+
+    * Hours already configured are never overwritten. Somebody set those by
+      hand, and a document uploaded a year later must not quietly move them.
+    * Nothing is applied until the timezone is set. "09:00" with no zone is
+      09:00 UTC, which is how a Miami shop ended up with an appointment at one
+      in the morning. Hours without a zone are worse than no hours.
+    * The result goes through the same validation as the settings form. One
+      writer, one set of rules.
+
+    Every outcome is reported back to the uploader in plain words, because a
+    setup step that happens invisibly is one nobody can tell has not happened.
+    """
+    found = opening_hours.parse(text)
+    if not found:
+        return {
+            "found": None,
+            "applied": False,
+            "detail": "This document does not state opening hours, so booking stays off "
+            "until you set them. Until then the agent hands anyone asking for an "
+            "appointment to a person and alerts you.",
+        }
+
+    summary = opening_hours.describe(found)
+    organization = await db.get(Organization, organization_id)
+    if organization is None:
+        return {"found": summary, "applied": False, "detail": "No organization to apply them to."}
+
+    config = dict(organization.agent_config or {})
+    if config.get("business_hours"):
+        same = config["business_hours"] == found
+        return {
+            "found": summary,
+            "applied": False,
+            "detail": (
+                "These match the hours you already have."
+                if same
+                else "You already have opening hours set, so these were left alone. "
+                "Change them in Setup if the document is the newer one."
+            ),
+        }
+
+    zone = (getattr(organization, "timezone", None) or "").strip()
+    if not zone or zone == "UTC":
+        return {
+            "found": summary,
+            "applied": False,
+            "detail": f"Found {summary}, but your timezone is not set yet — these would be "
+            "read as UTC and book people in the middle of the night. Set your "
+            "timezone in Setup and upload this again.",
+        }
+
+    problems = agent_config.validate({**config, "business_hours": found})
+    if problems:
+        logger.warning("parsed hours for %s did not validate: %s", organization_id, problems)
+        return {"found": summary, "applied": False, "detail": problems[0]}
+
+    config["business_hours"] = found
+    organization.agent_config = config
+    await db.flush()
+    logger.info("adopted opening hours for %s from an upload: %s", organization_id, summary)
+    return {
+        "found": summary,
+        "applied": True,
+        "detail": f"Opening hours were read from this document and saved: {summary} "
+        f"({zone}). The agent can offer appointments now.",
+    }
 
 
 @router.post("/upload", status_code=201)
@@ -100,13 +186,20 @@ async def upload_document(
         stored.append(document)
 
     await db.flush()
+
+    # Read from the whole extracted document rather than the passages, so
+    # hours split across a chunk boundary are not lost to where the splitter
+    # happened to cut.
+    hours = await _adopt_opening_hours(db, tenant.id, extracted.text)
+
     logger.info(
-        "indexed %s for %s: %d passage(s), %d table(s), %d page(s)",
+        "indexed %s for %s: %d passage(s), %d table(s), %d page(s); hours %s",
         file.filename,
         tenant.id,
         len(stored),
         extracted.tables,
         extracted.pages,
+        hours["found"] or "not stated",
     )
     return {
         "filename": file.filename,
@@ -115,6 +208,7 @@ async def upload_document(
         "tables_found": extracted.tables,
         "passages_indexed": len(stored),
         "characters": len(extracted.text),
+        "opening_hours": hours,
     }
 
 

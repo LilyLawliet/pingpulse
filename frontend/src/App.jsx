@@ -449,20 +449,20 @@ function Dashboard({ onSignedOut }) {
             }}
           />
 
-          <span
-            className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold ${
-              connected
-                ? 'border-accent/25 bg-accent/10 text-accent'
-                : 'border-warn/25 bg-warn/10 text-warn'
-            }`}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                connected ? 'animate-breathe bg-accent' : 'bg-warn'
-              }`}
-            />
-            {connected ? 'Live' : 'Reconnecting'}
-          </span>
+          {/*
+            Only shown when the socket is down.
+
+            "Live" was on screen permanently and told the owner nothing they
+            could act on - the normal state does not need a badge. Losing the
+            connection does, because the board stops updating and a stale
+            screen looks exactly like a quiet afternoon.
+          */}
+          {!connected && (
+            <span className="flex items-center gap-2 rounded-full border border-warn/25 bg-warn/10 px-3 py-1.5 text-[11px] font-semibold text-warn">
+              <span className="h-1.5 w-1.5 rounded-full bg-warn" />
+              Reconnecting
+            </span>
+          )}
 
           {waiting > 0 && (
             <button
