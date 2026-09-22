@@ -1,11 +1,11 @@
 {
-  "version": "1.3.8",
-  "notes": "Pairing by QR no longer asks for the phone number \u2014 the phone reports it when you scan.",
-  "pub_date": "2026-09-22T14:58:56+00:00",
+  "version": "1.3.9",
+  "notes": "The pairing QR appears again, and a connection nobody has scanned no longer claims to be a paired phone.",
+  "pub_date": "2026-09-22T15:30:42+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjZCcFpsa2dqbVJURnZsbTk3YmZrR1Q5MGhsSG00NDNuN2tuK0tMLzBXY2FQSkw0UDYxWHd2MVg4Tlk4NzIrTzEyaTArWmRQUkY5ZnoySWNaTkxta1FRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDg5MTM1CWZpbGU6UGluZ1B1bHNlXzEuMy44X3g2NC1zZXR1cC5leGUKNU4wc21zVjRManRqZWw5dnhIdlY4Y2t4a01sV0FXOTJObjVQNzlNVGhIMlNQandyRTRXU1dqTGNYanlZbzZyT0ZGUlNXMDRJWS93c1l5RDU2RTdRRGc9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.3.8_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjlTdUxHTXNPQzJWWndnSjZyWk9vZmp3VXREa2RRcUgrTW90NUw3RXBhRjZXT2VjUU04OFlEUWdGZ2pDNkZ4VktFT2tUaXJvb2FjYVk0WkhiM2c3UUFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDkxMDQxCWZpbGU6UGluZ1B1bHNlXzEuMy45X3g2NC1zZXR1cC5leGUKQ3owQ0Y3YUpKZTc5YVlJSUQwZVZoNldnTnlVSFlTeGtERDJDbi9hQWdvdE4zeWhZQ28xTUpkc2Z4a1lETlBicG1SNU9tV21CL0g2ZG1paEJzcEpaQVE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.3.9_x64-setup.exe"
     }
   }
 }

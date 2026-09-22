@@ -25,6 +25,7 @@ import path from 'node:path'
 
 import makeWASocket, {
   DisconnectReason,
+  fetchLatestBaileysVersion,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys'
 import express from 'express'
@@ -45,6 +46,55 @@ const SEND_WAIT_MS = Number(process.env.SEND_WAIT_MS || 12000)
 const log = pino({ level: process.env.LOG_LEVEL || 'info' })
 
 mkdirSync(SESSIONS_DIR, { recursive: true })
+
+/**
+ * The WhatsApp Web version to announce, fetched rather than assumed.
+ *
+ * Baileys ships a hard-coded version number, and WhatsApp closes the
+ * handshake on one it considers too old - before the exchange ever reaches
+ * the point where a QR is offered. The symptom is a socket that times out
+ * with a 408 a second after opening, retried forever, with no QR and nothing
+ * in the log naming a cause. Pairing simply never worked, and the only
+ * sessions that still connected were ones already holding credentials.
+ *
+ * So the current version is asked for. Cached for an hour because it changes
+ * about weekly and a pairing should not wait on a network call it could
+ * reuse, and falling back to whatever the library believes rather than
+ * refusing to start: a stale guess sometimes works, and no attempt never
+ * does.
+ */
+let waVersion = null
+let waVersionAt = 0
+const WA_VERSION_TTL_MS = 60 * 60 * 1000
+
+async function whatsappVersion() {
+  if (waVersion && Date.now() - waVersionAt < WA_VERSION_TTL_MS) return waVersion
+  try {
+    const { version, isLatest } = await fetchLatestBaileysVersion()
+    waVersion = version
+    waVersionAt = Date.now()
+    log.info({ version: version.join('.'), isLatest }, 'announcing this WhatsApp Web version')
+  } catch (error) {
+    log.warn(
+      { err: error?.message },
+      'could not look up the current WhatsApp Web version — using the built-in one',
+    )
+  }
+  return waVersion
+}
+
+/**
+ * Sessions that have reached an open connection at least once since boot.
+ *
+ * The difference between "this phone is paired and the network wobbled" and
+ * "this pairing has never worked". The first deserves retrying for as long as
+ * it takes; the second deserves an answer, because retrying in silence is how
+ * a broken pairing looked like a slow one for days.
+ */
+const opened = new Set()
+/** Consecutive failed starts for a session that has never opened. */
+const attempts = new Map()
+const MAX_PAIRING_ATTEMPTS = 5
 
 /** Live sessions, keyed by channel id. */
 const sessions = new Map()
@@ -200,7 +250,10 @@ async function startSession(sessionId) {
   const folder = path.join(SESSIONS_DIR, sessionId)
   const { state, saveCreds } = await useMultiFileAuthState(folder)
 
+  const version = await whatsappVersion()
   const socket = makeWASocket({
+    // Omitted when the lookup failed, so Baileys falls back to its own.
+    ...(version ? { version } : {}),
     auth: state,
     logger: pino({ level: 'silent' }),
     // Shown on the phone's linked-devices screen.
@@ -257,6 +310,9 @@ async function startSession(sessionId) {
       const phoneNumber = socket.user?.id?.split(':')[0]?.split('@')[0] || null
       log.info({ sessionId, phoneNumber }, 'session authenticated')
       ready.add(sessionId)
+      // This pairing works, so later drops are worth retrying indefinitely.
+      opened.add(sessionId)
+      attempts.delete(sessionId)
       latest.delete(sessionId)
       reportStatus(sessionId, 'AUTHENTICATED', { phoneNumber })
     }
@@ -297,11 +353,40 @@ async function startSession(sessionId) {
           )
         }
 
+        opened.delete(sessionId)
+        attempts.delete(sessionId)
         reportStatus(sessionId, 'DISCONNECTED', { reason: 'logged_out' })
         return
       }
 
-      log.info({ sessionId, status }, 'connection dropped, reconnecting')
+      // A session that has connected before is worth waiting on for as long
+      // as it takes - the phone is paired and the network will come back.
+      if (opened.has(sessionId)) {
+        log.info({ sessionId, status }, 'connection dropped, reconnecting')
+        reportStatus(sessionId, 'DISCONNECTED', { reason: 'reconnecting' })
+        setTimeout(() => startSession(sessionId).catch(() => {}), 3000)
+        return
+      }
+
+      // A pairing that has never connected is a different thing, and retrying
+      // it in silence is what made a WhatsApp version this bridge could not
+      // negotiate look like a QR that was merely slow. It retried every three
+      // seconds for as long as anybody left the page open, said nothing, and
+      // showed the operator a spinner the whole time.
+      const tries = (attempts.get(sessionId) || 0) + 1
+      attempts.set(sessionId, tries)
+
+      if (tries >= MAX_PAIRING_ATTEMPTS) {
+        attempts.delete(sessionId)
+        log.error(
+          { sessionId, status, tries },
+          'giving up on this pairing — WhatsApp closed every attempt before offering a code',
+        )
+        reportStatus(sessionId, 'DISCONNECTED', { reason: 'unreachable' })
+        return
+      }
+
+      log.info({ sessionId, status, tries }, 'pairing attempt failed, trying again')
       reportStatus(sessionId, 'DISCONNECTED', { reason: 'reconnecting' })
       setTimeout(() => startSession(sessionId).catch(() => {}), 3000)
     }
@@ -403,6 +488,10 @@ app.post('/pair', async (request, response) => {
   const { sessionId } = request.body || {}
   if (!sessionId) return response.status(400).json({ ok: false, error: 'sessionId required' })
   try {
+    // Somebody asked again, so the count of failures before this starts over.
+    // Otherwise a pairing that gave up earlier would refuse on the first
+    // attempt of every later try, and clicking again would do nothing.
+    attempts.delete(sessionId)
     await startSession(sessionId)
     response.json({ ok: true })
   } catch (error) {

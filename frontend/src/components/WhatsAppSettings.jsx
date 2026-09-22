@@ -205,9 +205,21 @@ export default function WhatsAppSettings({ onChanged }) {
               key={channel.id}
               className="flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-bg px-3 py-2.5"
             >
-              <span className="grid h-7 w-7 place-items-center rounded-md bg-accent/12">
-                <Check size={13} className="text-accent" />
-              </span>
+              {/*
+                A tick for a connection nobody has scanned yet says the job is
+                done. Twilio is live the moment it is saved; a QR pairing is
+                not live until a phone has been on the other end of it.
+              */}
+              {channel.whatsapp_provider !== 'QR_SESSION' ||
+              channel.session_status === 'AUTHENTICATED' ? (
+                <span className="grid h-7 w-7 place-items-center rounded-md bg-accent/12">
+                  <Check size={13} className="text-accent" />
+                </span>
+              ) : (
+                <span className="grid h-7 w-7 place-items-center rounded-md bg-warn/12">
+                  <QrCode size={13} className="text-warn" />
+                </span>
+              )}
               <div className="min-w-0">
                 {/* A QR channel has no number until the handset reports one,
                     and an empty line here reads as a missing number rather
@@ -221,11 +233,19 @@ export default function WhatsAppSettings({ onChanged }) {
                   {channel.whatsapp_provider === 'QR_SESSION' ? (
                     <>
                       <Smartphone size={11} />
+                      {/*
+                        "Paired phone" was said in every state, including
+                        before any phone had been near it. A connection that
+                        has never been scanned is not a paired phone, and
+                        calling it one tells the operator a job is done when
+                        it has not been started. Whether a number is known is
+                        the honest test: it can only have come from a handset.
+                      */}
                       {channel.session_status === 'AUTHENTICATED'
                         ? 'Paired phone · session active'
-                        : channel.session_status === 'DISCONNECTED'
+                        : channel.phone_number
                           ? 'Paired phone · disconnected, re-scan needed'
-                          : 'Paired phone · waiting for a scan'}
+                          : 'Not linked yet · scan the code to connect'}
                     </>
                   ) : (
                     <>
