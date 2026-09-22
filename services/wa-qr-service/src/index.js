@@ -19,7 +19,7 @@
  * official API access is in place rather than a permanent transport.
  */
 
-import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
 
@@ -270,6 +270,33 @@ async function startSession(sessionId) {
       // the only way back. Anything else is a dropped connection worth retrying.
       if (status === DisconnectReason.loggedOut) {
         log.warn({ sessionId }, 'logged out on the phone — re-pairing required')
+
+        // Throw the dead credentials away, which is the part that was missing.
+        //
+        // Reporting the status was not enough: the folder stayed on disk, and
+        // it holds more than the `registered` flag. The identity and noise
+        // keys in it have been revoked by WhatsApp, and WhatsApp closes a
+        // connection that presents revoked keys immediately - before the
+        // handshake ever reaches the point where a QR is offered.
+        //
+        // So every later attempt to pair loaded those same keys, was refused
+        // at once, and emitted no QR. The client sat on "asking WhatsApp for a
+        // code" indefinitely while this warning repeated in the log, and no
+        // amount of clicking could break out of it, because each click
+        // rebuilt the session from the very files that guaranteed the
+        // refusal. A number in this state could never be re-paired.
+        try {
+          rmSync(folder, { recursive: true, force: true })
+          log.info({ sessionId }, 'cleared the dead credentials — the next attempt pairs fresh')
+        } catch (error) {
+          // Worth shouting about: the session is now permanently unpairable
+          // until somebody removes the folder by hand.
+          log.error(
+            { sessionId, err: error?.message },
+            'could not clear the dead credentials — this session cannot re-pair',
+          )
+        }
+
         reportStatus(sessionId, 'DISCONNECTED', { reason: 'logged_out' })
         return
       }
