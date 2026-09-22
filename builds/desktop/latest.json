@@ -1,11 +1,11 @@
 {
-  "version": "1.3.6",
-  "notes": "Setup is a page now, not a sheet. The steps are in the order they have to happen, each one says what it is for and what happens if you skip it, and each shows whether it is already done - so nothing important can be missed by not scrolling far enough. The header buttons have words on them, and there is a Setup link where there was none. Long links no longer push the board sideways.",
-  "pub_date": "2026-09-21T21:45:38+00:00",
+  "version": "1.3.7",
+  "notes": "The header says what it does, replies are signed PingPulse, and opening hours are read from the documents you upload.",
+  "pub_date": "2026-09-22T13:29:07+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjZCVTRaUnlQcW9ybVd6LzY0MjlXQUE5bXNmdWJQUUg4TUZ1VWR6MXp6TVlDUHUzdWY4OWVQSmk3THcxd2pHWTdNdFc0eWxxdmE3SE0vcGNsMEFDZmc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDI3MTM4CWZpbGU6UGluZ1B1bHNlXzEuMy42X3g2NC1zZXR1cC5leGUKSzgxcEVhUlJwQ2ZpUjR4T1BtRXNteUpVRGdqQUF6UjNUOW9teDU3aWRPclZKTmJPL1drT2lqNnNuTmdxZXROR2tEdzhxQ3Fsa0QydDhlcWdCWDc2Q0E9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.3.6_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjQzNkc0UlFvdGZ6TURGMU41VlpybTZ1aEtEUGJ5Q0ZMSUdjUDBGZnZHRjZmejRDWFhUaUJPclhubGh1SlYyNEpwajZvTVhiM29Jam5sajVJWVoyTmdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMDgzNzQ3CWZpbGU6UGluZ1B1bHNlXzEuMy43X3g2NC1zZXR1cC5leGUKRFFIMlBhNUdCV21lVGhTTVdQUGFubEdPaHgrZG8xL1czd25aME5weUczOTFJbnY5RFZwUWFlMUJ4Tk5QbXMxaUJGZUdmRVFHemREaHZoUEtodEdOQ0E9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.3.7_x64-setup.exe"
     }
   }
 }
