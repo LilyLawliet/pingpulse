@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Clock, Loader2, TriangleAlert } from 'lucide-react'
+import { Check, Clock, FileText, Loader2, TriangleAlert } from 'lucide-react'
 import { api } from '../api.js'
 
 const DAYS = [
@@ -35,11 +35,28 @@ export default function AgentSettings() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)
+  // Hours a document offered, waiting to be confirmed. Null once they are.
+  const [fromDocument, setFromDocument] = useState(null)
 
   const load = useCallback(async () => {
     try {
       const found = await api.getAgentConfig()
-      setConfig(found.agent_config || {})
+      const stored = found.agent_config || {}
+
+      // Hours read out of an uploaded document are offered here, in the form,
+      // rather than written straight to the config. Booking reads
+      // business_hours, so writing it from parsed prose would have the agent
+      // offering real times to real customers on the strength of a regular
+      // expression. Prefilled and left for a person to look at and save: the
+      // document does the typing, somebody still says yes.
+      const suggested = stored.hours_from_document
+      if (suggested?.hours && !stored.business_hours) {
+        setConfig({ ...stored, business_hours: suggested.hours })
+        setFromDocument(suggested)
+      } else {
+        setConfig(stored)
+        setFromDocument(null)
+      }
       setZone(found.timezone || 'UTC')
     } catch {
       setConfig({})
@@ -79,8 +96,19 @@ export default function AgentSettings() {
     setError(null)
     setNote(null)
     try {
-      await api.saveAgentConfig(config, zone)
-      setNote('Saved. New conversations follow these from now on.')
+      // Deliberately without a timezone. This screen no longer owns it, and
+      // sending the one it happens to have loaded would quietly satisfy the
+      // server's "set your timezone before setting hours" check with the
+      // default nobody chose.
+      await api.saveAgentConfig(config)
+      setNote(
+        fromDocument
+          ? 'Saved. Booking is on, and these are the hours appointments are offered in.'
+          : 'Saved. New conversations follow these from now on.',
+      )
+      // Confirmed now, so it is no longer a suggestion. The server drops the
+      // stored copy for the same reason.
+      setFromDocument(null)
     } catch (err) {
       setError(err.message)
     }
@@ -114,19 +142,40 @@ export default function AgentSettings() {
         </p>
       )}
 
-      <label className="block">
-        <span className="eyebrow mb-1 block">Timezone</span>
-        <input
-          value={zone}
-          onChange={(e) => setZone(e.target.value)}
-          placeholder="Asia/Dubai"
-          className="w-full rounded-lg border border-edge bg-bg px-3 py-2 text-2xs text-ink placeholder:text-faint focus:border-accent/60"
-        />
-        <span className="mt-1 block text-2xs text-faint">
-          Needed before opening hours mean anything. Use a name like Asia/Dubai or
-          Europe/London.
-        </span>
-      </label>
+      {/*
+        Shown, not edited. The timezone is asked for in Your business, which
+        comes first - it used to be asked for here, after the document upload
+        that needs it, so it was reliably unset at the one moment it mattered.
+        Keeping an editor in both places is how one of them goes stale.
+      */}
+      {zone && zone !== 'UTC' ? (
+        <p className="text-2xs text-faint">
+          Times below are read in <span className="text-dim">{zone}</span>. Change it
+          in <span className="text-dim">Your business</span>.
+        </p>
+      ) : (
+        <p className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2 text-2xs text-warn">
+          <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+          <span>
+            Your timezone is not set, so these hours cannot be saved yet — without one
+            they would be read as UTC, which is how somebody gets offered an
+            appointment in the middle of the night. Set it in{' '}
+            <span className="font-semibold">Your business</span>.
+          </span>
+        </p>
+      )}
+
+      {fromDocument && (
+        <p className="flex items-start gap-2 rounded-lg bg-accent/10 px-3 py-2 text-2xs text-accent">
+          <FileText size={12} className="mt-0.5 shrink-0" />
+          <span>
+            These hours were read from{' '}
+            <span className="font-semibold">{fromDocument.source}</span>. Nothing is
+            booked against them until you save — check them first, since a document
+            can word its hours in a way this reads differently.
+          </span>
+        </p>
+      )}
 
       <div>
         <span className="eyebrow mb-1.5 block">Opening hours</span>

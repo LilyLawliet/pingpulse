@@ -62,6 +62,11 @@ class OrganizationCreate(BaseModel):
 
 class OrganizationUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=255)
+    # Where the business is, which is a fact about the business rather than a
+    # setting on its diary. It used to be asked for at the booking step, after
+    # the document upload that needs it, so it was reliably absent at the one
+    # moment it mattered.
+    timezone: str | None = Field(default=None, max_length=64)
     sales_prompt: str | None = None
     target_tone: str | None = None
     product_rules: str | None = None
@@ -79,6 +84,7 @@ class OrganizationOut(BaseModel):
     product_rules: str | None = None
     default_currency: str
     default_language: str
+    timezone: str = "UTC"
     created_at: datetime
 
 

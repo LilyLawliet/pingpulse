@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -127,7 +128,23 @@ async def update_active_organization(
     db: AsyncSession = Depends(get_db),
 ):
     tenant.require_role(ADMIN_ROLES)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+
+    # Checked here as well as on the agent config, because there are now two
+    # ways in and a zone the reply path cannot load would have the agent
+    # apologising about the wrong opening hours rather than failing visibly.
+    if changes.get("timezone") is not None:
+        try:
+            ZoneInfo(str(changes["timezone"]))
+        except Exception:  # noqa: BLE001
+            raise HTTPException(
+                status_code=422,
+                detail=f"'{changes['timezone']}' is not a timezone. "
+                "Use an IANA name like America/New_York or Asia/Karachi.",
+            )
+        changes["timezone"] = str(changes["timezone"])[:64]
+
+    for field, value in changes.items():
         setattr(tenant.organization, field, value)
     await db.flush()
     await db.refresh(tenant.organization)

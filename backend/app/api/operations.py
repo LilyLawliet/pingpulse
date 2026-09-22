@@ -247,6 +247,12 @@ async def save_agent_config(
         organization.timezone = str(zone)[:64]
 
     if config is not None:
+        # Once real hours are saved, whatever a document suggested has served
+        # its purpose. Dropped here rather than trusted to the client, so the
+        # suggestion cannot outlive the decision and reappear as a prompt to
+        # confirm something already confirmed.
+        if config.get("business_hours"):
+            config.pop(agent_config.PROPOSED_HOURS_KEY, None)
         organization.agent_config = config
     await db.flush()
 

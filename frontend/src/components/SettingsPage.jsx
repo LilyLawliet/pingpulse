@@ -100,7 +100,12 @@ export default function SettingsPage({ open, onClose, onSaved }) {
 
     try {
       const org = await api.activeOrganization()
-      next.business = Boolean((org?.sales_prompt || '').trim().length > 40)
+      // The timezone counts. Without one, every hour this business states is
+      // read as UTC, so a step that called itself done without it would be
+      // reporting a setup that cannot book anybody correctly.
+      const zone = (org?.timezone || '').trim()
+      next.business =
+        Boolean((org?.sales_prompt || '').trim().length > 40) && Boolean(zone) && zone !== 'UTC'
       next.knowledge = Boolean((org?.product_rules || '').trim())
       setForm({
         name: org?.name || '',
@@ -109,6 +114,7 @@ export default function SettingsPage({ open, onClose, onSaved }) {
         sales_prompt: org?.sales_prompt || '',
         default_currency: org?.default_currency || 'USD',
         default_language: org?.default_language || 'en',
+        timezone: org?.timezone || '',
       })
     } catch {
       setForm((was) => was || { ...EMPTY_FORM })
@@ -159,12 +165,21 @@ export default function SettingsPage({ open, onClose, onSaved }) {
     setError(null)
     setNote(null)
     try {
-      const saved = await api.updateActiveOrganization(form)
+      // An empty box means "not answered", not "the empty string" - which the
+      // server would reject as an invalid timezone.
+      const zone = (form.timezone || '').trim()
+      const saved = await api.updateActiveOrganization({
+        ...form,
+        timezone: zone || undefined,
+      })
       setNote('Saved.')
       onSaved?.(saved)
       await check()
-    } catch {
-      setError('That did not save. Check the details and try again.')
+    } catch (err) {
+      // The server writes these for a shop owner - "'Miami' is not a timezone.
+      // Use an IANA name like America/New_York" is the whole answer, and
+      // replacing it with "that did not save" throws the answer away.
+      setError(err?.message || 'That did not save. Check the details and try again.')
     }
     setSaving(false)
   }
@@ -384,6 +399,27 @@ export default function SettingsPage({ open, onClose, onSaved }) {
                     </label>
                   </div>
 
+                  {/*
+                    Asked for here, first, rather than at the booking step.
+                    It used to sit after the document upload that needs it, so
+                    it was reliably unset at the one moment it mattered: hours
+                    read out of a handbook could not be saved, and the reason
+                    appeared in a message that vanished on the next click.
+                  */}
+                  <label className="block">
+                    <span className="eyebrow mb-1.5 block">Where you are</span>
+                    <input
+                      {...field('timezone')}
+                      className={inputClass}
+                      placeholder="America/New_York"
+                      spellCheck={false}
+                    />
+                    <span className="mt-1 block text-2xs text-faint">
+                      Every opening time and appointment is read against this. Use an
+                      IANA name — America/New_York, Asia/Karachi, Europe/London.
+                    </span>
+                  </label>
+
                   <label className="block">
                     <span className="eyebrow mb-1.5 block">How it should sell</span>
                     <textarea
@@ -427,6 +463,7 @@ const EMPTY_FORM = {
   product_rules: '',
   sales_prompt: '',
   default_currency: 'USD',
+  timezone: '',
   default_language: 'en',
 }
 

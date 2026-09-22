@@ -9,8 +9,11 @@ was refused and handed to a person.
 Two halves are tested here, and they are the two halves the shop actually
 experiences:
 
-  * a document that states hours switches booking on, with those hours;
-  * a document that does not leaves it off, so the agent hands over and
+  * a document that states hours has them read out and offered, prefilled into
+    the hours form, where saving is what switches booking on. The document
+    does the typing; a person still says yes, because parsed prose must not
+    start promising appointments to customers on its own.
+  * a document that does not leaves booking off, so the agent hands over and
     alerts somebody instead of inventing a time.
 
 The parser tests lean hard on what must NOT be read. A missed line costs a
@@ -25,7 +28,7 @@ import uuid
 import pytest
 
 from app.models import Organization
-from app.services import booking, opening_hours
+from app.services import agent_config, booking, opening_hours
 
 
 # ------------------------------------------------------------------ the parser
@@ -153,22 +156,62 @@ take three to four weeks. Delivery of fittings takes 2-3 working days.
 
 
 @pytest.mark.asyncio
-async def test_a_document_with_hours_switches_booking_on(org_a, db_session):
+async def test_a_document_with_hours_offers_them_without_switching_booking_on(
+    org_a, db_session
+):
+    """Found, stored where the form can prefill from it, and not acted on.
+
+    Writing `business_hours` here would switch booking on off the back of
+    parsed prose, and the agent would start offering real times to real
+    customers on the strength of a regular expression.
+    """
     await _set(db_session, org_a, timezone="America/New_York", agent_config={})
 
     response = await _upload(org_a, WITH_HOURS)
     assert response.status_code == 201, response.text
 
     report = response.json()["opening_hours"]
-    assert report["applied"] is True, report
+    assert report["proposed"] is True, report
     assert "09:00-18:00" in report["found"]
 
     organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
-    hours = organization.agent_config["business_hours"]
-    assert hours["monday"] == {"open": "09:00", "close": "18:00"}
-    assert hours["saturday"] == {"open": "10:00", "close": "14:00"}
-    assert "sunday" not in hours, "the document says Sunday is closed"
+    assert not organization.agent_config.get("business_hours")
+    assert booking.booking_enabled(organization) is False, (
+        "a document switched booking on before anybody had looked at the hours"
+    )
+
+    offered = organization.agent_config[agent_config.PROPOSED_HOURS_KEY]
+    assert offered["hours"]["monday"] == {"open": "09:00", "close": "18:00"}
+    assert offered["hours"]["saturday"] == {"open": "10:00", "close": "14:00"}
+    assert "sunday" not in offered["hours"], "the document says Sunday is closed"
+    assert offered["source"] == "handbook.txt", "the operator has to know what it read"
+
+
+@pytest.mark.asyncio
+async def test_saving_the_offered_hours_is_what_switches_booking_on(org_a, db_session):
+    """The confirmation, which is the whole point of offering rather than applying."""
+    await _set(db_session, org_a, timezone="America/New_York", agent_config={})
+    await _upload(org_a, WITH_HOURS)
+
+    organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
+    offered = organization.agent_config[agent_config.PROPOSED_HOURS_KEY]["hours"]
+
+    saved = await org_a._client.put(
+        "/api/v1/agent-config",
+        headers=org_a.headers,
+        json={"agent_config": {"business_hours": offered}},
+    )
+    assert saved.status_code == 200, saved.text
+
+    await db_session.refresh(organization)
     assert booking.booking_enabled(organization) is True
+    assert organization.agent_config["business_hours"]["monday"] == {
+        "open": "09:00",
+        "close": "18:00",
+    }
+    assert agent_config.PROPOSED_HOURS_KEY not in organization.agent_config, (
+        "the suggestion outlived the decision and will ask to be confirmed again"
+    )
 
 
 @pytest.mark.asyncio
@@ -180,31 +223,45 @@ async def test_a_document_without_hours_leaves_booking_off(org_a, db_session):
     assert response.status_code == 201, response.text
 
     report = response.json()["opening_hours"]
-    assert report["applied"] is False
+    assert report["proposed"] is False
     assert report["found"] is None
     assert "booking stays off" in report["detail"]
 
     organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
     assert not (organization.agent_config or {}).get("business_hours")
+    assert agent_config.PROPOSED_HOURS_KEY not in (organization.agent_config or {})
     assert booking.booking_enabled(organization) is False, (
         "booking was switched on by a document that never stated an opening time"
     )
 
 
 @pytest.mark.asyncio
-async def test_hours_are_not_applied_before_a_timezone_is_set(org_a, db_session):
-    """09:00 with no zone is 09:00 UTC, which is how Miami got a 1am appointment."""
+async def test_hours_are_still_read_without_a_timezone_but_say_so(org_a, db_session):
+    """09:00 with no zone is 09:00 UTC, which is how Miami got a 1am appointment.
+
+    The hours are still offered - losing them would mean uploading the document
+    again - but the reply says the timezone comes first, and nothing can be
+    saved until it does.
+    """
     await _set(db_session, org_a, timezone="UTC", agent_config={})
 
     response = await _upload(org_a, WITH_HOURS)
     report = response.json()["opening_hours"]
 
-    assert report["applied"] is False
-    assert report["found"], "the hours were read, they were just not trusted yet"
+    assert report["proposed"] is True
     assert "timezone" in report["detail"]
 
     organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
-    assert not (organization.agent_config or {}).get("business_hours")
+    assert not organization.agent_config.get("business_hours")
+
+    # And the form cannot save them while the zone is still the default.
+    offered = organization.agent_config[agent_config.PROPOSED_HOURS_KEY]["hours"]
+    refused = await org_a._client.put(
+        "/api/v1/agent-config",
+        headers=org_a.headers,
+        json={"agent_config": {"business_hours": offered}},
+    )
+    assert refused.status_code == 422, "hours were saved against a timezone nobody set"
 
 
 @pytest.mark.asyncio
@@ -218,7 +275,7 @@ async def test_hours_somebody_set_by_hand_are_never_overwritten(org_a, db_sessio
 
     response = await _upload(org_a, WITH_HOURS)
     report = response.json()["opening_hours"]
-    assert report["applied"] is False
+    assert report["proposed"] is False
     assert "already have" in report["detail"]
 
     organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
@@ -228,13 +285,15 @@ async def test_hours_somebody_set_by_hand_are_never_overwritten(org_a, db_sessio
 
 
 @pytest.mark.asyncio
-async def test_an_upload_only_sets_its_own_tenants_hours(org_a, org_b, db_session):
+async def test_an_upload_only_offers_hours_to_its_own_tenant(org_a, org_b, db_session):
     await _set(db_session, org_a, timezone="America/New_York", agent_config={})
     await _set(db_session, org_b, timezone="America/New_York", agent_config={})
 
     assert (await _upload(org_a, WITH_HOURS)).status_code == 201
 
     other = await db_session.get(Organization, uuid.UUID(org_b.organization_id))
-    assert not (other.agent_config or {}).get("business_hours"), (
+    config = other.agent_config or {}
+    assert not config.get("business_hours"), (
         "one shop's handbook set another shop's opening hours"
     )
+    assert agent_config.PROPOSED_HOURS_KEY not in config

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
@@ -54,34 +55,38 @@ async def add_document(
     return document
 
 
-async def _adopt_opening_hours(db, organization_id, text: str) -> dict:
-    """Take the opening hours out of an uploaded document and use them.
+async def _adopt_opening_hours(db, organization_id, text: str, source: str) -> dict:
+    """Read the opening hours out of an uploaded document and offer them.
 
-    A shop uploads the sheet that says when it is open, and until now that
-    sentence reached the knowledge base and nothing else. The agent could
-    recite the hours to a customer while `business_hours` - the field the
-    booking code actually reads - stayed empty, so booking stayed off and the
-    agent had to hand every appointment to a person. The document said one
-    thing and the product did another.
+    A shop uploads the sheet that says when it is open, and that sentence used
+    to reach the knowledge base and nothing else. The agent could recite the
+    hours to a customer while `business_hours` - the field the booking code
+    actually reads - stayed empty, so booking stayed off and every appointment
+    was handed to a person. The document said one thing and the product did
+    another.
 
-    Three things stop this writing hours it should not:
+    What is found is written where the hours form can prefill from it, and
+    nowhere else. It is deliberately not written to `business_hours`:
 
-    * Hours already configured are never overwritten. Somebody set those by
-      hand, and a document uploaded a year later must not quietly move them.
-    * Nothing is applied until the timezone is set. "09:00" with no zone is
-      09:00 UTC, which is how a Miami shop ended up with an appointment at one
-      in the morning. Hours without a zone are worse than no hours.
-    * The result goes through the same validation as the settings form. One
-      writer, one set of rules.
+    * Booking reads that key. Writing it would switch appointments on off the
+      back of prose nobody had checked, and the agent would then offer real
+      times to real customers on the strength of a regular expression.
+    * A document has no timezone in it, and no shop handbook ever will. "09:00"
+      means nothing until somebody says where they are, and reading it in the
+      wrong zone is exactly how a Miami customer was offered one in the
+      morning.
 
-    Every outcome is reported back to the uploader in plain words, because a
-    setup step that happens invisibly is one nobody can tell has not happened.
+    So the document does the typing and a person still says yes. The result
+    survives in the config rather than in a banner, because the first version
+    of this reported what it found in a message that vanished the moment the
+    operator clicked to the next step - and the hours step, which is where the
+    finding mattered, never heard about it.
     """
     found = opening_hours.parse(text)
     if not found:
         return {
             "found": None,
-            "applied": False,
+            "proposed": False,
             "detail": "This document does not state opening hours, so booking stays off "
             "until you set them. Until then the agent hands anyone asking for an "
             "appointment to a person and alerts you.",
@@ -90,46 +95,47 @@ async def _adopt_opening_hours(db, organization_id, text: str) -> dict:
     summary = opening_hours.describe(found)
     organization = await db.get(Organization, organization_id)
     if organization is None:
-        return {"found": summary, "applied": False, "detail": "No organization to apply them to."}
+        return {"found": summary, "proposed": False, "detail": "No organization to apply them to."}
 
     config = dict(organization.agent_config or {})
     if config.get("business_hours"):
         same = config["business_hours"] == found
         return {
             "found": summary,
-            "applied": False,
+            "proposed": False,
             "detail": (
                 "These match the hours you already have."
                 if same
                 else "You already have opening hours set, so these were left alone. "
-                "Change them in Setup if the document is the newer one."
+                "Change them in Hours and booking if the document is the newer one."
             ),
-        }
-
-    zone = (getattr(organization, "timezone", None) or "").strip()
-    if not zone or zone == "UTC":
-        return {
-            "found": summary,
-            "applied": False,
-            "detail": f"Found {summary}, but your timezone is not set yet — these would be "
-            "read as UTC and book people in the middle of the night. Set your "
-            "timezone in Setup and upload this again.",
         }
 
     problems = agent_config.validate({**config, "business_hours": found})
     if problems:
         logger.warning("parsed hours for %s did not validate: %s", organization_id, problems)
-        return {"found": summary, "applied": False, "detail": problems[0]}
+        return {"found": summary, "proposed": False, "detail": problems[0]}
 
-    config["business_hours"] = found
+    config[agent_config.PROPOSED_HOURS_KEY] = {
+        "hours": found,
+        "source": source,
+        "found_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
     organization.agent_config = config
     await db.flush()
-    logger.info("adopted opening hours for %s from an upload: %s", organization_id, summary)
+    logger.info("read opening hours for %s from %s: %s", organization_id, source, summary)
+
+    zone = (getattr(organization, "timezone", None) or "").strip()
+    waiting = (
+        "Open Hours and booking to check them and switch booking on."
+        if zone and zone != "UTC"
+        else "Set your timezone first, then open Hours and booking to check them — "
+        "without a timezone these would be read as UTC."
+    )
     return {
         "found": summary,
-        "applied": True,
-        "detail": f"Opening hours were read from this document and saved: {summary} "
-        f"({zone}). The agent can offer appointments now.",
+        "proposed": True,
+        "detail": f"Opening hours were read from this document: {summary}. {waiting}",
     }
 
 
@@ -190,7 +196,9 @@ async def upload_document(
     # Read from the whole extracted document rather than the passages, so
     # hours split across a chunk boundary are not lost to where the splitter
     # happened to cut.
-    hours = await _adopt_opening_hours(db, tenant.id, extracted.text)
+    hours = await _adopt_opening_hours(
+        db, tenant.id, extracted.text, file.filename or "document"
+    )
 
     logger.info(
         "indexed %s for %s: %d passage(s), %d table(s), %d page(s); hours %s",

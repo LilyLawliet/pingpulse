@@ -251,16 +251,17 @@ export default function KnowledgeSettings() {
       {/*
         What the file did to the shop's opening hours, which decides whether
         the agent can offer an appointment or has to hand over to a person.
-        Green when the hours were taken and booking is on; amber otherwise,
-        because "nothing was applied" is the case somebody has to act on.
+        Green when hours were read and are waiting at the hours step; amber
+        when none were found, because that is the case where booking stays off
+        and somebody has to type them in.
       */}
       {hours && !error && (
         <p
           className={`flex items-start gap-2 rounded-lg px-3 py-2 text-xs ${
-            hours.applied ? 'bg-accent/10 text-accent' : 'bg-warn/10 text-warn'
+            hours.proposed ? 'bg-accent/10 text-accent' : 'bg-warn/10 text-warn'
           }`}
         >
-          {hours.applied ? (
+          {hours.proposed ? (
             <CalendarCheck size={13} className="mt-0.5 shrink-0" />
           ) : (
             <TriangleAlert size={13} className="mt-0.5 shrink-0" />

@@ -27,6 +27,15 @@ logger = logging.getLogger(__name__)
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
+# Where hours read out of an uploaded document wait for a person to confirm
+# them.
+#
+# Deliberately not `business_hours`: booking reads that key, so writing it
+# would switch appointments on off the back of prose nobody had checked. This
+# key changes nothing by itself. It only prefills the hours form, which is
+# where a person says yes.
+PROPOSED_HOURS_KEY = "hours_from_document"
+
 # Reasons to stop and fetch a person, whatever the conversation looked like up
 # to that point. Deliberately blunt: the cost of handing over a conversation
 # that did not need it is a person reading one extra message, and the cost of
