@@ -235,6 +235,18 @@ export const api = {
       body: JSON.stringify({ agent_config: config, timezone }),
     }),
 
+  // Starting drafts by trade, words learned from conversations a person had
+  // to step into, and a look at the finished prompt. None of the three write
+  // anything: they fill the form in, and saving it is still a person's act.
+  getTradeDrafts: () => request('/agent-config/trades'),
+  getConfigSuggestions: () => request('/agent-config/suggestions'),
+  previewAgentConfig: (config, timezone) =>
+    request('/agent-config/preview', {
+      method: 'POST',
+      body: JSON.stringify({ agent_config: config, timezone }),
+    }),
+  undoAgentConfig: () => request('/agent-config/undo', { method: 'POST' }),
+
   // ------------------------------ is it on? -----------------------------
   whatsappStatus: () => request('/whatsapp/status'),
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -32,10 +33,12 @@ from app.models import (
 )
 from app.services import (
     agent_config,
+    handover_signals,
     llm_service,
     oplog,
     pipelines,
     retrieval,
+    trade_defaults,
     whatsapp,
     ws_manager,
 )
@@ -179,11 +182,23 @@ async def get_agent_config(
 ):
     """How this business wants its agent to behave."""
     organization = await db.get(Organization, tenant.id)
+    stored = organization.agent_config or {}
     return {
-        "agent_config": organization.agent_config or {},
+        # Without the undo snapshot: it is not a setting, the form has no
+        # field for it, and a client that could send one back could forge a
+        # history for itself.
+        "agent_config": {
+            key: value
+            for key, value in stored.items()
+            if key != agent_config.PREVIOUS_KEY
+        },
         "timezone": organization.timezone,
         "open_now": agent_config.is_open(organization),
         "days": list(agent_config.DAYS),
+        # So the page can offer to step back without a second round trip. None
+        # when this tenant has never changed anything, which is when an undo
+        # button would be a lie.
+        "last_change": _describe_change(stored),
     }
 
 
@@ -265,6 +280,24 @@ async def save_agent_config(
             for key in (agent_config.PROPOSED_KEY, agent_config.PROPOSED_HOURS_KEY):
                 if key in before and key not in config:
                     config[key] = before[key]
+
+        # Whatever a client sent under this key is discarded: the history is
+        # the server's, and a page that could write it could hand somebody an
+        # undo button that restores something they never had.
+        config.pop(agent_config.PREVIOUS_KEY, None)
+
+        # Kept only where something actually moved. A save that changes
+        # nothing must not offer an undo, because pressing it would appear to
+        # do nothing and leave a person unsure which of their changes it ate.
+        if agent_config.snapshot(before) != config:
+            config[agent_config.PREVIOUS_KEY] = {
+                "config": agent_config.snapshot(before),
+                "at": datetime.now(timezone.utc).isoformat(),
+                "was_undo": False,
+            }
+        elif agent_config.PREVIOUS_KEY in before:
+            config[agent_config.PREVIOUS_KEY] = before[agent_config.PREVIOUS_KEY]
+
         organization.agent_config = config
     await db.flush()
 
@@ -278,9 +311,229 @@ async def save_agent_config(
         changes=oplog.changes_between(before, organization.agent_config or {}),
     )
     return {
-        "agent_config": organization.agent_config,
+        "agent_config": {
+            key: value
+            for key, value in (organization.agent_config or {}).items()
+            if key != agent_config.PREVIOUS_KEY
+        },
         "timezone": organization.timezone,
         "open_now": agent_config.is_open(organization),
+        "last_change": _describe_change(organization.agent_config or {}),
+    }
+
+
+# ------------------------------------------------- drafts, evidence, undo
+# Three fields on the settings form describe nothing about a business and so
+# cannot be read out of its documents: what the agent must never promise, how
+# it may talk about price, and which words should fetch a person. They are
+# decisions, and the form asked for them as three empty boxes.
+#
+# An empty box asks a person to author policy from nothing. Everything below
+# turns that into correcting a draft instead, without ever writing anything a
+# person has not looked at:
+#
+#   /trades       a starting draft by trade. A convention, not a finding.
+#   /suggestions  words that really did precede a person stepping in. Evidence.
+#   /preview      exactly what the agent will be told, before saving.
+#   /undo         the last change put back, because a wrong one is quiet.
+#
+# None of the first three writes. The config still changes in one place, on a
+# form somebody pressed save on.
+
+
+@router.get("/agent-config/trades")
+async def list_trades(tenant: Tenant = Depends(current_org)):
+    """Starting drafts, one per trade. Shown in full, stored by nobody."""
+    return {
+        "trades": trade_defaults.listing(),
+        "fields": list(trade_defaults.DRAFT_FIELDS),
+    }
+
+
+@router.get("/agent-config/suggestions")
+async def config_suggestions(
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Words that kept coming up just before a person took over a conversation.
+
+    Derived from operator messages - a human judgement, made at the time, that
+    the agent was out of its depth. Returned with the evidence for each one
+    and applied by nobody: only the shop knows which of these mean trouble
+    rather than just meaning Tuesday.
+    """
+    organization = await db.get(Organization, tenant.id)
+    try:
+        report = await handover_signals.evidence(db, tenant.id, organization)
+    except Exception as exc:  # noqa: BLE001
+        # A suggestion panel must never take the settings page down with it.
+        logger.warning("handover signals failed for %s: %s", tenant.id, exc)
+        return dict(handover_signals.Report().as_dict(), unavailable=True)
+
+    existing = {
+        str(word).lower().strip()
+        for word in (organization.agent_config or {}).get("escalate_on") or []
+    }
+    payload = report.as_dict()
+    payload["candidates"] = [
+        row for row in payload["candidates"] if row["phrase"] not in existing
+    ]
+    payload["min_conversations"] = handover_signals.MIN_CONVERSATIONS
+    return payload
+
+
+@router.post("/agent-config/preview")
+async def preview_agent_config(
+    payload: dict,
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """What the agent would be told, if this were saved. Saves nothing.
+
+    The config reaches the model as prompt text, and until now the only way to
+    find out what that text came out as was to save it and message the number.
+    A shop editing the rules its agent answers under should be able to read
+    them first: that is the difference between a settings form and a guess.
+    """
+    config = payload.get("agent_config")
+    if config is not None and not isinstance(config, dict):
+        raise HTTPException(status_code=422, detail="agent_config must be an object")
+
+    organization = await db.get(Organization, tenant.id)
+    zone = payload.get("timezone") or organization.timezone
+
+    problems = agent_config.validate(config or {})
+
+    # A stand-in rather than the real row: `as_prompt_block` reads its
+    # organization by attribute, and assigning the candidate onto the mapped
+    # object would leave it dirty in a session that is about to commit
+    # something else.
+    candidate = SimpleNamespace(
+        id=organization.id, agent_config=config or {}, timezone=zone
+    )
+
+    return {
+        "problems": problems,
+        "valid": not problems,
+        "prompt_block": agent_config.as_prompt_block(candidate),
+        "open_now": agent_config.is_open(candidate),
+        "timezone": zone,
+        "changes": oplog.changes_between(
+            dict(organization.agent_config or {}), config or {}
+        ),
+    }
+
+
+def _describe_change(stored: dict) -> dict | None:
+    """The last change, in the shape the button needs: what, and when.
+
+    None where there is nothing to undo. An undo button that 404s is worse
+    than no undo button.
+    """
+    snapshot = (stored or {}).get(agent_config.PREVIOUS_KEY)
+    if not isinstance(snapshot, dict):
+        return None
+
+    was = snapshot.get("config") or {}
+    now = agent_config.snapshot(stored)
+    moved = sorted(oplog.changes_between(was, now).keys())
+    if not moved:
+        return None
+
+    return {
+        "at": snapshot.get("at"),
+        "fields": moved,
+        # So the button can say "Redo" rather than offering to undo an undo,
+        # which reads as though it would go back two steps.
+        "was_undo": bool(snapshot.get("was_undo")),
+    }
+
+
+@router.post("/agent-config/undo")
+async def undo_agent_config(
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Put the last change to these rules back.
+
+    A wrong setting here is quiet. Nothing breaks, no error is raised, and the
+    agent simply starts answering customers under a rule nobody meant - which
+    is then found out from a customer rather than from the dashboard. Being
+    able to step back without reconstructing what the form said an hour ago is
+    what makes the rest of this safe to experiment with.
+
+    The inverse of the recorded change is applied to the config as it stands
+    now, rather than a stored snapshot being written over it. Where nothing
+    else has changed since, the two are identical; where something has, this
+    undoes the one change instead of silently reverting the others too.
+    """
+    tenant.require_role(WRITE_ROLES)
+
+    organization = await db.get(Organization, tenant.id)
+    before = dict(organization.agent_config or {})
+
+    snapshot = before.get(agent_config.PREVIOUS_KEY)
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("config"), dict):
+        raise HTTPException(status_code=404, detail="There is no change to undo.")
+
+    restored = dict(snapshot["config"])
+
+    # A document read since the last save is not a settings change, and undo
+    # must not throw it away - re-uploading would be the only way back. The
+    # current proposal always wins where there is one, because documents only
+    # ever move forward; the snapshot's is used when the save being undone was
+    # the confirmation that consumed it.
+    for key in (agent_config.PROPOSED_KEY, agent_config.PROPOSED_HOURS_KEY):
+        if key in before:
+            restored[key] = before[key]
+
+    # Held to the same standard as a save. A config stored before a validation
+    # rule existed could otherwise be restored into a state the form now
+    # refuses, leaving somebody unable to save until they found the offending
+    # field themselves.
+    problems = agent_config.validate(restored)
+    if problems:
+        raise HTTPException(
+            status_code=422,
+            detail=["That change cannot be undone as it stands."] + problems,
+        )
+
+    undone = sorted(
+        oplog.changes_between(restored, agent_config.snapshot(before)).keys()
+    )
+
+    # What is being undone becomes what a second press restores, so overshooting
+    # is recoverable. Marked as an undo so the button can offer "Redo" rather
+    # than appearing to go back twice.
+    restored[agent_config.PREVIOUS_KEY] = {
+        "config": agent_config.snapshot(before),
+        "at": datetime.now(timezone.utc).isoformat(),
+        "was_undo": True,
+    }
+
+    organization.agent_config = restored
+    await db.flush()
+
+    await oplog.record(
+        db,
+        tenant.id,
+        "agent_config.undo",
+        user_id=getattr(tenant.user, "id", None),
+        resource_type="organization",
+        resource_id=tenant.id,
+        changes=oplog.changes_between(before, restored),
+    )
+
+    return {
+        "agent_config": {
+            key: value
+            for key, value in restored.items()
+            if key != agent_config.PREVIOUS_KEY
+        },
+        "timezone": organization.timezone,
+        "open_now": agent_config.is_open(organization),
+        "undone": undone,
+        "last_change": _describe_change(restored),
     }
 
 

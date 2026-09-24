@@ -39,6 +39,37 @@ PROPOSED_KEY = "from_document"
 # stored before this widened does not vanish; never written.
 PROPOSED_HOURS_KEY = "hours_from_document"
 
+# The config as it stood before the last save, kept so a change can be put
+# back. A wrong value here is quiet - nothing raises, and the agent simply
+# begins answering customers under a rule nobody meant - so getting back has
+# to cost one press rather than an attempt to remember what the form said.
+#
+# A snapshot rather than an inverse reconstructed from the audit log. Saving
+# replaces this config whole, so "what it was before the last save" is exactly
+# a copy of it, and the audit log cannot answer the question reliably anyway:
+# its rows carry a transaction timestamp, which is identical for two rows
+# written in one transaction and only second-resolution under SQLite. Undo is
+# not a thing to be clever about.
+#
+# Server-owned. It is stripped from what the settings page is given and from
+# whatever it sends back, so a client cannot forge a history, and a snapshot
+# never comes to contain a snapshot.
+PREVIOUS_KEY = "previous"
+
+# Keys stored inside the config that are not settings: a document's pending
+# suggestion, and the undo snapshot. Held here so the places that care can
+# name them rather than re-listing them.
+RESERVED_KEYS = (PROPOSED_KEY, PROPOSED_HOURS_KEY, PREVIOUS_KEY)
+
+
+def snapshot(config: dict) -> dict:
+    """A copy of a config fit to be stored as its own predecessor.
+
+    Without the previous snapshot, so that undoing repeatedly does not build
+    a config containing a chain of every config it ever had.
+    """
+    return {key: value for key, value in (config or {}).items() if key != PREVIOUS_KEY}
+
 # The config fields a document is allowed to fill in. Everything else on the
 # form - what the agent must never promise, its pricing rules, the words that
 # fetch a person - is an instruction to an agent rather than a description of

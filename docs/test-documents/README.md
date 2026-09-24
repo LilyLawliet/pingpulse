@@ -45,7 +45,29 @@ cannot be saved until a timezone is set.
 stay empty no matter what you upload. Those are instructions to an agent, not
 descriptions of a business — no customer handbook contains them, and a parser
 reaching for them would be guessing at your policy and writing the guess into
-what customers get told. Type those three yourself.
+what customers get told.
+
+They are not left as three empty boxes either. **Start from a draft** above
+them fills all three with what a careful business in your trade would write,
+so the job is deleting the line that does not apply rather than authoring
+policy from nothing. It is a convention of the trade, not a reading of your
+documents, and it says so.
+
+Where a business already has history, **the words that fetch a person** also
+gets suggestions from it: the phrases that really did come up just before
+somebody at the business stepped into a conversation. Each one shows how many
+handovers it preceded, and how many ordinary chats it turned up in too. A
+phrase that appears in both is never offered — a trigger that fires on
+ordinary messages is how a business learns to stop reading its alerts.
+
+Nothing from either is applied. Both fill the form in; saving is still yours.
+
+## Getting back
+
+**Check it first** shows the exact text your agent will be handed, before
+anything is saved. **Undo last save** puts the previous version back, and
+pressing it again brings your change forward — so trying a draft costs
+nothing.
 
 ## The traps, on purpose
 

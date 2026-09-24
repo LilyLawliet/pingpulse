@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Clock, FileText, Loader2, TriangleAlert } from 'lucide-react'
+import {
+  Check,
+  Clock,
+  Eye,
+  FileText,
+  Lightbulb,
+  Loader2,
+  Plus,
+  TriangleAlert,
+  Undo2,
+} from 'lucide-react'
 import { api } from '../api.js'
 
 const DAYS = [
@@ -28,12 +38,26 @@ const DAYS = [
  * Lists are typed one per line rather than as tag chips. A chip editor is
  * nicer to look at and worse to use for a person pasting in the twelve
  * services they already have written down somewhere.
+ *
+ * Three fields here cannot be read out of a document, because they describe
+ * nothing about the business: what the agent must never promise, how it may
+ * talk about price, and which words fetch a person. Those are decisions. They
+ * used to be three empty boxes, which asks somebody to author policy from
+ * nothing — so a trade draft fills them with text that is visibly a draft,
+ * past conversations offer the words that really did precede a handover, and
+ * both are only ever a prefill. Saving is still what turns any of it on.
  */
 const FIELD_NAMES = {
   business_hours: 'Opening hours',
   services: 'Services',
   service_areas: 'Areas you serve',
+  never_promise: 'Never promise',
+  pricing_rules: 'Pricing rules',
+  escalate_on: 'Words that fetch a person',
 }
+
+/** The three a trade draft fills. Mirrors `trade_defaults.DRAFT_FIELDS`. */
+const DRAFT_FIELDS = ['never_promise', 'pricing_rules', 'escalate_on']
 
 /** "Opening hours and Services", for a sentence rather than a key list. */
 function describeFields(keys) {
@@ -50,6 +74,7 @@ function namedSources(keys, sources) {
   return `${files.slice(0, -1).join(', ')} and ${files[files.length - 1]}`
 }
 
+const isBlank = (value) => (Array.isArray(value) ? value.length === 0 : !value)
 
 export default function AgentSettings() {
   const [config, setConfig] = useState(null)
@@ -59,6 +84,18 @@ export default function AgentSettings() {
   const [note, setNote] = useState(null)
   // Hours a document offered, waiting to be confirmed. Null once they are.
   const [fromDocument, setFromDocument] = useState(null)
+
+  const [trades, setTrades] = useState([])
+  const [tradeKey, setTradeKey] = useState('')
+  // What the chosen draft filled, and what it left alone because the shop had
+  // already answered. Cleared when the trade changes.
+  const [drafted, setDrafted] = useState(null)
+
+  const [suggestions, setSuggestions] = useState(null)
+  const [preview, setPreview] = useState(null)
+  const [previewing, setPreviewing] = useState(false)
+  const [lastChange, setLastChange] = useState(null)
+  const [undoing, setUndoing] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -77,11 +114,10 @@ export default function AgentSettings() {
       // A field the shop has already answered is left alone. A document
       // arriving later must not quietly move an answer somebody typed - if
       // it disagrees, that is said out loud below and applied only on asking.
-      const blank = (value) => (Array.isArray(value) ? value.length === 0 : !value)
-      const filling = Object.keys(offered).filter((key) => blank(stored[key]))
+      const filling = Object.keys(offered).filter((key) => isBlank(stored[key]))
       const differing = Object.keys(offered).filter(
         (key) =>
-          !blank(stored[key]) &&
+          !isBlank(stored[key]) &&
           JSON.stringify(stored[key]) !== JSON.stringify(offered[key]),
       )
 
@@ -96,6 +132,7 @@ export default function AgentSettings() {
           : null,
       )
       setZone(found.timezone || 'UTC')
+      setLastChange(found.last_change || null)
     } catch {
       setConfig({})
     }
@@ -104,6 +141,20 @@ export default function AgentSettings() {
   useEffect(() => {
     load()
   }, [load])
+
+  // Both are advice rather than settings, so neither is allowed to stop the
+  // page rendering. A tenant with no history gets an empty report and no
+  // panel, which is the correct amount of nothing.
+  useEffect(() => {
+    api
+      .getTradeDrafts()
+      .then((found) => setTrades(found.trades || []))
+      .catch(() => setTrades([]))
+    api
+      .getConfigSuggestions()
+      .then(setSuggestions)
+      .catch(() => setSuggestions(null))
+  }, [])
 
   if (!config) return null
 
@@ -129,6 +180,99 @@ export default function AgentSettings() {
     setConfig({ ...config, business_hours: next })
   }
 
+  /**
+   * Fill the three policy fields from a trade's draft.
+   *
+   * Only where the shop has not already answered. A draft is a convention of
+   * the trade, not a finding about this business, so it must never move
+   * something somebody typed — what it would have said differently is named
+   * underneath instead, with a button.
+   */
+  const applyTrade = (key) => {
+    setTradeKey(key)
+    const trade = trades.find((row) => row.key === key)
+    if (!trade) {
+      setDrafted(null)
+      return
+    }
+
+    const next = { ...config }
+    const filled = []
+    const held = []
+    DRAFT_FIELDS.forEach((field) => {
+      const draft = trade.draft?.[field]
+      if (isBlank(draft)) return
+      if (isBlank(config[field])) {
+        next[field] = draft
+        filled.push(field)
+      } else if (JSON.stringify(config[field]) !== JSON.stringify(draft)) {
+        held.push(field)
+      }
+    })
+
+    setConfig(next)
+    setDrafted({ label: trade.label, draft: trade.draft, filled, held })
+  }
+
+  /** Take the draft's version of a field the shop had already answered. */
+  const takeDraft = (field) => {
+    if (!drafted) return
+    const draft = drafted.draft[field]
+    const next = { ...config }
+    // Lists merge and text replaces. Adding a word to the escalation list
+    // never costs anything a shop typed; overwriting a paragraph does, so
+    // that one is only ever done on an explicit press.
+    next[field] = Array.isArray(draft)
+      ? [...new Set([...(config[field] || []), ...draft])]
+      : draft
+    setConfig(next)
+    setDrafted({
+      ...drafted,
+      filled: [...drafted.filled, field],
+      held: drafted.held.filter((key) => key !== field),
+    })
+  }
+
+  const addPhrase = (phrase) => {
+    const existing = config.escalate_on || []
+    if (existing.includes(phrase)) return
+    setConfig({ ...config, escalate_on: [...existing, phrase] })
+    setSuggestions({
+      ...suggestions,
+      candidates: suggestions.candidates.filter((row) => row.phrase !== phrase),
+    })
+  }
+
+  const showPreview = async () => {
+    setPreviewing(true)
+    setError(null)
+    try {
+      setPreview(await api.previewAgentConfig(config))
+    } catch (err) {
+      setError(err.message)
+    }
+    setPreviewing(false)
+  }
+
+  const undo = async () => {
+    setUndoing(true)
+    setError(null)
+    setNote(null)
+    try {
+      const result = await api.undoAgentConfig()
+      setConfig(result.agent_config || {})
+      setLastChange(result.last_change || null)
+      setPreview(null)
+      setDrafted(null)
+      setNote(
+        `Put back: ${describeFields(result.undone || []).toLowerCase() || 'the last change'}.`,
+      )
+    } catch (err) {
+      setError(err.message)
+    }
+    setUndoing(false)
+  }
+
   const save = async () => {
     setSaving(true)
     setError(null)
@@ -147,6 +291,12 @@ export default function AgentSettings() {
       // Confirmed now, so it is no longer a suggestion. The server drops the
       // stored copy for the same reason.
       setFromDocument(null)
+      setDrafted(null)
+      setPreview(null)
+      // Reloaded rather than assumed: the undo offer has to name the change
+      // that was actually recorded, and the server decides what that was.
+      const found = await api.getAgentConfig().catch(() => null)
+      if (found) setLastChange(found.last_change || null)
     } catch (err) {
       setError(err.message)
     }
@@ -306,6 +456,72 @@ export default function AgentSettings() {
         value={lines('service_areas')}
         onChange={(value) => setLines('service_areas', value)}
       />
+
+      {/*
+        The three below are policy rather than fact, so no document fills
+        them. A draft by trade is the substitute: text somebody reads and
+        deletes from, instead of an empty box somebody has to write into.
+      */}
+      {trades.length > 0 && (
+        <div className="space-y-1.5 rounded-lg border border-edge px-3 py-2.5">
+          <label className="block">
+            <span className="eyebrow mb-1 block">Start from a draft</span>
+            <select
+              value={tradeKey}
+              onChange={(e) => applyTrade(e.target.value)}
+              className="w-full rounded-lg border border-edge bg-bg px-2 py-1.5 text-2xs text-ink focus:border-accent/60"
+            >
+              <option value="">Pick your trade…</option>
+              {trades.map((trade) => (
+                <option key={trade.key} value={trade.key}>
+                  {trade.label} — {trade.examples}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="text-2xs leading-relaxed text-faint">
+            Fills the three below with what a careful business in that trade would
+            write. It is a starting point, not a reading of your documents — edit
+            it, and nothing takes effect until you save.
+          </p>
+
+          {drafted?.filled?.length > 0 && (
+            <p className="flex items-start gap-2 text-2xs text-accent">
+              <Check size={12} className="mt-0.5 shrink-0" />
+              <span>
+                {describeFields(drafted.filled)} filled from the{' '}
+                {drafted.label.toLowerCase()} draft. Read it before saving.
+              </span>
+            </p>
+          )}
+
+          {drafted?.held?.length > 0 && (
+            <div className="text-2xs text-dim">
+              <p className="flex items-start gap-2">
+                <TriangleAlert size={12} className="mt-0.5 shrink-0 text-warn" />
+                <span>
+                  You have already written {describeFields(drafted.held).toLowerCase()}.
+                  Yours is kept.
+                </span>
+              </p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {drafted.held.map((field) => (
+                  <button
+                    key={field}
+                    type="button"
+                    onClick={() => takeDraft(field)}
+                    className="rounded-lg border border-edge px-2 py-1 font-semibold text-dim transition-colors hover:border-accent/50 hover:text-ink"
+                  >
+                    {Array.isArray(drafted.draft[field]) ? 'Add the draft’s' : 'Use the draft’s'}{' '}
+                    {(FIELD_NAMES[field] || field).toLowerCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <TextList
         label="Words that should fetch a person"
         hint="One per line. These are added to refunds, complaints and requests for a manager, which always do."
@@ -313,10 +529,23 @@ export default function AgentSettings() {
         onChange={(value) => setLines('escalate_on', value)}
       />
 
+      <Suggestions
+        report={suggestions}
+        onAdd={addPhrase}
+        onAddAll={() => {
+          const phrases = (suggestions?.candidates || []).map((row) => row.phrase)
+          setConfig({
+            ...config,
+            escalate_on: [...new Set([...(config.escalate_on || []), ...phrases])],
+          })
+          setSuggestions({ ...suggestions, candidates: [] })
+        }}
+      />
+
       <label className="block">
         <span className="eyebrow mb-1 block">Never promise</span>
         <textarea
-          rows={2}
+          rows={3}
           value={config.never_promise || ''}
           onChange={(e) => setConfig({ ...config, never_promise: e.target.value })}
           placeholder="Same-day work. Discounts over 10%."
@@ -327,7 +556,7 @@ export default function AgentSettings() {
       <label className="block">
         <span className="eyebrow mb-1 block">Pricing rules</span>
         <textarea
-          rows={2}
+          rows={3}
           value={config.pricing_rules || ''}
           onChange={(e) => setConfig({ ...config, pricing_rules: e.target.value })}
           placeholder="No quotes under $200. Always mention the callout fee."
@@ -335,16 +564,146 @@ export default function AgentSettings() {
         />
       </label>
 
-      <button
-        type="button"
-        disabled={saving}
-        onClick={save}
-        className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-2xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
-      >
-        {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-        Save rules
-      </button>
+      {/*
+        What the model is actually handed. Until this existed, the only way to
+        find out how these fields read once folded into a prompt was to save
+        them and message the number - which means finding out from a customer.
+      */}
+      {preview && (
+        <div className="space-y-1.5 rounded-lg border border-edge px-3 py-2.5">
+          <span className="eyebrow block">What your agent will be told</span>
+          {preview.problems?.length > 0 ? (
+            <ul className="space-y-1">
+              {preview.problems.map((problem) => (
+                <li key={problem} className="flex items-start gap-2 text-2xs text-crit">
+                  <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+                  {problem}
+                </li>
+              ))}
+            </ul>
+          ) : preview.prompt_block ? (
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-bg px-2.5 py-2 text-2xs leading-relaxed text-dim">
+              {preview.prompt_block}
+            </pre>
+          ) : (
+            <p className="text-2xs leading-relaxed text-faint">
+              Nothing yet. With none of these filled in your agent is told nothing
+              extra and answers exactly as it does today.
+            </p>
+          )}
+          <p className="text-2xs leading-relaxed text-faint">
+            This is a preview. Nothing has been saved.
+          </p>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={save}
+          className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-2xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
+        >
+          {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+          Save rules
+        </button>
+
+        <button
+          type="button"
+          disabled={previewing}
+          onClick={showPreview}
+          className="flex items-center gap-1.5 rounded-lg border border-edge px-3 py-1.5 text-2xs font-semibold text-dim transition-colors hover:border-accent/50 hover:text-ink disabled:opacity-40"
+        >
+          {previewing ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+          Check it first
+        </button>
+
+        {/*
+          A wrong rule here is quiet: nothing errors, the agent just starts
+          answering under something nobody meant. Being able to step back
+          without reconstructing what the form said an hour ago is what makes
+          the drafts above safe to try.
+        */}
+        {lastChange && (
+          <button
+            type="button"
+            disabled={undoing}
+            onClick={undo}
+            title={`Changed ${describeFields(lastChange.fields).toLowerCase()}`}
+            className="flex items-center gap-1.5 rounded-lg border border-edge px-3 py-1.5 text-2xs font-semibold text-dim transition-colors hover:border-warn/50 hover:text-ink disabled:opacity-40"
+          >
+            {undoing ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />}
+            {lastChange.was_undo ? 'Redo' : 'Undo last save'}
+          </button>
+        )}
+      </div>
     </section>
+  )
+}
+
+/**
+ * Words that kept turning up just before a person took over a conversation.
+ *
+ * Shown with their evidence rather than as a list to accept, because the
+ * count is the argument: "came up before 4 handovers" is checkable, and
+ * "suggested" is not. Nothing is added without a press — a trigger that fires
+ * on ordinary messages teaches a shop to ignore its alerts, and then the one
+ * that mattered is ignored too.
+ */
+function Suggestions({ report, onAdd, onAddAll }) {
+  if (!report || report.unavailable) return null
+  const candidates = report.candidates || []
+  if (candidates.length === 0) return null
+
+  return (
+    <div className="space-y-1.5 rounded-lg border border-edge px-3 py-2.5">
+      <p className="flex items-start gap-2 text-2xs text-dim">
+        <Lightbulb size={12} className="mt-0.5 shrink-0 text-accent" />
+        <span>
+          These came up just before somebody at your business stepped into a
+          conversation — {report.handovers} of those in your history
+          {report.already_caught > 0 && `, ${report.already_caught} already covered`}.
+          Add the ones that mean trouble rather than just meaning Tuesday.
+        </span>
+      </p>
+
+      <ul className="space-y-1">
+        {candidates.map((row) => (
+          <li key={row.phrase} className="flex items-start gap-2">
+            <button
+              type="button"
+              onClick={() => onAdd(row.phrase)}
+              className="mt-px flex shrink-0 items-center gap-1 rounded-lg border border-edge px-1.5 py-0.5 text-2xs font-semibold text-dim transition-colors hover:border-accent/50 hover:text-ink"
+            >
+              <Plus size={10} />
+              add
+            </button>
+            <span className="min-w-0 text-2xs leading-relaxed">
+              <span className="font-semibold text-ink">{row.phrase}</span>
+              <span className="text-faint">
+                {' '}
+                — before {row.handovers}{' '}
+                {row.handovers === 1 ? 'handover' : 'handovers'}
+                {row.ordinary > 0 && `, and ${row.ordinary} ordinary chats`}
+              </span>
+              {row.examples?.[0] && (
+                <span className="mt-0.5 block truncate text-faint">“{row.examples[0]}”</span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {candidates.length > 1 && (
+        <button
+          type="button"
+          onClick={onAddAll}
+          className="rounded-lg border border-edge px-2 py-1 text-2xs font-semibold text-dim transition-colors hover:border-accent/50 hover:text-ink"
+        >
+          Add all {candidates.length}
+        </button>
+      )}
+    </div>
   )
 }
 
