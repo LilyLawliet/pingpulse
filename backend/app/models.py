@@ -247,6 +247,18 @@ class Organization(Base):
     # Where this organization's catalogue and policies are ingested from.
     primary_domain: Mapped[str | None] = mapped_column(String(255))
 
+    # The secret in the calendar subscription URL, so the diary can be read by
+    # the phone the business actually runs its day from. Null until somebody
+    # asks for a feed - which is different from set up and empty - and
+    # rotatable, because a subscription link that has been forwarded is a
+    # link that has to be revocable without touching anything else.
+    #
+    # It is in the URL because that is all a subscribing calendar client can
+    # send: it fetches for years and can never be prompted for a login.
+    calendar_token: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True
+    )
+
     # How this shop writes, learned from replies a person at the shop actually
     # typed, and approved by a person before it takes effect.
     #

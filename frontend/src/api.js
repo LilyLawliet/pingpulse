@@ -247,6 +247,14 @@ export const api = {
     }),
   undoAgentConfig: () => request('/agent-config/undo', { method: 'POST' }),
 
+  // The diary, as a calendar the phone can subscribe to. No account, no
+  // OAuth: a secret URL every calendar client already knows how to read.
+  getCalendarSubscription: () => request('/calendar/subscription'),
+  createCalendarSubscription: () =>
+    request('/calendar/subscription', { method: 'POST' }),
+  deleteCalendarSubscription: () =>
+    request('/calendar/subscription', { method: 'DELETE' }),
+
   // ------------------------------ is it on? -----------------------------
   whatsappStatus: () => request('/whatsapp/status'),
 

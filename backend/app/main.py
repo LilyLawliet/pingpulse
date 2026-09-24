@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from app import __version__
 from app.api.auth import router as auth_router
+from app.api.calendar import router as calendar_router
 from app.api.crm import router as crm_router
 from app.api.knowledge import router as knowledge_router
 from app.api.learning import router as learning_router
@@ -181,6 +182,7 @@ app.include_router(prospects_router)
 app.include_router(learning_router)
 app.include_router(operations_router)
 app.include_router(analytics_router)
+app.include_router(calendar_router)
 app.include_router(notifications_router)
 
 

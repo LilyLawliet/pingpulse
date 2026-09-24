@@ -50,13 +50,23 @@ celery_app.conf.update(
 
 FOLLOWUP_STAGES = ("QUALIFIED", "PRESENTATION", "NEGOTIATION")
 
+# Written for any business, because they are sent by every business.
+#
+# These used to say "would you like me to hold anything for you" and "tell me
+# the colour or budget you have in mind and I'll pull up what we have", which
+# is a shop with a rail of stock talking. A bathroom remodeling client's
+# customer was asked about colours after enquiring about a wet room, because
+# the copy assumed a catalogue that tenant does not have.
+#
+# A tenant that wants its own wording sets `followup_messages` in its agent
+# config and these are not used at all.
 FIRST_NUDGE = (
-    "Just checking in — would you like me to hold anything for you, or show you "
-    "a few more options?"
+    "Just checking in — anything else you'd like to know, or shall I leave it "
+    "with you?"
 )
 SECOND_NUDGE = (
-    "Still here whenever you're ready. Tell me the colour or budget you have in "
-    "mind and I'll pull up what we have."
+    "Still here whenever you're ready. Tell me what you have in mind and I'll "
+    "take it from there."
 )
 # The last one anybody gets. It says so, and it offers the way out, because a
 # third unanswered message is the point where persistence starts reading as
@@ -67,6 +77,28 @@ THIRD_NUDGE = (
     "from us."
 )
 NUDGES = (FIRST_NUDGE, SECOND_NUDGE, THIRD_NUDGE)
+
+
+def nudges_for(organization) -> tuple[str, ...]:
+    """This tenant's follow-up wording, falling back to the neutral default.
+
+    A business selling bathrooms and one selling shoes are both chasing a
+    quiet conversation, but only one of them has colours to ask about. Set
+    `followup_messages` to a list of up to three and those are sent instead;
+    a short list keeps the defaults for the rest, so a tenant can change only
+    the first one.
+    """
+    config = (getattr(organization, "agent_config", None) or {}) if organization else {}
+    custom = config.get("followup_messages")
+    if not isinstance(custom, (list, tuple)):
+        return NUDGES
+
+    chosen: list[str] = []
+    for index, fallback in enumerate(NUDGES):
+        value = custom[index] if index < len(custom) else None
+        text = str(value).strip() if value is not None else ""
+        chosen.append(text[:600] if text else fallback)
+    return tuple(chosen)
 
 # Three, and the cap is here rather than in configuration because it is a
 # promise to the customer and not a dial. A fourth automated message to
@@ -355,7 +387,12 @@ async def _run_followup(
                     await session.commit()
                 return refusal
 
-            body = body_override or NUDGES[min(attempt, MAX_FOLLOWUPS) - 1]
+            # This tenant's own wording where it has set any, so a business
+            # without a catalogue is not made to ask about colours.
+            body = (
+                body_override
+                or nudges_for(organization)[min(attempt, MAX_FOLLOWUPS) - 1]
+            )
 
             # A nudge must come from the same number the conversation is on.
             channel = await whatsapp.active_channel(session, contact.organization_id)

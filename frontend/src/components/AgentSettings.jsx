@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
+  CalendarDays,
   Check,
   Clock,
+  Copy,
   Eye,
   FileText,
   Lightbulb,
@@ -96,6 +98,10 @@ export default function AgentSettings() {
   const [previewing, setPreviewing] = useState(false)
   const [lastChange, setLastChange] = useState(null)
   const [undoing, setUndoing] = useState(false)
+  // Whether this business can actually take an appointment, and what is
+  // stopping it. Read from the server rather than worked out here, because
+  // the server is what refuses the save.
+  const [readiness, setReadiness] = useState(null)
 
   const load = useCallback(async () => {
     try {
@@ -133,6 +139,7 @@ export default function AgentSettings() {
       )
       setZone(found.timezone || 'UTC')
       setLastChange(found.last_change || null)
+      setReadiness(found.booking || null)
     } catch {
       setConfig({})
     }
@@ -296,7 +303,10 @@ export default function AgentSettings() {
       // Reloaded rather than assumed: the undo offer has to name the change
       // that was actually recorded, and the server decides what that was.
       const found = await api.getAgentConfig().catch(() => null)
-      if (found) setLastChange(found.last_change || null)
+      if (found) {
+        setLastChange(found.last_change || null)
+        setReadiness(found.booking || null)
+      }
     } catch (err) {
       setError(err.message)
     }
@@ -350,6 +360,38 @@ export default function AgentSettings() {
             appointment in the middle of the night. Set it in{' '}
             <span className="font-semibold">Your business</span>.
           </span>
+        </p>
+      )}
+
+      {/*
+        Whether the agent can book at all. A client ran for its whole life
+        unable to take a single appointment - its hours read correctly out of
+        a document and never confirmed, its timezone never set - and nothing
+        anywhere said so. Every step was working as designed and the chain was
+        invisible.
+      */}
+      {readiness && !readiness.can_book && readiness.blockers?.length > 0 && (
+        <div className="rounded-lg bg-crit/10 px-3 py-2 text-2xs text-crit">
+          <p className="flex items-start gap-2 font-semibold">
+            <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+            Your agent cannot book appointments yet.
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {readiness.blockers.map((blocker) => (
+              <li key={blocker.key} className="leading-relaxed">
+                {blocker.says} <span className="text-dim">{blocker.fix}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {readiness?.can_book && (
+        <p className="flex items-start gap-2 text-2xs text-faint">
+          <Check size={12} className="mt-0.5 shrink-0 text-ok" />
+          Booking is on, across {readiness.days_open}{' '}
+          {readiness.days_open === 1 ? 'day' : 'days'} a week, in{' '}
+          <span className="text-dim">{readiness.timezone}</span>.
         </p>
       )}
 
@@ -443,6 +485,8 @@ export default function AgentSettings() {
           will call straight back.
         </p>
       </div>
+
+      <CalendarSubscription />
 
       <TextList
         label="Services you offer"
@@ -701,6 +745,122 @@ function Suggestions({ report, onAdd, onAddAll }) {
           className="rounded-lg border border-edge px-2 py-1 text-2xs font-semibold text-dim transition-colors hover:border-accent/50 hover:text-ink"
         >
           Add all {candidates.length}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The diary, on the phone the business actually runs its day from.
+ *
+ * A subscription URL rather than a connected account: every calendar client
+ * already knows how to read one, nobody signs into anything, and no consent
+ * screen can change underneath it. It is read-only by construction, which
+ * keeps the database the one place allowed to say an appointment exists.
+ *
+ * The link is a secret, so replacing it is offered in exactly those terms —
+ * it is how a link that has been forwarded gets taken back.
+ */
+function CalendarSubscription() {
+  const [state, setState] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    api
+      .getCalendarSubscription()
+      .then(setState)
+      .catch(() => setState({ active: false, urls: null }))
+  }, [])
+
+  if (!state) return null
+
+  const run = async (action) => {
+    setBusy(true)
+    setError(null)
+    try {
+      setState(await action())
+      setCopied(false)
+    } catch (err) {
+      setError(err.message)
+    }
+    setBusy(false)
+  }
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(state.urls.https)
+      setCopied(true)
+    } catch {
+      setError('Could not copy — select the link and copy it by hand.')
+    }
+  }
+
+  return (
+    <div className="space-y-1.5 rounded-lg border border-edge px-3 py-2.5">
+      <p className="flex items-start gap-2 text-2xs text-dim">
+        <CalendarDays size={12} className="mt-0.5 shrink-0 text-accent" />
+        <span>
+          <span className="font-semibold text-ink">Appointments on your phone.</span>{' '}
+          Subscribe once and every booking shows up in the calendar you already
+          use. No account to connect, and nothing can be changed from there.
+        </span>
+      </p>
+
+      {error && <p className="text-2xs text-crit">{error}</p>}
+
+      {state.active ? (
+        <>
+          <a
+            href={state.urls.webcal}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-2xs font-semibold text-bg transition-opacity hover:opacity-90"
+          >
+            <CalendarDays size={12} />
+            Add to this device
+          </a>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={copy}
+              className="flex items-center gap-1.5 rounded-lg border border-edge px-2 py-1 text-2xs font-semibold text-dim transition-colors hover:border-accent/50 hover:text-ink"
+            >
+              {copied ? <Check size={11} /> : <Copy size={11} />}
+              {copied ? 'Copied' : 'Copy link for another phone'}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(api.createCalendarSubscription)}
+              className="rounded-lg border border-edge px-2 py-1 text-2xs font-semibold text-dim transition-colors hover:border-warn/50 hover:text-ink disabled:opacity-40"
+            >
+              Replace link
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(api.deleteCalendarSubscription)}
+              className="rounded-lg border border-edge px-2 py-1 text-2xs font-semibold text-faint transition-colors hover:border-crit/50 hover:text-crit disabled:opacity-40"
+            >
+              Turn off
+            </button>
+          </div>
+          <p className="text-2xs leading-relaxed text-faint">
+            Anyone with this link can see your appointments — it is the only
+            thing standing in front of them. Replacing it stops every phone
+            already subscribed, which is how you take one back.
+          </p>
+        </>
+      ) : (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => run(api.createCalendarSubscription)}
+          className="flex items-center gap-1.5 rounded-lg border border-edge px-3 py-1.5 text-2xs font-semibold text-dim transition-colors hover:border-accent/50 hover:text-ink disabled:opacity-40"
+        >
+          {busy ? <Loader2 size={12} className="animate-spin" /> : <CalendarDays size={12} />}
+          Create a calendar link
         </button>
       )}
     </div>

@@ -1153,3 +1153,85 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
         prompt_block=as_prompt_block(organization, contact, slots),
         offered=slots,
     )
+
+
+# --------------------------------------------------------------- readiness
+# Why a business cannot take an appointment, in words it can act on.
+#
+# Beluga ran for its whole life unable to book anything and nothing said so.
+# Its documents had been read - hours, services, areas, all correct and all
+# sitting unconfirmed - but the timezone was never set, so the hours could
+# never be saved, so there were no hours, so `booking_enabled` was false, so
+# every booking request fell through to a link that reached nobody. Each step
+# was working as designed. The chain was invisible.
+#
+# A capability that silently is not there is worse than one that is plainly
+# off, because nobody goes looking for it.
+
+# What a blocker looks like: the thing that is wrong, and the one action that
+# fixes it. Not a validation error - nothing here is a mistake somebody made,
+# it is a step nobody has taken yet.
+def readiness(organization) -> dict:
+    """Whether appointments can be taken, and what is stopping them."""
+    config = _config(organization)
+    zone = (getattr(organization, "timezone", None) or "UTC").strip()
+    hours = config.get("business_hours") or {}
+    appointments = config.get("appointments") or {}
+
+    blockers: list[dict] = []
+
+    if appointments.get("enabled") is False:
+        blockers.append(
+            {
+                "key": "switched_off",
+                "says": "Appointments are switched off.",
+                "fix": "Turn them on in Hours and booking.",
+            }
+        )
+
+    if not hours:
+        pending = (config.get(agent_config.PROPOSED_KEY) or {}).get("fields") or {}
+        if pending.get("business_hours"):
+            # The specific case above: read, correct, and never confirmed.
+            # Saying "set your hours" to somebody whose hours are on screen in
+            # front of them is how they conclude the feature is broken.
+            blockers.append(
+                {
+                    "key": "hours_unconfirmed",
+                    "says": (
+                        "Your opening hours were read from your document but "
+                        "have never been saved, so there are no times to offer."
+                    ),
+                    "fix": "Check them in Hours and booking and press Save rules.",
+                }
+            )
+        else:
+            blockers.append(
+                {
+                    "key": "no_hours",
+                    "says": "No opening hours are set, so there are no times to offer.",
+                    "fix": "Set them in Hours and booking.",
+                }
+            )
+
+    if zone.upper() == "UTC":
+        # Not fatal on its own - a business really on UTC is fine - but it is
+        # what blocks the save above, and every hour is read against it.
+        blockers.append(
+            {
+                "key": "timezone",
+                "says": (
+                    "Your timezone is UTC, which is the default nobody chose. "
+                    "Hours cannot be saved until it is set, and every time "
+                    "offered is read against it."
+                ),
+                "fix": "Pick it in Your business.",
+            }
+        )
+
+    return {
+        "can_book": booking_enabled(organization),
+        "blockers": blockers,
+        "timezone": zone,
+        "days_open": sum(1 for day in agent_config.DAYS if hours.get(day)),
+    }

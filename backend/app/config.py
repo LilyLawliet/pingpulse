@@ -95,7 +95,20 @@ class Settings(BaseSettings):
     # Scheduling / calendar
     scheduling_enabled: bool = True
     calcom_link: str = ""
-    calendar_fallback_enabled: bool = True
+    # The Google Calendar fallback: OFF.
+    #
+    # It builds a `action=TEMPLATE` link, which adds an event to *the
+    # customer's own* calendar. Nothing reaches the business - no row, no
+    # diary entry, no name. A client watched their agent answer three requests
+    # with it and the appointments table had never held a single row.
+    #
+    # "Please pick a time here" is therefore a promise with nothing behind it,
+    # which is the one thing this product does not do. Where a real diary
+    # exists the booking service offers real slots; where it does not, the
+    # agent now says plainly that it will help here in the chat and a person
+    # is alerted. A tenant with a genuine booking page still has `calcom_link`,
+    # which is tried first and is a real page.
+    calendar_fallback_enabled: bool = False
 
     # Signed desktop installers the app auto-updates from.
     updates_dir: str = "/app/updates"

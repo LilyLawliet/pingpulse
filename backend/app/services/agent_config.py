@@ -98,26 +98,72 @@ _WORDS = re.compile(
 
 # Asking for a person, in the ways people actually ask.
 #
-# The old list held "speak to a human" and "talk to a person" but not "talk to
-# a human" or "talk to someone", so the two commonest phrasings in English
-# missed it entirely. The agent then answered under a policy that tells it
-# "You are the shop. You answer now" - which is what a client meant when they
-# reported it presenting itself as a live team member. It was not pretending.
-# It was never told to stand down.
+# Two faults lived here and both were found in a real Beluga conversation, in
+# which a customer asked three times and was answered three times with a
+# booking link.
+#
+# The first: the verb and the preposition had to be adjacent, so
+# "connect me to a human" did not match. Any object between them broke it, and
+# "connect me", "put me", "get me" are how people actually write it. The
+# commonest phrasing in English was the one phrasing that failed.
+#
+# The second: "team member" was not in the list at all. That is the one that
+# stings, because the shop's own sales prompt says "a team member will confirm
+# it" - the agent taught the customer a phrase its own matcher could not hear.
+#
+# Erring towards firing is deliberate and is the same trade the rest of this
+# module makes: a handover that was not needed costs a person reading one
+# extra message, and a handover that was needed and missed costs a sales pitch
+# answering a complaint.
+
+# Who a customer means when they ask for a person. "team" and "team member"
+# are here because that is what a business calls its own staff to customers,
+# and what its agent has been telling them to ask for.
+_PERSON = (
+    r"(?:human|person|people|someone|somebody|anyone|anybody|agent|rep|"
+    r"representative|manager|supervisor|owner|staff|colleague|"
+    r"team\s*members?|team|advisor|adviser|consultant|specialist|operator|"
+    r"real\s+\w+)"
+)
+
 _HUMAN_PATTERNS = (
-    r"\b(speak|talk|chat|connect|deal)\s+(to|with)\s+(a\s+|an\s+|the\s+)?"
-    r"(human|person|people|someone|somebody|agent|rep|representative|manager|"
-    r"supervisor|owner|staff|real\s+\w+)",
-    r"\b(put|get)\s+me\s+(through|onto|in\s+touch)",
+    # "speak to a person", and now "connect me to a team member", "put me
+    # through to someone", "talk to them directly". The lazy gap is what
+    # allows an object; it is bounded at three words so it cannot reach across
+    # a whole sentence and pair an unrelated verb with an unrelated noun.
+    r"\b(?:speak|talk|chat|connect|deal|transfer|forward)\s+(?:\w+\s+){0,3}?"
+    r"(?:to|with)\s+(?:a\s+|an\s+|the\s+|your\s+|some\s+)?" + _PERSON,
+    # "put a team member on", "get me someone", "send a person". Either an
+    # object or an article is required: without that, "get staff discount"
+    # reads as a request for staff.
+    r"\b(?:put|get|send|give|find)\s+"
+    r"(?:me\s+(?:a\s+|an\s+|the\s+)?|a\s+|an\s+|the\s+)" + _PERSON,
+    # "talk to them", where the customer has just been offered a team. "them"
+    # is only read this way after an explicit wish, so "I'll talk to them and
+    # come back to you" - a customer consulting their own household - does not
+    # fire it.
+    r"\b(?:i\s+)?(?:want|need|would\s+like|wanna|like)\s+to\s+"
+    r"(?:speak|talk|chat|deal)\s+(?:to|with)\s+(?:them|him|her)\b",
+    r"\b(put|get|transfer|patch)\s+me\s+(through|onto|in\s+touch|over)",
     r"\bi\s+(want|need|would\s+like)\s+(to\s+\w+\s+(to\s+|with\s+)?)?(a\s+)?"
-    r"(human|person|real\s+person|manager|supervisor)\b",
+    + _PERSON + r"\b",
     r"\b(is\s+this|are\s+you)\s+(a\s+)?(bot|robot|ai|machine|human|real|"
     r"automated)",
     r"\bam\s+i\s+(talking|speaking|chatting)\s+(to|with)\s+"
     r"(a\s+)?(bot|robot|human|person|machine|computer)",
     r"\bwho\s+am\s+i\s+(talking|speaking)\s+(to|with)",
-    r"\b(human|real\s+person)\s+please\b",
+    # "manager please", "someone from the team please". Widened from
+    # human/real person, which missed how people actually shorten it.
+    r"\b" + _PERSON + r"\s+please\b",
+    r"\b(?:someone|somebody|anyone)\s+from\s+(?:the\s+|your\s+)?"
+    r"(?:team|staff|office|shop|company)\b",
     r"\bcancel\s+my\s+order\b",
+    # A refusal aimed at the agent itself. "No, I want a team member" arrived
+    # after an offer and has to be read as a rejection of it, not as a fresh
+    # request that the next sentence can talk it out of.
+    r"\b(?:no|not)\b[^.!?]{0,30}\b(?:i\s+)?(?:want|need)\s+"
+    r"(?:to\s+(?:speak|talk|chat)\s+(?:to|with)\s+)?(?:a\s+|an\s+|the\s+)?"
+    + _PERSON,
 )
 
 _HUMAN = re.compile("|".join(_HUMAN_PATTERNS), re.IGNORECASE)

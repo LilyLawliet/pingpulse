@@ -33,6 +33,7 @@ from app.models import (
 )
 from app.services import (
     agent_config,
+    booking,
     handover_signals,
     llm_service,
     oplog,
@@ -199,6 +200,12 @@ async def get_agent_config(
         # when this tenant has never changed anything, which is when an undo
         # button would be a lie.
         "last_change": _describe_change(stored),
+        # Whether this business can actually take an appointment, and what is
+        # stopping it. A capability that silently is not there is worse than
+        # one that is plainly off: a client ran for its whole life unable to
+        # book anything, with its hours read correctly out of a document and
+        # never confirmed, and nothing anywhere said so.
+        "booking": booking.readiness(organization),
     }
 
 

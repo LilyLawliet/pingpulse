@@ -185,10 +185,38 @@ def test_b2b_language_is_recognised():
     assert not scheduling.looks_like_b2b("can I buy one red kurta")
 
 
-def test_a_booking_link_is_produced():
+def test_no_link_is_invented_when_there_is_nowhere_to_book():
+    """The Google Calendar fallback is off, and this is why.
+
+    It built an `action=TEMPLATE` link, which adds an event to *the
+    customer's own* calendar. Nothing reached the business - no row, no diary
+    entry, no name. A client watched their agent answer three requests for a
+    person with that link, and the appointments table had never held a single
+    row in its life.
+
+    "Please pick a time here" is a promise with nothing behind it, so a
+    business with no real booking page now gets no link at all.
+    """
+    assert scheduling.booking_link("Nishat Linen", "Ayesha", "+923001234567") is None
+
+
+def test_the_fallback_can_still_be_turned_on_deliberately(monkeypatch):
+    """Kept, rather than deleted, because a tenant who wants an add-to-your-
+    own-calendar link can have one. It is off because it is the wrong default,
+    not because it is never wanted."""
+    monkeypatch.setattr(scheduling.settings, "calendar_fallback_enabled", True)
     link = scheduling.booking_link("Nishat Linen", "Ayesha", "+923001234567")
 
-    assert link and link.startswith("https://")
+    assert link and link.startswith("https://calendar.google.com/")
+
+
+def test_a_real_booking_page_is_always_offered(monkeypatch):
+    """A cal.com page is a genuine diary somebody at the business watches, so
+    it is not affected by any of the above."""
+    monkeypatch.setattr(scheduling.settings, "calcom_link", "https://cal.com/nishat/30min")
+
+    link = scheduling.booking_link("Nishat Linen", "Ayesha")
+    assert link.startswith("https://cal.com/nishat/30min")
 
 
 def test_calcom_is_preferred_when_configured(monkeypatch):
@@ -212,7 +240,10 @@ def test_without_a_link_the_agent_is_told_not_to_promise_a_callback(monkeypatch)
     assert "Do NOT promise a callback" in block
 
 
-def test_the_link_block_tells_the_agent_to_send_it_verbatim():
+def test_the_link_block_tells_the_agent_to_send_it_verbatim(monkeypatch):
+    # A real booking page, since a business with none is now given no link at
+    # all rather than one that reaches nobody.
+    monkeypatch.setattr(scheduling.settings, "calcom_link", "https://cal.com/nishat/30min")
     block = scheduling.as_prompt_block("Nishat Linen", "Ayesha", "+923001234567")
 
     assert "book a call here" in block
