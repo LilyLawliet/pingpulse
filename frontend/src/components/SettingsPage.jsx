@@ -43,6 +43,42 @@ import WhatsAppSettings from './WhatsAppSettings.jsx'
  * connection is not a shop that is running.
  */
 
+// The timezone list the browser already has, so nobody types "America/New_York"
+// from memory.
+//
+// It was a free-text box asking for an IANA name, which is a thing engineers
+// know and shop owners do not - so the field existed and was still not a way
+// to set a timezone. Falling back to a short list on a browser too old for
+// supportedValuesOf, because an empty dropdown would be worse than the box it
+// replaced.
+const FALLBACK_ZONES = [
+  'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+  'America/Sao_Paulo', 'Europe/London', 'Europe/Dublin', 'Europe/Paris',
+  'Europe/Berlin', 'Europe/Madrid', 'Europe/Istanbul', 'Africa/Lagos',
+  'Africa/Johannesburg', 'Africa/Cairo', 'Asia/Dubai', 'Asia/Karachi',
+  'Asia/Kolkata', 'Asia/Dhaka', 'Asia/Singapore', 'Asia/Tokyo',
+  'Australia/Sydney', 'UTC',
+]
+
+const ZONES = (() => {
+  try {
+    const all = Intl.supportedValuesOf('timeZone')
+    return all?.length ? all : FALLBACK_ZONES
+  } catch {
+    return FALLBACK_ZONES
+  }
+})()
+
+// What this machine believes, offered as the answer rather than guessed at:
+// it is right nearly always, and the one click to accept it is the point.
+const detectedZone = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || ''
+  } catch {
+    return ''
+  }
+})()
+
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'PKR', 'AED', 'SAR', 'INR', 'TRY', 'NGN', 'ZAR']
 const LANGUAGES = [
   ['en', 'English'],
@@ -408,15 +444,31 @@ export default function SettingsPage({ open, onClose, onSaved }) {
                   */}
                   <label className="block">
                     <span className="eyebrow mb-1.5 block">Where you are</span>
-                    <input
-                      {...field('timezone')}
-                      className={inputClass}
-                      placeholder="America/New_York"
-                      spellCheck={false}
-                    />
+                    <select {...field('timezone')} className={inputClass}>
+                      <option value="">Choose your timezone…</option>
+                      {ZONES.map((zone) => (
+                        <option key={zone} value={zone}>
+                          {zone === detectedZone ? `${zone} — this computer` : zone}
+                        </option>
+                      ))}
+                    </select>
                     <span className="mt-1 block text-2xs text-faint">
-                      Every opening time and appointment is read against this. Use an
-                      IANA name — America/New_York, Asia/Karachi, Europe/London.
+                      Every opening time and appointment is read against this.
+                      {detectedZone && form.timezone !== detectedZone && (
+                        <>
+                          {' '}This computer is set to{' '}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setForm((f) => ({ ...f, timezone: detectedZone }))
+                            }
+                            className="font-semibold text-accent underline-offset-2 hover:underline"
+                          >
+                            {detectedZone}
+                          </button>
+                          .
+                        </>
+                      )}
                     </span>
                   </label>
 

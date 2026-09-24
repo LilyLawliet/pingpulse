@@ -170,7 +170,7 @@ async def test_a_document_with_hours_offers_them_without_switching_booking_on(
     response = await _upload(org_a, WITH_HOURS)
     assert response.status_code == 201, response.text
 
-    report = response.json()["opening_hours"]
+    report = response.json()["from_document"]
     assert report["proposed"] is True, report
     assert "09:00-18:00" in report["found"]
 
@@ -180,11 +180,14 @@ async def test_a_document_with_hours_offers_them_without_switching_booking_on(
         "a document switched booking on before anybody had looked at the hours"
     )
 
-    offered = organization.agent_config[agent_config.PROPOSED_HOURS_KEY]
-    assert offered["hours"]["monday"] == {"open": "09:00", "close": "18:00"}
-    assert offered["hours"]["saturday"] == {"open": "10:00", "close": "14:00"}
-    assert "sunday" not in offered["hours"], "the document says Sunday is closed"
-    assert offered["source"] == "handbook.txt", "the operator has to know what it read"
+    offered = organization.agent_config[agent_config.PROPOSED_KEY]
+    hours = offered["fields"]["business_hours"]
+    assert hours["monday"] == {"open": "09:00", "close": "18:00"}
+    assert hours["saturday"] == {"open": "10:00", "close": "14:00"}
+    assert "sunday" not in hours, "the document says Sunday is closed"
+    assert offered["sources"]["business_hours"] == "handbook.txt", (
+        "the operator has to know what it read"
+    )
 
 
 @pytest.mark.asyncio
@@ -194,7 +197,7 @@ async def test_saving_the_offered_hours_is_what_switches_booking_on(org_a, db_se
     await _upload(org_a, WITH_HOURS)
 
     organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
-    offered = organization.agent_config[agent_config.PROPOSED_HOURS_KEY]["hours"]
+    offered = organization.agent_config[agent_config.PROPOSED_KEY]["fields"]["business_hours"]
 
     saved = await org_a._client.put(
         "/api/v1/agent-config",
@@ -209,7 +212,7 @@ async def test_saving_the_offered_hours_is_what_switches_booking_on(org_a, db_se
         "open": "09:00",
         "close": "18:00",
     }
-    assert agent_config.PROPOSED_HOURS_KEY not in organization.agent_config, (
+    assert agent_config.PROPOSED_KEY not in organization.agent_config, (
         "the suggestion outlived the decision and will ask to be confirmed again"
     )
 
@@ -222,14 +225,14 @@ async def test_a_document_without_hours_leaves_booking_off(org_a, db_session):
     response = await _upload(org_a, WITHOUT_HOURS)
     assert response.status_code == 201, response.text
 
-    report = response.json()["opening_hours"]
+    report = response.json()["from_document"]
     assert report["proposed"] is False
     assert report["found"] is None
-    assert "booking stays off" in report["detail"]
+    assert "nothing was filled in" in report["detail"]
 
     organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
     assert not (organization.agent_config or {}).get("business_hours")
-    assert agent_config.PROPOSED_HOURS_KEY not in (organization.agent_config or {})
+    assert agent_config.PROPOSED_KEY not in (organization.agent_config or {})
     assert booking.booking_enabled(organization) is False, (
         "booking was switched on by a document that never stated an opening time"
     )
@@ -246,7 +249,7 @@ async def test_hours_are_still_read_without_a_timezone_but_say_so(org_a, db_sess
     await _set(db_session, org_a, timezone="UTC", agent_config={})
 
     response = await _upload(org_a, WITH_HOURS)
-    report = response.json()["opening_hours"]
+    report = response.json()["from_document"]
 
     assert report["proposed"] is True
     assert "timezone" in report["detail"]
@@ -255,7 +258,7 @@ async def test_hours_are_still_read_without_a_timezone_but_say_so(org_a, db_sess
     assert not organization.agent_config.get("business_hours")
 
     # And the form cannot save them while the zone is still the default.
-    offered = organization.agent_config[agent_config.PROPOSED_HOURS_KEY]["hours"]
+    offered = organization.agent_config[agent_config.PROPOSED_KEY]["fields"]["business_hours"]
     refused = await org_a._client.put(
         "/api/v1/agent-config",
         headers=org_a.headers,
@@ -274,13 +277,15 @@ async def test_hours_somebody_set_by_hand_are_never_overwritten(org_a, db_sessio
     )
 
     response = await _upload(org_a, WITH_HOURS)
-    report = response.json()["opening_hours"]
-    assert report["proposed"] is False
-    assert "already have" in report["detail"]
+    report = response.json()["from_document"]
+    assert report["proposed"] is True, "the reading is still offered"
 
     organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
     assert organization.agent_config["business_hours"] == mine, (
         "a document quietly moved hours the owner had set themselves"
+    )
+    assert booking.booking_enabled(organization) is True, (
+        "the shop's own hours are still the ones in force"
     )
 
 
@@ -296,4 +301,151 @@ async def test_an_upload_only_offers_hours_to_its_own_tenant(org_a, org_b, db_se
     assert not config.get("business_hours"), (
         "one shop's handbook set another shop's opening hours"
     )
-    assert agent_config.PROPOSED_HOURS_KEY not in config
+    assert agent_config.PROPOSED_KEY not in config
+
+
+# --------------------------------------------- what else a document states
+SERVICES_AND_AREAS = """Beluga Group - Price list
+
+Services
+Full bathroom renovation - from $12,000
+Shower and tub conversion - from $4,500
+
+Areas we serve: Miami-Dade, Broward and Palm Beach
+
+Payment
+50% deposit to schedule, balance on completion.
+"""
+
+
+def test_a_document_states_more_than_its_hours():
+    from app.services import document_facts
+
+    facts = document_facts.extract(SERVICES_AND_AREAS)
+    assert facts["services"] == [
+        "Full bathroom renovation - from $12,000",
+        "Shower and tub conversion - from $4,500",
+    ]
+    assert facts["service_areas"] == ["Miami-Dade", "Broward", "Palm Beach"]
+    assert "business_hours" not in facts, "this price list states no opening hours"
+
+
+def test_a_section_stops_at_the_next_heading():
+    """Services must not swallow the payment terms printed underneath them."""
+    from app.services import document_facts
+
+    facts = document_facts.extract(SERVICES_AND_AREAS)
+    assert not any("deposit" in service for service in facts["services"])
+
+
+def test_policy_fields_are_never_guessed_at():
+    """A handbook does not contain instructions to an agent, so none are read."""
+    from app.services import document_facts
+
+    text = (
+        "Pricing\nNo quotes under $200. Always mention the callout fee.\n\n"
+        "Never promise same-day work.\n"
+    )
+    facts = document_facts.extract(text)
+    assert "pricing_rules" not in facts
+    assert "never_promise" not in facts
+    assert "escalate_on" not in facts
+
+
+@pytest.mark.asyncio
+async def test_a_second_document_adds_without_erasing_the_first(org_a, db_session):
+    """A price list silent about hours is not a shop saying it has none."""
+    await _set(db_session, org_a, timezone="America/New_York", agent_config={})
+
+    assert (await _upload(org_a, WITH_HOURS, "handbook.txt")).status_code == 201
+    second = await _upload(org_a, SERVICES_AND_AREAS, "prices.txt")
+    assert second.status_code == 201, second.text
+
+    organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
+    offered = organization.agent_config[agent_config.PROPOSED_KEY]
+
+    assert offered["fields"]["business_hours"]["monday"] == {
+        "open": "09:00",
+        "close": "18:00",
+    }, "the second document erased hours it never mentioned"
+    assert offered["fields"]["service_areas"] == ["Miami-Dade", "Broward", "Palm Beach"]
+    assert offered["sources"]["business_hours"] == "handbook.txt"
+    assert offered["sources"]["services"] == "prices.txt", (
+        "each field has to name the file it came from, or a conflict cannot be explained"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_later_document_replaces_what_it_does_state(org_a, db_session):
+    await _set(db_session, org_a, timezone="America/New_York", agent_config={})
+
+    assert (await _upload(org_a, WITH_HOURS, "old.txt")).status_code == 201
+    newer = "Opening hours\nMonday - Friday: 08:00 - 16:00\n"
+    assert (await _upload(org_a, newer, "new.txt")).status_code == 201
+
+    organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
+    offered = organization.agent_config[agent_config.PROPOSED_KEY]["fields"]
+    assert offered["business_hours"]["monday"] == {"open": "08:00", "close": "16:00"}
+    assert "saturday" not in offered["business_hours"], (
+        "the newer document states the week, so its answer replaces the old one whole"
+    )
+
+
+@pytest.mark.asyncio
+async def test_saving_any_of_it_clears_the_suggestion(org_a, db_session):
+    await _set(db_session, org_a, timezone="America/New_York", agent_config={})
+    await _upload(org_a, SERVICES_AND_AREAS, "prices.txt")
+
+    organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
+    offered = organization.agent_config[agent_config.PROPOSED_KEY]["fields"]
+
+    saved = await org_a._client.put(
+        "/api/v1/agent-config",
+        headers=org_a.headers,
+        json={"agent_config": {"services": offered["services"]}},
+    )
+    assert saved.status_code == 200, saved.text
+
+    await db_session.refresh(organization)
+    assert agent_config.PROPOSED_KEY not in organization.agent_config
+
+
+@pytest.mark.asyncio
+async def test_clicking_through_an_empty_form_keeps_the_suggestion(org_a, db_session):
+    """Saving nothing is not a confirmation, and must not throw the reading away."""
+    await _set(db_session, org_a, timezone="America/New_York", agent_config={})
+    await _upload(org_a, SERVICES_AND_AREAS, "prices.txt")
+
+    saved = await org_a._client.put(
+        "/api/v1/agent-config", headers=org_a.headers, json={"agent_config": {}}
+    )
+    assert saved.status_code == 200, saved.text
+
+    organization = await db_session.get(Organization, uuid.UUID(org_a.organization_id))
+    await db_session.refresh(organization)
+    assert agent_config.PROPOSED_KEY in organization.agent_config
+
+
+def test_a_word_document_is_read_despite_its_blank_lines():
+    """The extractor puts a blank line between every paragraph.
+
+    So a blank line separates two items in one list exactly as often as it
+    separates two sections. Treating it as the end of a section read nothing
+    at all out of a real .docx - every list ended at its first entry - while
+    the plain-text tests kept passing, because plain text has no such gaps.
+    """
+    from app.services import document_facts
+
+    spaced = (
+        "Services\n\n"
+        "Full bathroom renovation\n\n"
+        "Shower and tub conversion\n\n"
+        "Areas we serve\n\n"
+        "Miami-Dade, Broward\n"
+    )
+    facts = document_facts.extract(spaced)
+    assert facts["services"] == [
+        "Full bathroom renovation",
+        "Shower and tub conversion",
+    ], "a blank line between paragraphs ended the list at its first entry"
+    assert facts["service_areas"] == ["Miami-Dade", "Broward"]

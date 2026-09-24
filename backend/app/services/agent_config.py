@@ -34,7 +34,17 @@ DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sun
 # would switch appointments on off the back of prose nobody had checked. This
 # key changes nothing by itself. It only prefills the hours form, which is
 # where a person says yes.
+PROPOSED_KEY = "from_document"
+# What the key was called when it only ever held hours. Read so a suggestion
+# stored before this widened does not vanish; never written.
 PROPOSED_HOURS_KEY = "hours_from_document"
+
+# The config fields a document is allowed to fill in. Everything else on the
+# form - what the agent must never promise, its pricing rules, the words that
+# fetch a person - is an instruction to an agent rather than a description of
+# a business, and no handbook contains one. A parser reaching for those would
+# be guessing at policy and writing the guess into what customers are told.
+DOCUMENT_FIELDS = ("business_hours", "services", "service_areas")
 
 # Reasons to stop and fetch a person, whatever the conversation looked like up
 # to that point. Deliberately blunt: the cost of handing over a conversation

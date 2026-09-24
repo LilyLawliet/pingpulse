@@ -29,6 +29,28 @@ const DAYS = [
  * nicer to look at and worse to use for a person pasting in the twelve
  * services they already have written down somewhere.
  */
+const FIELD_NAMES = {
+  business_hours: 'Opening hours',
+  services: 'Services',
+  service_areas: 'Areas you serve',
+}
+
+/** "Opening hours and Services", for a sentence rather than a key list. */
+function describeFields(keys) {
+  const names = keys.map((key) => FIELD_NAMES[key] || key)
+  if (names.length <= 1) return names[0] || ''
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
+
+/** The files those fields came from, named once each. */
+function namedSources(keys, sources) {
+  const files = [...new Set(keys.map((key) => sources?.[key]).filter(Boolean))]
+  if (files.length === 0) return 'your document'
+  if (files.length === 1) return files[0]
+  return `${files.slice(0, -1).join(', ')} and ${files[files.length - 1]}`
+}
+
+
 export default function AgentSettings() {
   const [config, setConfig] = useState(null)
   const [zone, setZone] = useState('UTC')
@@ -43,20 +65,36 @@ export default function AgentSettings() {
       const found = await api.getAgentConfig()
       const stored = found.agent_config || {}
 
-      // Hours read out of an uploaded document are offered here, in the form,
-      // rather than written straight to the config. Booking reads
-      // business_hours, so writing it from parsed prose would have the agent
-      // offering real times to real customers on the strength of a regular
-      // expression. Prefilled and left for a person to look at and save: the
-      // document does the typing, somebody still says yes.
-      const suggested = stored.hours_from_document
-      if (suggested?.hours && !stored.business_hours) {
-        setConfig({ ...stored, business_hours: suggested.hours })
-        setFromDocument(suggested)
-      } else {
-        setConfig(stored)
-        setFromDocument(null)
-      }
+      // What the uploaded documents said, offered here in the form rather
+      // than written straight to the config. Booking reads business_hours, so
+      // writing it from parsed prose would have the agent offering real times
+      // to real customers on the strength of a regular expression. Prefilled
+      // and left for a person to look at and save: the document does the
+      // typing, somebody still says yes.
+      const offered = stored.from_document?.fields || {}
+      const sources = stored.from_document?.sources || {}
+
+      // A field the shop has already answered is left alone. A document
+      // arriving later must not quietly move an answer somebody typed - if
+      // it disagrees, that is said out loud below and applied only on asking.
+      const blank = (value) => (Array.isArray(value) ? value.length === 0 : !value)
+      const filling = Object.keys(offered).filter((key) => blank(stored[key]))
+      const differing = Object.keys(offered).filter(
+        (key) =>
+          !blank(stored[key]) &&
+          JSON.stringify(stored[key]) !== JSON.stringify(offered[key]),
+      )
+
+      const prefilled = { ...stored }
+      filling.forEach((key) => {
+        prefilled[key] = offered[key]
+      })
+      setConfig(prefilled)
+      setFromDocument(
+        filling.length || differing.length
+          ? { offered, sources, filling, differing }
+          : null,
+      )
       setZone(found.timezone || 'UTC')
     } catch {
       setConfig({})
@@ -165,16 +203,56 @@ export default function AgentSettings() {
         </p>
       )}
 
-      {fromDocument && (
+      {fromDocument?.filling?.length > 0 && (
         <p className="flex items-start gap-2 rounded-lg bg-accent/10 px-3 py-2 text-2xs text-accent">
           <FileText size={12} className="mt-0.5 shrink-0" />
           <span>
-            These hours were read from{' '}
-            <span className="font-semibold">{fromDocument.source}</span>. Nothing is
-            booked against them until you save — check them first, since a document
-            can word its hours in a way this reads differently.
+            {describeFields(fromDocument.filling)} below{' '}
+            {fromDocument.filling.length === 1 ? 'was' : 'were'} read from{' '}
+            <span className="font-semibold">
+              {namedSources(fromDocument.filling, fromDocument.sources)}
+            </span>
+            . Nothing is used until you save — check it first, since a document can
+            word things in a way this reads differently.
           </span>
         </p>
+      )}
+
+      {/*
+        The document disagrees with something already saved. Not applied on
+        its own: a price list uploaded months later must not quietly move
+        opening hours somebody set by hand, and a change nobody noticed is
+        the one that ends up promising a customer the wrong thing.
+      */}
+      {fromDocument?.differing?.length > 0 && (
+        <div className="rounded-lg bg-warn/10 px-3 py-2 text-2xs text-warn">
+          <p className="flex items-start gap-2">
+            <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+            <span>
+              {namedSources(fromDocument.differing, fromDocument.sources)} states
+              different {describeFields(fromDocument.differing).toLowerCase()} from
+              what you have saved. Yours is being kept.
+            </span>
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              const next = { ...config }
+              fromDocument.differing.forEach((key) => {
+                next[key] = fromDocument.offered[key]
+              })
+              setConfig(next)
+              setFromDocument({
+                ...fromDocument,
+                filling: [...fromDocument.filling, ...fromDocument.differing],
+                differing: [],
+              })
+            }}
+            className="mt-2 rounded-lg border border-warn/40 px-2.5 py-1 font-semibold transition-colors hover:bg-warn/15"
+          >
+            Use what the document says
+          </button>
+        </div>
       )}
 
       <div>

@@ -21,8 +21,8 @@ from app.schemas_tenancy import (
 from app.services import (
     agent_config,
     catalogue,
+    document_facts,
     documents,
-    opening_hours,
     retrieval,
     whatsapp,
 )
@@ -55,87 +55,105 @@ async def add_document(
     return document
 
 
-async def _adopt_opening_hours(db, organization_id, text: str, source: str) -> dict:
-    """Read the opening hours out of an uploaded document and offer them.
+def _stored_proposal(config: dict) -> tuple[dict, dict]:
+    """What earlier documents offered, as (fields, which file said each one).
 
-    A shop uploads the sheet that says when it is open, and that sentence used
-    to reach the knowledge base and nothing else. The agent could recite the
-    hours to a customer while `business_hours` - the field the booking code
-    actually reads - stayed empty, so booking stayed off and every appointment
-    was handed to a person. The document said one thing and the product did
-    another.
-
-    What is found is written where the hours form can prefill from it, and
-    nowhere else. It is deliberately not written to `business_hours`:
-
-    * Booking reads that key. Writing it would switch appointments on off the
-      back of prose nobody had checked, and the agent would then offer real
-      times to real customers on the strength of a regular expression.
-    * A document has no timezone in it, and no shop handbook ever will. "09:00"
-      means nothing until somebody says where they are, and reading it in the
-      wrong zone is exactly how a Miami customer was offered one in the
-      morning.
-
-    So the document does the typing and a person still says yes. The result
-    survives in the config rather than in a banner, because the first version
-    of this reported what it found in a message that vanished the moment the
-    operator clicked to the next step - and the hours step, which is where the
-    finding mattered, never heard about it.
+    Reads the older shape too, where the key held hours alone, so a suggestion
+    stored before this widened is carried forward rather than dropped.
     """
-    found = opening_hours.parse(text)
-    if not found:
+    stored = dict(config.get(agent_config.PROPOSED_KEY) or {})
+    fields = dict(stored.get("fields") or {})
+    sources = dict(stored.get("sources") or {})
+
+    if not fields:
+        legacy = config.get(agent_config.PROPOSED_HOURS_KEY) or {}
+        if legacy.get("hours"):
+            fields = {"business_hours": legacy["hours"]}
+            sources = {"business_hours": legacy.get("source") or "an earlier document"}
+
+    return fields, sources
+
+
+async def _adopt_document_facts(db, organization_id, text: str, source: str) -> dict:
+    """Read what this document states about the business and offer it back.
+
+    A handbook already says when the shop is open, what it does and where it
+    will travel to. That is the same set of questions the setup form asks, so
+    the document is read for them and the answers are offered as a filled-in
+    form.
+
+    What is found is written where the form can prefill from it, and nowhere
+    else. It is deliberately not written to the live config:
+
+    * Booking reads `business_hours`. Writing it would switch appointments on
+      off the back of parsed prose, and the agent would begin offering real
+      times to real customers on the strength of a regular expression.
+    * A document has no timezone in it, and no handbook ever will. "09:00"
+      means nothing until somebody says where they are, and read in the wrong
+      zone it is how a Miami customer was offered one in the morning.
+
+    Several documents add up. Each one replaces the fields it states and
+    leaves alone the fields it does not, because a price list that says
+    nothing about opening hours is not a statement that the shop has none -
+    and erasing an earlier document's answer because a later one was silent
+    would make uploading a second file a destructive act.
+    """
+    facts = document_facts.extract(text)
+    if not facts:
         return {
             "found": None,
             "proposed": False,
-            "detail": "This document does not state opening hours, so booking stays off "
-            "until you set them. Until then the agent hands anyone asking for an "
-            "appointment to a person and alerts you.",
+            "fields": [],
+            "detail": "Nothing in this document describes your hours, services or "
+            "areas, so nothing was filled in for you. It is still searchable, and "
+            "the agent will quote from it.",
         }
 
-    summary = opening_hours.describe(found)
     organization = await db.get(Organization, organization_id)
     if organization is None:
-        return {"found": summary, "proposed": False, "detail": "No organization to apply them to."}
+        return {"found": None, "proposed": False, "fields": [], "detail": "No organization."}
 
     config = dict(organization.agent_config or {})
-    if config.get("business_hours"):
-        same = config["business_hours"] == found
-        return {
-            "found": summary,
-            "proposed": False,
-            "detail": (
-                "These match the hours you already have."
-                if same
-                else "You already have opening hours set, so these were left alone. "
-                "Change them in Hours and booking if the document is the newer one."
-            ),
-        }
+    fields, sources = _stored_proposal(config)
 
-    problems = agent_config.validate({**config, "business_hours": found})
+    merged = {**fields, **facts}
+    problems = agent_config.validate({**config, **merged})
     if problems:
-        logger.warning("parsed hours for %s did not validate: %s", organization_id, problems)
-        return {"found": summary, "proposed": False, "detail": problems[0]}
+        logger.warning("facts parsed for %s did not validate: %s", organization_id, problems)
+        return {"found": None, "proposed": False, "fields": [], "detail": problems[0]}
 
-    config[agent_config.PROPOSED_HOURS_KEY] = {
-        "hours": found,
-        "source": source,
+    for key in facts:
+        sources[key] = source
+
+    config[agent_config.PROPOSED_KEY] = {
+        "fields": merged,
+        "sources": sources,
         "found_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+    # The older key would otherwise sit alongside the new one, and the next
+    # read would have two answers to choose between.
+    config.pop(agent_config.PROPOSED_HOURS_KEY, None)
     organization.agent_config = config
     await db.flush()
-    logger.info("read opening hours for %s from %s: %s", organization_id, source, summary)
+
+    summary = document_facts.describe(facts)
+    logger.info("read %s for %s from %s", summary, organization_id, source)
 
     zone = (getattr(organization, "timezone", None) or "").strip()
-    waiting = (
-        "Open Hours and booking to check them and switch booking on."
-        if zone and zone != "UTC"
-        else "Set your timezone first, then open Hours and booking to check them — "
-        "without a timezone these would be read as UTC."
-    )
+    if facts.get("business_hours") and (not zone or zone == "UTC"):
+        waiting = (
+            "Set your timezone in Your business first — without one these hours "
+            "would be read as UTC. Then open Hours and booking to save them."
+        )
+    else:
+        waiting = "Open Hours and booking to check them and save."
+
     return {
         "found": summary,
         "proposed": True,
-        "detail": f"Opening hours were read from this document: {summary}. {waiting}",
+        "fields": sorted(facts.keys()),
+        "detail": f"Read from this document: {summary}. Nothing changes until you "
+        f"save. {waiting}",
     }
 
 
@@ -196,7 +214,7 @@ async def upload_document(
     # Read from the whole extracted document rather than the passages, so
     # hours split across a chunk boundary are not lost to where the splitter
     # happened to cut.
-    hours = await _adopt_opening_hours(
+    facts = await _adopt_document_facts(
         db, tenant.id, extracted.text, file.filename or "document"
     )
 
@@ -207,7 +225,7 @@ async def upload_document(
         len(stored),
         extracted.tables,
         extracted.pages,
-        hours["found"] or "not stated",
+        facts["found"] or "not stated",
     )
     return {
         "filename": file.filename,
@@ -216,7 +234,7 @@ async def upload_document(
         "tables_found": extracted.tables,
         "passages_indexed": len(stored),
         "characters": len(extracted.text),
-        "opening_hours": hours,
+        "from_document": facts,
     }
 
 

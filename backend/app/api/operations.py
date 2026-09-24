@@ -247,12 +247,24 @@ async def save_agent_config(
         organization.timezone = str(zone)[:64]
 
     if config is not None:
-        # Once real hours are saved, whatever a document suggested has served
-        # its purpose. Dropped here rather than trusted to the client, so the
-        # suggestion cannot outlive the decision and reappear as a prompt to
-        # confirm something already confirmed.
-        if config.get("business_hours"):
+        # Once any of it is saved, what a document suggested has served its
+        # purpose: this form is the confirmation, and it shows every field a
+        # document can fill. Dropped here rather than trusted to the client,
+        # so a suggestion cannot outlive the decision and ask to be confirmed
+        # again. Saving an empty form is not a confirmation, so a suggestion
+        # survives somebody clicking through without filling anything in.
+        if any(config.get(key) for key in agent_config.DOCUMENT_FIELDS):
+            config.pop(agent_config.PROPOSED_KEY, None)
             config.pop(agent_config.PROPOSED_HOURS_KEY, None)
+        else:
+            # Carried forward, because this endpoint replaces the config whole.
+            # A suggestion is not a field somebody typed; it is what the
+            # uploaded documents said, and clicking through the form without
+            # filling anything in would otherwise throw the reading away and
+            # leave re-uploading as the only way back.
+            for key in (agent_config.PROPOSED_KEY, agent_config.PROPOSED_HOURS_KEY):
+                if key in before and key not in config:
+                    config[key] = before[key]
         organization.agent_config = config
     await db.flush()
 

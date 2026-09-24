@@ -72,10 +72,10 @@ export default function KnowledgeSettings() {
       try {
         const result = await api.uploadKnowledge(file)
         done.push(`${result.filename}: ${result.passages_indexed} passage(s)`)
-        // Reading the opening hours out of the file changes whether the agent
-        // can book at all, which is far too big a thing to leave the owner to
-        // discover. The server says in plain words what it did; show it.
-        if (result.opening_hours) setHours(result.opening_hours)
+        // What the file filled in - hours, services, areas - decides whether
+        // the agent can book at all and what it says it does. Far too big to
+        // leave the owner to discover. The server says it in plain words.
+        if (result.from_document) setHours(result.from_document)
       } catch (err) {
         // The server writes these for a shop owner, not an engineer — a scan
         // with no text layer explains itself. Show it as it came.

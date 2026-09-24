@@ -1,11 +1,11 @@
 {
-  "version": "1.4.0",
-  "notes": "Your timezone is asked for first, and hours read from a document arrive prefilled in the booking step for you to check and save.",
-  "pub_date": "2026-09-22T19:48:17+00:00",
+  "version": "1.4.1",
+  "notes": "Pick your timezone from a list, and documents now fill in your services and areas as well as your hours.",
+  "pub_date": "2026-09-24T13:14:08+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjZtTlg0RndLdkdJcDhqLzRQQXAyWVJCZVNpOENyZkJLL1I4M240aHhZbHY4VERhbmRGQlpicjFsbHZ5S2FpTndvOGFXVEMwY25PSnlBSUJGTStEcFFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMTA2NDk3CWZpbGU6UGluZ1B1bHNlXzEuNC4wX3g2NC1zZXR1cC5leGUKUGhZSTI4dXcxSFF3Z08rVGtuWHpJZnM4RVFPcXdLWFpNaTJMcC9Yd20vRGR5SW9NdVUyZnZlaXFmSnN0MWFoaDNtcHlOQXBncTVGbjlUTG4zSE5qQ0E9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjBudldzcVppdi9xRDljQXVoSXp1NFN1UDZwb2NJeTBvZTl1NmZ1ME1KNEJqaExUMVFJdW8rVU9MTWs5dHkraTZ4T2F4OU1FTHF1RUt6c2V4ZlY2RndRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMjU1NjQ4CWZpbGU6UGluZ1B1bHNlXzEuNC4xX3g2NC1zZXR1cC5leGUKN0NqWUlCQyt6b3JzdVVjRk55ZkQzdXZ6UEtZVW5MYTBWeTIzN1NPSm1VeEhnWnpsWDdJR2JxSEZjaktqQmVVWFZ5OElGNXV2YkFRaHptdDFJRUx1RHc9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.1_x64-setup.exe"
     }
   }
 }

@@ -1,63 +1,58 @@
-# Two documents for testing what an upload does to opening hours
+# Three documents for testing what an upload fills in
 
 Upload these in **Setup → Prices and knowledge**. They are ordinary Word files,
 the kind a client actually sends.
 
-Both halves of the behaviour need testing, so there are two files. One states
-opening hours; the other deliberately does not, while still containing numbers
-that look like times — the trap a careless parser falls into.
+| File | What it states | What should happen |
+|---|---|---|
+| `beluga-handbook-WITH-hours.docx` | hours, services, areas | All three are read and offered. **Mon–Fri 09:00–18:00, Sat 10:00–14:00**, Sunday closed; 3 services; Miami-Dade, Broward, Palm Beach. |
+| `beluga-price-list-SECOND-document.docx` | services, areas — **no hours** | Replaces the services and areas. The hours from the first file are **kept**, because this one says nothing about them. |
+| `beluga-handbook-NO-hours.docx` | payment and warranty only | Nothing is filled in. It stays searchable and the agent quotes from it. |
 
-| File | What should happen |
-|---|---|
-| `beluga-handbook-WITH-hours.docx` | The hours are read out and **offered**: **Mon–Fri 09:00–18:00, Sat 10:00–14:00**, Sunday closed. They appear already filled in at **Hours and booking**, marked as read from this document. |
-| `beluga-handbook-NO-hours.docx` | Nothing is read. Booking stays off and the agent hands booking requests to a person. |
+## Several documents add up
 
-## The document does not switch booking on by itself
+Each upload replaces the fields it states and leaves alone the fields it does
+not. A price list silent about opening hours is not a shop saying it has none,
+so uploading a second file is never destructive.
 
-It fills the form in. Saving the hours is what switches booking on, and that is
-deliberate: the hours are parsed out of prose, and prose read slightly wrong
-would have the agent offering real appointments to real customers on the
-strength of a regular expression. One look and one click is the whole cost.
+Upload the first, then the second, and check **Hours and booking**: the hours
+came from the handbook, the services and areas from the price list, and each
+line says which file it came from.
+
+## It fills the form in — saving is what switches things on
+
+The hours are parsed out of prose, and prose read slightly wrong would have the
+agent offering real appointments to real customers on the strength of a regular
+expression. One look and one click is the whole cost.
+
+If a document disagrees with something you have already saved, yours is kept
+and an amber line says so, with a button to take the document's version
+instead.
 
 ## Set your timezone first
 
-**Setup → Your business → Where you are.** Every opening time is read against
-it, so `09:00` with no timezone means 09:00 UTC — 4am in Miami, which is the
-fault this was built to end.
+**Setup → Your business → Where you are.** Pick from the list; your own
+computer's zone is offered in one click. Every opening time is read against it,
+so `09:00` with no timezone means 09:00 UTC — 4am in Miami, which is the fault
+this was built to end.
 
-The hours are still read from the document without one, so nothing is lost, but
-they cannot be saved until a timezone is set. The hours step says so in amber
-rather than letting you save something that would book people overnight.
+Hours are still read from a document without one, so nothing is lost, but they
+cannot be saved until a timezone is set.
 
-## What to check
+## What is deliberately not read
 
-**After the WITH-hours file:**
+**Never promise**, **pricing rules** and **words that should fetch a person**
+stay empty no matter what you upload. Those are instructions to an agent, not
+descriptions of a business — no customer handbook contains them, and a parser
+reaching for them would be guessing at your policy and writing the guess into
+what customers get told. Type those three yourself.
 
-1. Go to **Hours and booking**. The grid is already filled: Mon–Fri
-   09:00–18:00, Sat 10:00–14:00, Sunday empty. A green line names the file the
-   hours came from.
-2. Save. The step turns green and booking is on.
-3. Message the WhatsApp number asking to book. The agent should offer real
-   times inside those hours, and nothing on a Sunday.
-4. Ask for a Sunday. It should refuse rather than invent a slot.
+## The traps, on purpose
 
-**After the NO-hours file:**
-
-1. **Hours and booking** is still empty — no suggestion, nothing prefilled.
-2. Ask to book. The agent must **not** offer a time and must **not** claim to
-   be a person. It should say a team member will come back to you — and only
-   when that alert has somewhere to go.
-3. Check your alert inbox: an alert titled *"Someone wants to book and the
-   agent cannot"* should have arrived. If the shop has no alert address or
-   device configured, the agent is not allowed to promise a callback at all,
-   because nothing would be behind the promise.
-
-## The trap, on purpose
-
-`beluga-handbook-NO-hours.docx` contains "Delivery of fittings takes 2-3
-working days" and "about 45 minutes on site". Neither may be read as opening
-hours. If a future change makes the parser greedier, this file is what catches
-it.
+Every file contains "Delivery of fittings takes 2-3 working days" and the
+handbook adds "about 45 minutes on site". Neither may be read as opening hours.
+`beluga-price-list-SECOND-document.docx` has a **Payment** section directly
+under its services, which must not be swallowed into the services list.
 
 The same cases are locked down in
 `backend/tests/test_opening_hours_from_documents.py`.
