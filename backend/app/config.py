@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     # The vision endpoint is rate-limited hard; each round tries every key.
     vision_attempts: int = 2
 
+    # A ceiling on how fast one caller can hit the public surface. On by
+    # default: there was none, and nothing slowed an attempt to guess a
+    # secret or to hammer the unauthenticated calendar feed. It fails open,
+    # so a Redis outage lets traffic through rather than becoming one.
+    rate_limit_enabled: bool = True
+
     # Scheduling / calendar
     scheduling_enabled: bool = True
     calcom_link: str = ""

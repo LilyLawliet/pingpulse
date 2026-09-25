@@ -11,6 +11,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+
+from app import rate_limit
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -129,6 +131,11 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+# Counted before anything else runs, so a flood is refused with a Redis INCR
+# rather than a database round trip. The webhook, media, updates and health
+# are exempt - see `rate_limit` for why each one has to be.
+app.middleware("http")(rate_limit.limit_requests)
 
 app.add_middleware(
     CORSMiddleware,
