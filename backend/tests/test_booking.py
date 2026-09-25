@@ -687,3 +687,42 @@ def test_ordinary_sentences_are_not_mistaken_for_claims():
         "Would you like me to look at what is free this week?",
     ):
         assert booking.unverified_claims(innocent) == [], innocent
+
+
+@pytest.mark.asyncio
+async def test_a_booked_slot_on_the_last_day_of_the_window_is_not_offered(
+    booked_shop, db_session
+):
+    """The diary must be read across the whole span that slots are generated.
+
+    `free_slots` walks `days + 1` calendar days and used to ask the database
+    for appointments over `days`, so anything already booked on that final day
+    was invisible to the clash check and got offered. Postgres still refused
+    the second booking, so nobody was double-booked - the customer was offered
+    a time and then told they could not have it, which is the same wrong
+    answer wearing a different hat.
+
+    Pinned to an explicit Monday rather than "a few days from now", because
+    the version of this that failed only failed when the extra day happened to
+    land on a day the shop was open. It passed every day of the week except
+    Friday, which is not a test, it is a coincidence with a schedule.
+    """
+    organization, contact, _ = booked_shop
+
+    # The last day the loop reaches when asked for three days' worth.
+    start = datetime.now(timezone.utc)
+    monday = start + timedelta(days=1)
+    while monday.weekday() != 0:
+        monday += timedelta(days=1)
+    taken = monday.replace(hour=10, minute=0, second=0, microsecond=0)
+
+    result = await booking.book(db_session, organization, contact, taken)
+    assert getattr(result, "appointment", None) is not None, result
+
+    days = (taken.date() - start.date()).days
+    slots = await booking.free_slots(db_session, organization, days=days, limit=100)
+
+    assert taken not in slots
+    # And the rest of that day is still on offer, so the fix is not "stop
+    # looking at the last day".
+    assert any(slot.date() == taken.date() for slot in slots)

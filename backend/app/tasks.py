@@ -111,6 +111,30 @@ def new_token() -> str:
     return uuid.uuid4().hex
 
 
+def claim_key(token: str, attempt: int) -> str:
+    """What identifies one nudge, for exactly-once purposes.
+
+    The token alone identifies a *sequence*, which is what cancellation needs
+    and what the duplicate storm slipped through: all forty-four tasks carried
+    the live token and the same attempt number, and the token check happily
+    passed every one of them.
+    """
+    return f"{token}:{attempt}"
+
+
+def already_sent(metadata: dict, token: str, attempt: int) -> bool:
+    claims = (metadata or {}).get(SENT_CLAIMS_KEY)
+    return isinstance(claims, list) and claim_key(token, attempt) in claims
+
+
+def record_claim(metadata: dict, token: str, attempt: int) -> dict:
+    """Mark this nudge as spoken for. Returns the metadata to store."""
+    claims = list((metadata or {}).get(SENT_CLAIMS_KEY) or [])
+    claims.append(claim_key(token, attempt))
+    metadata[SENT_CLAIMS_KEY] = claims[-MAX_SENT_CLAIMS:]
+    return metadata
+
+
 def schedule_one(contact, minutes: float, message: str | None = None) -> str | None:
     """Queue a single follow-up an operator asked for, and return its token.
 
@@ -237,6 +261,25 @@ async def _announce(contact, nudge, body: str) -> None:
 
 CANCELLED = "cancelled"
 OPTED_OUT = "opted out"
+# This exact nudge has already gone out once.
+#
+# A client received the same check-in forty-four times in eight seconds. The
+# cause was upstream - tasks acknowledged late are redelivered when a worker
+# restarts, and every restart during the quiet window left another copy
+# queued for the moment it ended, so they all came due together. But the
+# reason it reached the customer is here: nothing made sending a nudge
+# idempotent. `followup_attempts` was written after each send and never read,
+# so forty-four tasks all carrying attempt 1 each passed every check.
+#
+# The queue is allowed to deliver a task twice. That is what a broker does,
+# and no amount of care upstream makes it not so. The send is what has to
+# refuse.
+ALREADY_SENT = "already sent"
+
+# The claims kept on the contact, newest last. Bounded because this rides in
+# a JSON column that is read on every inbound message.
+SENT_CLAIMS_KEY = "followup_sent"
+MAX_SENT_CLAIMS = 12
 
 # Not a refusal so much as a postponement: the caller re-queues for the hour
 # the shop is willing to send at. Dropping it would lose a lead to a clock.
@@ -288,6 +331,12 @@ def refuse_followup(
     # end of NUDGES in the worker.
     if not manual and attempt > MAX_FOLLOWUPS:
         return f"past the {MAX_FOLLOWUPS}-nudge cap"
+
+    # Sent once already. Checked here so a redelivered task is refused for a
+    # reason that reads plainly in the log, and again under a row lock at the
+    # moment of sending, where the guarantee actually lives.
+    if already_sent(metadata, token, attempt):
+        return ALREADY_SENT
 
     # A confirmed appointment answers the question the nudge was going to ask.
     # An operator who presses follow-up anyway has looked at the conversation
@@ -365,6 +414,13 @@ async def _run_followup(
                             token,
                             attempt,
                         ],
+                        # Carried across, and they were not. A nudge an
+                        # operator wrote themselves, deferred overnight by
+                        # quiet hours, came back the next morning as an
+                        # automatic one: their wording replaced by the default
+                        # check-in, and subject to the stage gate they had
+                        # already decided against.
+                        kwargs={"body": body_override, "manual": manual},
                         eta=when,
                     )
                     logger.info(
@@ -393,6 +449,39 @@ async def _run_followup(
                 body_override
                 or nudges_for(organization)[min(attempt, MAX_FOLLOWUPS) - 1]
             )
+
+            # Claim this nudge before sending it, under a row lock, in its own
+            # committed transaction.
+            #
+            # Two tasks for the same nudge can be in two workers at the same
+            # instant; both would read a contact that had not been nudged and
+            # both would send. The lock serialises them and the committed
+            # claim is what the loser sees.
+            #
+            # Committed *before* delivery rather than after, which is the
+            # deliberate trade: a crash between the claim and the send loses
+            # one nudge, and the other order sends two. Silence is a
+            # disappointment and forty-four messages is a reported number.
+            locked = await session.execute(
+                select(CRMContact)
+                .where(CRMContact.id == contact.id)
+                .with_for_update()
+            )
+            contact = locked.scalar_one()
+            metadata = dict(contact.contact_metadata or {})
+
+            if already_sent(metadata, token, attempt):
+                await session.rollback()
+                logger.info(
+                    "follow-up %d for %s was already sent; dropping a duplicate",
+                    attempt,
+                    contact_id,
+                )
+                return ALREADY_SENT
+
+            contact.contact_metadata = record_claim(metadata, token, attempt)
+            await session.commit()
+            metadata = dict(contact.contact_metadata or {})
 
             # A nudge must come from the same number the conversation is on.
             channel = await whatsapp.active_channel(session, contact.organization_id)

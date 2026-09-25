@@ -309,7 +309,20 @@ async def free_slots(
     length = timedelta(minutes=duration_minutes(organization, kind))
     buffer = buffer_minutes(organization)
 
-    window_end = start_from + timedelta(days=days)
+    # The same span the loop below walks, which is `days + 1` calendar days
+    # and not `days`.
+    #
+    # It was `days`, and the mismatch meant a slot generated on the final day
+    # was checked against a diary that stopped short of it - so a time already
+    # booked could be offered. The exclusion constraint in Postgres still
+    # refused the second booking, so nobody was double-booked; the customer
+    # was offered a time and then told they could not have it, which is the
+    # same class of wrong answer this module exists to prevent.
+    #
+    # It hid because the loop skips closed days: only when the extra day
+    # landed on a day the shop was open did the gap show at all, so the test
+    # covering it passed except when run on a Friday.
+    window_end = start_from + timedelta(days=days + 1)
     taken = await live_appointments(db, organization.id, start_from, window_end)
 
     found: list[datetime] = []
