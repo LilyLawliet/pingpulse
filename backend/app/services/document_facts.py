@@ -88,9 +88,29 @@ def _clean(entry: str) -> str:
     return _BULLET.sub("", entry).strip(" .;•-").strip()
 
 
+# A list item is a name. A sentence is a statement about the business, and
+# reading one as an item puts a sentence into a list the agent answers from.
+#
+# Both signals are needed, and the test runs on the raw line because `_clean`
+# strips the trailing stop that carries half of it. Length alone judged
+# "Wet room conversion - from $9,500" - six words - to be prose and threw
+# away every service in the document.
+PROSE_WORDS = 5
+
+
+def _is_prose(line: str) -> bool:
+    """Does this line read as a sentence rather than as an entry?"""
+    stripped = (line or "").strip()
+    if not stripped.endswith((".", "!")):
+        return False
+    return len(stripped.split()) >= PROSE_WORDS
+
+
 def _split_inline(text: str) -> list[str]:
     """One line naming several things: "Miami-Dade, Broward and Palm Beach"."""
-    parts = re.split(r",|;| and (?=[A-Z])", text)
+    # Not a comma inside a number. "Wet room conversion - from $9,500" is one
+    # service, and splitting it produces a service called "500".
+    parts = re.split(r",(?!\d)|;| and (?=[A-Z])", text)
     return [part.strip() for part in parts if part.strip()]
 
 
@@ -126,6 +146,14 @@ def _section(lines: list[str], start: int) -> list[str]:
         if len(entry) > MAX_ITEM_CHARS:
             # A paragraph. Everything after it is prose too, so stop rather
             # than picking the short lines out of the middle of it.
+            break
+        if _is_prose(stripped):
+            # A sentence, not a list item. "Delivery of fittings takes 2-3
+            # working days." sits under the areas list in a real handbook and
+            # was being read as a place the business travels to - and, worse,
+            # its presence made the section two entries long, which stopped
+            # the comma-splitting below from running at all. So the list read
+            # "Miami-Dade, Broward, Palm Beach" as a single area.
             break
         collected.append(entry)
         if len(collected) >= MAX_ITEMS:

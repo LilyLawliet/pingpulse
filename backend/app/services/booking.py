@@ -606,35 +606,107 @@ def describe(appointment) -> str:
 # This is the same shape as the banned-handoff check and the price guard: the
 # output is inspected rather than trusted, because the failure mode is a
 # confident sentence rather than an error.
+# A claim is only a claim when it is *asserted*. "I can book you in for
+# Tuesday" is an offer and the agent must be free to make it; "I've booked you
+# in for Tuesday" is a statement about the world that has to be true. The
+# patterns below match the verb, and `_asserted` is what tells the two apart -
+# without it, widening these to catch real phrasings would block the agent
+# from offering anything at all.
+_MODAL = re.compile(
+    r"\b(can|could|shall|should|would|might|may|want me|like me|happy to|"
+    r"able to|if you|whether|let me know|do you want|shall i|want to)\b",
+    re.IGNORECASE,
+)
+
+# Sentence-ish. Split on terminators and on newlines, keeping the terminator
+# so a question can be recognised as one.
+_CLAUSE = re.compile(r"[^.!?\n]+[.!?]?")
+
+
+# Denying that something happened is the honest half of this. "Nothing has
+# been cancelled" is exactly what the agent should say when nothing has, and
+# reading it as a cancellation claim would block the correction and leave the
+# customer with the original mistake.
+_NEGATED = re.compile(
+    r"\b(not|never|nothing|none|no|cannot|can't|couldn't|didn't|haven't|"
+    # No comma inside the gap: "No problem, I have called it off" is an
+    # interjection followed by a claim, not a denial of one.
+    r"hasn't|won't|isn't|unable)\b[^.!?,]{0,24}$",
+    re.IGNORECASE,
+)
+
+
+def _asserted(pattern: re.Pattern, text: str) -> str | None:
+    """The phrase, if some clause states it outright.
+
+    A clause that asks ("shall I cancel that?"), offers ("I can move it") or
+    denies ("nothing has been cancelled") is not a claim about what has
+    happened, and treating any of them as one would stop the agent doing its
+    job - which is how a guard gets switched off rather than fixed.
+    """
+    for clause in _CLAUSE.findall(text or ""):
+        stripped = clause.strip()
+        if not stripped or stripped.endswith("?"):
+            continue
+        if _MODAL.search(stripped):
+            continue
+        for found in pattern.finditer(stripped):
+            # Only a negator close in front of the verb suppresses it, so
+            # "I cancelled Tuesday, not Wednesday" still reads as a claim.
+            if _NEGATED.search(stripped[: found.start()]):
+                continue
+            return found.group(0)
+    return None
+
+
+# Written broadly, because the failure being guarded against is a confident
+# sentence and a model has a hundred ways to write one. A probe of two dozen
+# phrasings a model actually produces found eighteen of them walking straight
+# through the first version of these: "that's booked for you", "I cancelled
+# it", "moved to Wednesday", "you're all set for Tuesday". Each one is the
+# 1am incident waiting to happen again with different words.
 _BOOKING_CLAIMS = re.compile(
     r"\b("
-    r"appointment is (now )?(confirmed|booked|scheduled|set)"
-    r"|you('re| are) (all )?(booked|scheduled|confirmed)"
-    r"|i('ve| have) (now )?(booked|scheduled|confirmed|reserved)"
+    r"(appointment|booking|slot|visit) is (now )?(confirmed|booked|scheduled|set|reserved)"
+    r"|you('re| are) (all )?(booked|scheduled|confirmed|set|in)\b"
+    r"|i('ve| have)? ?(now )?(booked|scheduled|confirmed|reserved|locked)\b"
+    r"|that('s| is) (now )?(booked|confirmed|reserved|scheduled|set)"
     r"|(booking|appointment) (is )?confirmed"
     r"|confirmed for \w+"
-    r"|see you (on|at) \w+"
-    r"|we('ll| will) see you (on|at)"
-    r"|your (visit|estimate|consultation) (is|on)"
+    r"|locked in"
+    r"|(done|ok|okay|sorted|right|great|perfect|all done)[,!.:]?\s+(booked|scheduled|confirmed|reserved)\b"
+    r"|all set for"
+    r"|see you (on|at|then)"
+    r"|we('ll| will) see you"
+    r"|your (visit|estimate|consultation|appointment) (is|on) "
     r")",
     re.IGNORECASE,
 )
 
 _CANCEL_CLAIMS = re.compile(
     r"\b("
-    r"i('ve| have) (now )?cancell?ed"
-    r"|(has|have) been cancell?ed"
-    r"|(booking|appointment) (is )?cancell?ed"
-    r"|cancell?ed (your|the) (appointment|booking|visit)"
+    r"i('ve| have)? ?(now )?cancell?ed"
+    r"|(has|have|is|are) been cancell?ed"
+    r"|(booking|appointment|slot|visit|that|it) (is |has been )?cancell?ed"
+    r"|cancell?ed (your|the|that|it)"
+    r"|that('s| is) (now )?cancell?ed"
+    r"|called it off"
+    r"|(removed|taken off) (that|your) (booking|appointment)"
+    r"|(done|ok|okay|sorted|right|great|perfect|all done)[,!.:]?\s+cancell?ed\b"
+    r"|^cancell?ed\b"
     r")",
     re.IGNORECASE,
 )
 
 _MOVE_CLAIMS = re.compile(
     r"\b("
-    r"i('ve| have) (now )?(moved|rescheduled|changed)"
-    r"|(has|have) been (moved|rescheduled)"
-    r"|(booking|appointment) (is )?(moved|rescheduled)"
+    r"i('ve| have)? ?(now )?(moved|rescheduled|shifted|changed it)"
+    r"|(has|have|is) been (moved|rescheduled|changed)"
+    r"|(booking|appointment|slot|visit|that|it) (is |has been )?(moved|rescheduled)"
+    r"|that('s| is) (now )?(moved|rescheduled)"
+    r"|your appointment is now"
+    r"|(done|ok|okay|sorted|right|great|perfect|all done)[,!.:]?\s+(moved|rescheduled)\b"
+    r"|^moved to\b"
     r")",
     re.IGNORECASE,
 )
@@ -642,8 +714,7 @@ _MOVE_CLAIMS = re.compile(
 
 def claims_appointment(text: str) -> str | None:
     """The phrase asserting a booking exists, or None."""
-    found = _BOOKING_CLAIMS.search(text or "")
-    return found.group(0) if found else None
+    return _asserted(_BOOKING_CLAIMS, text)
 
 
 def claims_cancellation(text: str) -> str | None:
@@ -653,13 +724,11 @@ def claims_cancellation(text: str) -> str | None:
     appointment" was written about an appointment that never existed, so this
     matters as much as the booking claim and was the half nobody reported.
     """
-    found = _CANCEL_CLAIMS.search(text or "")
-    return found.group(0) if found else None
+    return _asserted(_CANCEL_CLAIMS, text)
 
 
 def claims_reschedule(text: str) -> str | None:
-    found = _MOVE_CLAIMS.search(text or "")
-    return found.group(0) if found else None
+    return _asserted(_MOVE_CLAIMS, text)
 
 
 def unverified_claims(
