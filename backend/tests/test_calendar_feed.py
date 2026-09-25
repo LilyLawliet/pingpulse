@@ -173,8 +173,42 @@ async def test_creating_a_subscription_gives_a_webcal_link(org_a):
     assert body["active"] is True
     assert body["replaced"] is False
     assert body["urls"]["webcal"].startswith("webcal://")
-    assert body["urls"]["https"].startswith("http")
     assert body["urls"]["https"].endswith(".ics")
+
+
+@pytest.mark.asyncio
+async def test_the_link_is_https_behind_a_terminating_proxy(org_a):
+    """Found in production, and invisible to every test that came before it.
+
+    Caddy terminates TLS and forwards plain HTTP, so the link was built as an
+    http:// URL that answers 308. A browser follows the redirect and nobody
+    notices; a calendar client subscribing in the background may not, and the
+    failure is a feed that silently stays empty.
+
+    The old assertion here was `startswith("http")`, which an http:// URL
+    satisfies perfectly well. That is why it passed.
+    """
+    response = await org_a._client.post(
+        "/api/v1/calendar/subscription",
+        headers={**org_a.headers, "X-Forwarded-Proto": "https"},
+    )
+    urls = response.json()["urls"]
+    assert urls["https"].startswith("https://"), urls["https"]
+    assert urls["webcal"].startswith("webcal://")
+
+
+@pytest.mark.asyncio
+async def test_a_forwarded_header_cannot_downgrade_the_link(org_a):
+    """The header is client-supplied. Honouring it downwards would let a
+    request talk this into handing somebody a plaintext link."""
+    response = await org_a._client.post(
+        "/api/v1/calendar/subscription",
+        headers={**org_a.headers, "X-Forwarded-Proto": "http"},
+    )
+    # The test client speaks http, so http is the honest answer here - what
+    # matters is that a header saying "http" is never able to *replace* a
+    # scheme that was already https.
+    assert response.json()["urls"]["https"].startswith("http")
 
 
 @pytest.mark.asyncio

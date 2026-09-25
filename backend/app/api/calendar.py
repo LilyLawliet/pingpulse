@@ -35,18 +35,37 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["calendar"])
 
 
+def _external_scheme(request: Request) -> str:
+    """The scheme the *client* used, not the one that reached this process.
+
+    Caddy terminates TLS and forwards plain HTTP, so `request.url.scheme` is
+    "http" in production and the subscription link came out as an http:// URL
+    that redirects. A browser follows a 308 and never notices; a calendar
+    client subscribing in the background may not, and the failure is a feed
+    that silently stays empty rather than an error anybody sees.
+
+    Upgrade only. A forwarded header is client-supplied, and honouring it to
+    move *down* to http would let a request talk this into handing somebody a
+    plaintext link.
+    """
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    first = forwarded.split(",")[0].strip().lower()
+    return "https" if first == "https" else request.url.scheme
+
+
 def _urls(request: Request, token: str) -> dict:
-    """The same feed, in the three forms a person might need.
+    """The same feed, in the two forms a person might need.
 
     `webcal://` is what makes a phone offer to subscribe rather than download
     a file, and it is the one that should be tapped. The https form is there
     for pasting into a desktop client that will not accept the other.
     """
-    base = str(request.base_url).rstrip("/")
-    https = f"{base}/api/v1/calendar/{token}.ics"
+    scheme = _external_scheme(request)
+    host = request.headers.get("x-forwarded-host") or request.url.netloc
+    url = f"{scheme}://{host}/api/v1/calendar/{token}.ics"
     return {
-        "webcal": https.replace("https://", "webcal://").replace("http://", "webcal://"),
-        "https": https,
+        "webcal": url.replace("https://", "webcal://").replace("http://", "webcal://"),
+        "https": url,
     }
 
 
