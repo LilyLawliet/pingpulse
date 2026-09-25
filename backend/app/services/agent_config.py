@@ -525,6 +525,48 @@ def _check_quiet_hours(problems: list[str], quiet) -> None:
             _check_time(problems, "quiet_hours." + edge, quiet[edge])
 
 
+# How big this is allowed to get.
+#
+# Nothing bounded it, and a config of three quarters of a megabyte was
+# accepted and stored. The prompt survived - every field folded into it is
+# truncated - so the model never saw it. Everything else did: this row is read
+# on *every inbound message* to decide opening hours, quiet hours and whether
+# a customer asked for a person, the undo snapshot keeps a second copy beside
+# it, and the dashboard fetches the whole thing on load.
+#
+# `escalate_on` is the sharpest of them, because `needs_escalation` walks the
+# whole list doing a substring scan for each entry, on the hot path, for every
+# message that arrives.
+#
+# The numbers are generous by a wide margin. A real tenant's config is about a
+# kilobyte; a document fills at most twenty-five services. These are the point
+# past which the value is a mistake or a paste, not a business with a lot to
+# say.
+MAX_CONFIG_BYTES = 64_000
+MAX_TEXT_CHARS = 4_000
+MAX_LIST_ITEMS = 200
+MAX_ITEM_CHARS = 300
+
+
+def _check_size(problems: list[str], config: dict) -> None:
+    import json
+
+    try:
+        size = len(json.dumps(config, default=str).encode("utf-8"))
+    except (TypeError, ValueError):
+        problems.append("These settings could not be read as text.")
+        return
+
+    if size > MAX_CONFIG_BYTES:
+        problems.append(
+            f"These settings are {size // 1000}KB, over the "
+            f"{MAX_CONFIG_BYTES // 1000}KB limit. Every one of them is read on "
+            "every message that arrives, so this has to stay small. Shorten "
+            "the longest fields, or move the detail into an uploaded document "
+            "where the agent can look it up instead."
+        )
+
+
 def validate(config) -> list[str]:
     """Everything wrong with this config, in words a shop owner can act on.
 
@@ -555,10 +597,36 @@ def validate(config) -> list[str]:
             )
         elif any(isinstance(item, (dict, list)) for item in value):
             problems.append("Every entry in " + key + " must be a piece of text.")
+        elif len(value) > MAX_LIST_ITEMS:
+            problems.append(
+                f"{key} has {len(value)} entries, over the {MAX_LIST_ITEMS} "
+                "limit. Every one of them is checked against every message "
+                "that arrives."
+            )
+        else:
+            too_long = [item for item in value if len(str(item)) > MAX_ITEM_CHARS]
+            if too_long:
+                problems.append(
+                    f"An entry in {key} is {len(str(too_long[0]))} characters. "
+                    f"Each one must be under {MAX_ITEM_CHARS} - these are "
+                    "single phrases, not paragraphs."
+                )
 
     for key in _TEXT_KEYS:
         value = config.get(key)
-        if value is not None and not isinstance(value, str):
+        if value is None:
+            continue
+        if not isinstance(value, str):
             problems.append(key + " must be text.")
+        elif len(value) > MAX_TEXT_CHARS:
+            problems.append(
+                f"{key} is {len(value)} characters, over the {MAX_TEXT_CHARS} "
+                "limit. Only the first few hundred reach the agent anyway - "
+                "put the rest in an uploaded document."
+            )
+
+    # Last, and on the whole object, so a config that slips past every
+    # field-level rule by being broad rather than deep is still caught.
+    _check_size(problems, config)
 
     return problems
