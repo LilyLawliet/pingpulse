@@ -164,6 +164,10 @@ async def list_tokens(_args: argparse.Namespace) -> int:
                 select(AccessToken).order_by(AccessToken.created_at.desc())
             )
         ).scalars().all()
+        # Resolved while the session is still open - the printing below runs
+        # after it closes, and a lazy load there would raise rather than
+        # quietly print nothing.
+        reaches = {row.token: await _reaches(session, row) for row in rows}
 
     if not rows:
         print("  no tokens issued yet")
@@ -184,7 +188,56 @@ async def list_tokens(_args: argparse.Namespace) -> int:
         # Only a prefix: a full token in a terminal is a credential on screen.
         print(f"  {row.client_name[:23]:<24} {row.token[:16] + '...':<20} "
               f"{expires:%Y-%m-%d}   {state}")
+
+        # The label is the name somebody typed when the token was issued; it
+        # is not checked against anything and it does not follow the account.
+        # An account can own more than one organization, and which one it acts
+        # as is stored server-side and changes whenever somebody uses the
+        # organization switcher - so a token labelled for one client can be
+        # writing to another, with nothing on this screen to say so. That has
+        # already happened once here.
+        for line in reaches[row.token]:
+            print(f"  {'':<24} {line}")
     return 0
+
+
+async def _reaches(session, token) -> list[str]:
+    """Which tenants this token can act as, and which one it lands on now."""
+    if token.user_id is None:
+        return ["!! no account - this token authenticates but reads nothing"]
+
+    user = await session.get(User, token.user_id)
+    if user is None:
+        return ["!! the account this token belongs to is gone"]
+
+    memberships = (
+        await session.execute(
+            select(OrganizationMember).where(
+                OrganizationMember.user_id == user.id
+            )
+        )
+    ).scalars().all()
+
+    owned = []
+    for m in memberships:
+        org = await session.get(Organization, m.organization_id)
+        owned.append((m.organization_id, org.name if org else "?", m.role))
+
+    if not owned:
+        return ["!! belongs to no organization - authenticates but reads nothing"]
+
+    active_id = user.active_organization_id
+    active = next((n for oid, n, _ in owned if oid == active_id), None)
+
+    lines = []
+    if len(owned) > 1:
+        names = ", ".join(f"{n} ({r})" for _, n, r in owned)
+        lines.append(f"can act as {len(owned)}: {names}")
+    if active is None:
+        lines.append("!! acts as NOTHING - no active organization set")
+    elif len(owned) > 1 or active != token.client_name:
+        lines.append(f"-> acts as: {active}")
+    return lines
 
 
 async def revoke(args: argparse.Namespace) -> int:
