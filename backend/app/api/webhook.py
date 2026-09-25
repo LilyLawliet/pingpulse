@@ -8,6 +8,7 @@ retrieval, persistence — is filtered by that organization.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -1130,6 +1131,26 @@ async def process_inbound_message(
     }
 
 
+def _bridge_authorised(request: Request) -> bool:
+    """Whether this request carries the bridge secret.
+
+    Constant-time. The comparison used to be `!=`, which returns the moment
+    two bytes differ - so the time to reject a guess grows with how many
+    leading bytes were right, and a caller measuring that can rebuild the
+    secret one byte at a time without ever seeing it. `compare_digest` takes
+    the same time whatever the input, and encoding to bytes keeps it from
+    raising on a non-ASCII header.
+
+    An empty configured secret fails every request rather than matching an
+    empty header: a missing secret is a locked door, not an open one.
+    """
+    secret = settings.wa_qr_shared_secret or ""
+    presented = request.headers.get("X-PingPulse-Bridge", "")
+    if not secret:
+        return False
+    return hmac.compare_digest(secret.encode("utf-8"), presented.encode("utf-8"))
+
+
 @router.post("/webhook")
 async def whatsapp_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     """Twilio POSTs x-www-form-urlencoded here on every inbound WhatsApp message.
@@ -1223,8 +1244,7 @@ async def qr_session_inbound(request: Request, db: AsyncSession = Depends(get_db
     bridge is a service on the internal network, not a third party, and it has
     no auth token to sign with.
     """
-    secret = settings.wa_qr_shared_secret
-    if not secret or request.headers.get("X-PingPulse-Bridge") != secret:
+    if not _bridge_authorised(request):
         logger.warning("rejected qr-inbound with a bad or missing bridge secret")
         return Response(status_code=403)
 
@@ -1312,10 +1332,7 @@ async def qr_session_status(request: Request, db: AsyncSession = Depends(get_db)
     Stored on the channel so the desktop app can show "Session active" or
     "Disconnected" without holding a socket open to the bridge itself.
     """
-    if (
-        not settings.wa_qr_shared_secret
-        or request.headers.get("X-PingPulse-Bridge") != settings.wa_qr_shared_secret
-    ):
+    if not _bridge_authorised(request):
         return Response(status_code=403)
 
     body = await request.json()

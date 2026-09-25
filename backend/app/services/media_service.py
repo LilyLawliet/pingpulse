@@ -10,16 +10,73 @@ reachable — either a supplier CDN link or one of our own stored files.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import mimetypes
+import socket
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _is_public_host(host: str) -> bool:
+    """Whether a hostname resolves only to public addresses.
+
+    The inbound fetch downloads a URL and follows redirects, and this service
+    shares a network with Redis, Postgres and the WhatsApp bridge. A URL that
+    resolved to one of those - or to the cloud metadata endpoint - would turn
+    "save the customer's photo" into a request to internal infrastructure. So
+    every address a host resolves to is checked, and a single private one is
+    enough to refuse the whole host: a name that returns one public and one
+    loopback address is the shape of exactly this attack.
+
+    Fails closed. A name that will not resolve is not fetched.
+    """
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError, ValueError):
+        return False
+
+    for info in infos:
+        raw = info[4][0].split("%")[0]  # drop any zone id
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError:
+            return False
+        if (
+            address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_reserved
+            or address.is_multicast
+            or address.is_unspecified
+        ):
+            return False
+    return bool(infos)
+
+
+def _fetchable(url: str) -> bool:
+    """Whether this URL is one we will fetch at all.
+
+    http/https only - no file://, no ftp:// reaching for the local disk - and
+    a host that lives on the public internet rather than beside us on the
+    network.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    return _is_public_host(parsed.hostname or "")
 
 # WhatsApp will not fetch an arbitrary file; keep to what it renders inline.
 ALLOWED_TYPES = {
@@ -68,14 +125,34 @@ async def download_inbound(url: str, content_type: str = "") -> str | None:
     if not url:
         return None
 
+    if not _fetchable(url):
+        # Not http(s), or a host that resolves onto our own network. A
+        # customer's photo lives on a CDN; a request aimed at redis:6379 or
+        # the metadata endpoint does not.
+        logger.warning("refusing to fetch inbound media from a non-public URL")
+        return None
+
     auth = None
     if "twilio.com" in url and settings.twilio_account_sid:
         # Twilio media requires the account credentials to fetch.
         auth = (settings.twilio_account_sid, settings.twilio_auth_token)
 
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        # Redirects are followed by hand so each hop is re-checked. Left to the
+        # client, a public URL answering 302 -> http://169.254.169.254/ would
+        # sail straight through the check above, which only ever saw the first
+        # URL.
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
             response = await client.get(url, auth=auth)
+            for _ in range(5):
+                if response.status_code not in (301, 302, 303, 307, 308):
+                    break
+                location = response.headers.get("location", "")
+                nxt = str(httpx.URL(response.url).join(location))
+                if not _fetchable(nxt):
+                    logger.warning("refusing an inbound media redirect to a non-public URL")
+                    return None
+                response = await client.get(nxt, auth=auth)
             response.raise_for_status()
             payload = response.content
             if len(payload) > MAX_BYTES:
