@@ -381,9 +381,9 @@ open to the public, and a bound on how much configuration one account can
 store. None of it changes your afternoon, which is why it is at the bottom of
 this list.
 
-> One thing we have not done yet: the **What's new** panel inside the app
-> still ends at release 1.3.4. Everything in this section is newer than that
-> and is not listed there yet.
+All of this is now listed in the **What's new** panel inside the app as well,
+under releases 1.3.9, 1.4.0 and 1.4.3 — so you can read it where you work
+rather than only here.
 
 ---
 
