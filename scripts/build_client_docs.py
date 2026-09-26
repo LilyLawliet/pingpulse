@@ -54,6 +54,14 @@ DOCUMENTS = {
             "Read alongside What Changed, and How to Use It"
         ),
     },
+    "PingPulse_User_Guide": {
+        "title": "The Guide",
+        "lede": "Every screen, what it is for, and what to put in it.",
+        "meta": (
+            "Release 1.4.3 &nbsp;·&nbsp; 26 September 2026 &nbsp;·&nbsp; "
+            "Screenshots from a demonstration account"
+        ),
+    },
     "PingPulse_Whats_New": {
         "title": "What Changed,<br>and How to Use It",
         "lede": "Everything added in 1.3.x, and the order to set it up in.",
