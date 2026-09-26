@@ -48,7 +48,7 @@ def _args(**overrides) -> argparse.Namespace:
         name="Test Retail", preset="retail", prompt=None, tone=None,
         currency="AED", language="en", price_list=None, domain=None,
         knowledge=None, whatsapp_number=None, twilio_sid="", twilio_token="",
-        days=180, months=12, public_url="https://example.invalid",
+        days=180, months=12, public_url="https://example.invalid", seats=3,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -134,6 +134,41 @@ async def test_the_token_is_bound_to_that_organization(provision):
     assert token.is_active is True
     assert token.user_id == member.user_id
     assert member.role == "OWNER"
+
+
+@needs_script
+async def test_the_licence_is_sized_to_the_team(provision):
+    """A licence covers one person and their team. Each machine claims a seat
+    and the next one is refused, so a number set too low locks somebody out on
+    their first morning - and the failure is a 403 that says nothing about
+    seats, which is a bad morning to debug."""
+    from app.models import AccessToken
+
+    module, factory = provision
+    await module.run(_args(seats=5))
+
+    async with factory() as session:
+        token = (await session.execute(select(AccessToken))).scalar_one()
+
+    assert token.max_devices == 5
+
+
+@needs_script
+async def test_a_caller_that_names_no_seats_still_gets_a_licence(provision):
+    """This is driven as a library as well as from the command line, and an
+    args object built without the newest flag must not fail at the last step -
+    after the organization has already been created."""
+    from app.models import AccessToken
+
+    module, factory = provision
+    args = _args()
+    del args.seats
+    await module.run(args)
+
+    async with factory() as session:
+        token = (await session.execute(select(AccessToken))).scalar_one()
+
+    assert token.max_devices == module.DEFAULT_SEATS
 
 
 # --------------------------------------------------------- refusing nonsense

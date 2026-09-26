@@ -124,17 +124,45 @@ async def test_a_redis_outage_lets_traffic_through(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_an_unreachable_redis_does_not_refuse_the_request(monkeypatch, client):
-    """The same thing end to end: the middleware sees None and lets it pass."""
+async def test_an_unreachable_redis_does_not_refuse_the_request(monkeypatch, org_a):
+    """The same thing end to end: the middleware sees None and lets it pass.
+
+    On a path that is actually counted. The first version of this asked
+    /health, which is on the exempt list - so it never reached the limiter at
+    all and would have passed just as happily with fail-open broken. It also
+    dragged in the health endpoint's database probe, which talks to the real
+    configured database rather than the test one, so it failed on any machine
+    where that was not running. Neither had anything to do with rate limiting.
+    """
 
     def explode(*args, **kwargs):
         raise ConnectionError("redis is gone")
 
     monkeypatch.setattr(rate_limit.aioredis, "from_url", explode)
     monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    monkeypatch.setattr(rate_limit, "_breaker_open_until", 0.0)
 
-    response = await client.get("/health")
+    response = await org_a.get("/api/v1/agent-config")
+    assert response.status_code != 429
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_the_exempt_list_is_what_actually_skips_the_limiter(monkeypatch, client):
+    """Belt and braces on the line above: prove the exemption is real, by
+    counting how often the limiter is consulted rather than trusting a status
+    code that several other things could have produced."""
+    asked: list[str] = []
+
+    async def counting(key):
+        asked.append(key)
+        return 1
+
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    monkeypatch.setattr(rate_limit, "_count", counting)
+
+    await client.post("/api/v1/whatsapp/webhook", data={"Nonsense": "x"})
+    assert asked == [], "an exempt path must never be counted"
 
 
 # ============================================================ counting

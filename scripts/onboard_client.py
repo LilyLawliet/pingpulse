@@ -96,6 +96,11 @@ price quoted on WhatsApp is one the customer will hold the shop to."""
 
 PRESETS = {"retail": RETAIL_PROMPT, "general": DEFAULT_PROMPT}
 
+# How many machines a licence covers when nobody says. Named here rather than
+# written twice, so the flag's default and the fallback used when this is
+# driven as a library cannot drift apart.
+DEFAULT_SEATS = 3
+
 
 def slugify(name: str) -> str:
     return "".join(c.lower() if c.isalnum() else "-" for c in name.strip()).strip("-") or "client"
@@ -289,11 +294,11 @@ async def issue_token(session, organization: Organization, args) -> tuple[str, d
             expires_at=expires_at,
             is_active=True,
             user_id=user.id,
-            max_devices=args.seats,
+            max_devices=getattr(args, "seats", DEFAULT_SEATS),
         )
     )
     await session.flush()
-    ok(f"token valid until {expires_at:%Y-%m-%d}, {args.seats} seat(s)")
+    ok(f"token valid until {expires_at:%Y-%m-%d}, {getattr(args, 'seats', DEFAULT_SEATS)} seat(s)")
     return token, expires_at
 
 
@@ -446,7 +451,7 @@ def main() -> int:
     # claims a seat, and once they are gone the next machine is refused - so a
     # number set too low locks somebody out on their first morning.
     parser.add_argument(
-        "--seats", type=int, default=3,
+        "--seats", type=int, default=DEFAULT_SEATS,
         help="Machines allowed to use this token (default 3)",
     )
     parser.add_argument(
