@@ -289,10 +289,11 @@ async def issue_token(session, organization: Organization, args) -> tuple[str, d
             expires_at=expires_at,
             is_active=True,
             user_id=user.id,
+            max_devices=args.seats,
         )
     )
     await session.flush()
-    ok(f"token valid until {expires_at:%Y-%m-%d}")
+    ok(f"token valid until {expires_at:%Y-%m-%d}, {args.seats} seat(s)")
     return token, expires_at
 
 
@@ -441,6 +442,13 @@ def main() -> int:
 
     parser.add_argument("--days", type=int, default=180, help="Token validity, default 180")
     parser.add_argument("--months", type=int, help="Token validity in months")
+    # The size of the team this licence covers. Each machine that signs in
+    # claims a seat, and once they are gone the next machine is refused - so a
+    # number set too low locks somebody out on their first morning.
+    parser.add_argument(
+        "--seats", type=int, default=3,
+        help="Machines allowed to use this token (default 3)",
+    )
     parser.add_argument(
         "--public-url",
         default="https://pingpulse.duckdns.org",

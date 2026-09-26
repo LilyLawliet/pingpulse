@@ -247,6 +247,11 @@ def publish_web() -> bool:
         f"sudo cp -r {REMOTE_DIST}/. {REMOTE_WEB}/ && "
         f"sudo chmod -R a+rX {REMOTE_WEB} && "
         f"sudo python3 /tmp/prune_web_assets.py {REMOTE_WEB} && "
+        # And the checkout it was copied from. The tarball is unpacked over
+        # the top of that too, so it keeps every bundle it has ever held - and
+        # deploy.sh copies it back over the served directory, which quietly
+        # undoes the prune above on the next backend deploy.
+        f"sudo python3 /tmp/prune_web_assets.py {REMOTE_DIST} && "
         "rm -f /tmp/dashboard.tar.gz /tmp/prune_web_assets.py"
     )
     try:
