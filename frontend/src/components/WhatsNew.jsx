@@ -12,6 +12,105 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.4.3',
+    date: '24 September 2026',
+    items: [
+      {
+        title: 'Your appointments, in the calendar you already use',
+        body:
+          'In Hours and booking there is now a calendar link. Subscribe to it once from ' +
+          'your phone and every appointment your agent takes shows up beside everything ' +
+          'else in your day. There is no account to connect and nothing to install, and ' +
+          'nothing on your phone can move or cancel a booking by accident — the feed only ' +
+          'ever reads.',
+      },
+      {
+        title: 'It tells you when it cannot book',
+        body:
+          'Booking needs your timezone and your opening hours, and until both are set it ' +
+          'quietly does nothing. That is how a business ran for months taking no ' +
+          'appointments at all with nothing anywhere saying so. The hours screen now states ' +
+          'plainly whether your agent can book and what is stopping it, and until it can, ' +
+          'booking requests come to you instead of a link that books nothing.',
+      },
+      {
+        title: 'Asking for a person works now',
+        body:
+          'There were a lot of ways of asking for a human that it talked straight past — ' +
+          'including the plain ones. It hears them now, stops, and tells you. It will still ' +
+          'offer to help first, because "I can check that for you" is an honest offer and ' +
+          'not a refusal to fetch somebody.',
+      },
+    ],
+  },
+  {
+    version: '1.4.0',
+    date: '22 September 2026',
+    items: [
+      {
+        title: 'Setting up is a list, in order',
+        body:
+          'Settings was one long box you scrolled, with nothing saying which parts mattered. ' +
+          'It is a page now: eight steps in the order they need doing, five required and ' +
+          'three optional, each saying what it is for and what breaks if you skip it. The ' +
+          'ticks come from the real system, so a business you set up on another machine ' +
+          'already shows as done here.',
+      },
+      {
+        title: 'It can read your opening hours off your own price list',
+        body:
+          'Upload the documents you already have and, if your hours are written in one of ' +
+          'them, it offers to fill them in. It is a suggestion with the times shown to you, ' +
+          'never a silent change — and several documents now add up instead of replacing ' +
+          'each other.',
+      },
+      {
+        title: 'A wrong setting can be undone',
+        body:
+          'Three things no document can tell us — what you never promise, how you handle ' +
+          'pricing, and when to fetch a person — now start from sensible drafts for your ' +
+          'trade, shown before they apply. Anything you change can be stepped back. And a ' +
+          'setting that would quietly have done nothing is refused with a reason instead of ' +
+          'being accepted and ignored.',
+      },
+    ],
+  },
+  {
+    version: '1.3.9',
+    date: '22 September 2026',
+    items: [
+      {
+        title: 'It only offers times it can actually keep',
+        body:
+          'Appointments are offered from your real opening hours, in your timezone, and it ' +
+          'will only book a slot it already offered. Every booking is written down as a ' +
+          'record rather than living in the conversation.',
+      },
+      {
+        title: 'One answer per message. One follow-up per follow-up.',
+        body:
+          'A customer once received forty-four identical nudges in a row, because restarts ' +
+          'had been stacking copies of the same reminder to all release at once. A ' +
+          'follow-up is now claimed before it is sent, so however many times it is handed ' +
+          'over, one message goes out.',
+      },
+      {
+        title: 'Nobody is messaged at three in the morning',
+        body:
+          'Follow-ups wait for a civilised hour. A reminder that arrives in the night is ' +
+          'not a reminder, it is a reason to block the number.',
+      },
+      {
+        title: 'It never says something happened unless it did',
+        body:
+          'No confirmed booking, no promised callback, no price it cannot point at. If it ' +
+          'cannot check, it says so or it hands the conversation to you. That is enforced ' +
+          'by the software rather than asked of the agent, which is the difference between ' +
+          'a promise and a setting.',
+      },
+    ],
+  },
+  {
     version: '1.3.4',
     date: '16 September 2026',
     items: [
