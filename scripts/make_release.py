@@ -236,17 +236,24 @@ def publish_web() -> bool:
             if path.is_file():
                 tar.add(path, arcname=str(path.relative_to(DIST)).replace("\\", "/"))
 
+    # Copied over the top, then pruned - in that order. The prune reads the
+    # index.html that was just put in place to decide what is live, and keeps
+    # the builds before it so a page load already in flight can still fetch
+    # what it was promised. Without it this directory only ever grew: sixteen
+    # releases had left 46 files and 7.3 MB behind, two of them being served.
     remote = (
         f"sudo mkdir -p {REMOTE_WEB} {REMOTE_DIST} && "
         f"sudo tar -xzf /tmp/dashboard.tar.gz -C {REMOTE_DIST} && "
         f"sudo cp -r {REMOTE_DIST}/. {REMOTE_WEB}/ && "
         f"sudo chmod -R a+rX {REMOTE_WEB} && "
-        "rm -f /tmp/dashboard.tar.gz"
+        f"sudo python3 /tmp/prune_web_assets.py {REMOTE_WEB} && "
+        "rm -f /tmp/dashboard.tar.gz /tmp/prune_web_assets.py"
     )
     try:
         run([
             GCLOUD, "compute", "scp", str(archive),
-            f"{VM_NAME}:/tmp/dashboard.tar.gz",
+            str(ROOT / "scripts" / "prune_web_assets.py"),
+            f"{VM_NAME}:/tmp/",
             f"--zone={VM_ZONE}", f"--project={GCP_PROJECT}", "--quiet",
         ])
         run([
