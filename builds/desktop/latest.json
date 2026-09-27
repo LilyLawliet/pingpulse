@@ -1,11 +1,11 @@
 {
-  "version": "1.4.6",
-  "notes": "A redesigned dashboard: navigation moves to a sidebar, everything that needs you is gathered under Needs attention, and the whole thing comes in light as well as dark.",
-  "pub_date": "2026-09-27T17:25:46+00:00",
+  "version": "1.4.7",
+  "notes": "Setup now says which steps your agent cannot run without - your business, your prices, your timezone and your WhatsApp number - and holds the inbox shut until they are done, telling you exactly what is missing. Your timezone and your calendar link are steps of their own, and a phone that drops offline is now reported rather than left to be noticed.",
+  "pub_date": "2026-09-27T19:35:36+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMnpGZlJoZmFrMFhkL1FGWU5kbGQ2UXkwS1Vwb0dxWUlXQUtnem5kQUNMWVZBdW9SYXZHV2FzNTJIak4vQUJOaG9xTDlKZGhPZTM2YVA1NG9JSHRLZ1FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTI5OTQ1CWZpbGU6UGluZ1B1bHNlXzEuNC42X3g2NC1zZXR1cC5leGUKMjM5NEszcEtBeFkvc0J5UXdWSlFjckdwOEN3S2dDMWlmTFJlZlBzN2hZL0xyMDlhNm5lTExXeDk4cUd3M1kwS3FxRVQyL24zY2JJNklaQk5weStMQkE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.6_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjBmb3Fja21rbVRzK0JrT3lyMTByZ3RDa2plREtHdnQvNjJJMktzalhOSGV6WlNxZ1d3ampFV1U3N1pDQTUvclpEQ1kxUDhBK2w2dXlYTGJicEVINmc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTM3NzM1CWZpbGU6UGluZ1B1bHNlXzEuNC43X3g2NC1zZXR1cC5leGUKc1dmemJsdUJjdVJXNWZmQnhPWjlQUTRDWUs5ZzZRbWN0bUUwazhkaHBDZmxkcVNNWXluSWllc0NjRVA4ZjZvWmUyWGRXK2tYamJpc212dnUzTTVCRHc9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.7_x64-setup.exe"
     }
   }
 }
