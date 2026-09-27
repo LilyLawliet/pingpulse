@@ -14,6 +14,7 @@ import {
 import { clockOf, contactLabel, initialsOf, isPlaceholderNumber, prettyPhone, stageChip, stageLabel } from '../format.js'
 import { mediaUrl } from '../backend.js'
 import { api } from '../api.js'
+import { Avatar } from './ui.jsx'
 
 /** Our own stored media is loaded from wherever the backend is.
  *
@@ -117,28 +118,28 @@ function Bubble({ message }) {
   return (
     <div className={`flex animate-land ${fromCustomer ? 'justify-start' : 'justify-end'}`}>
       <div
-        className={`max-w-[46ch] rounded-2xl px-3.5 py-2.5 ${
+        className={`max-w-[min(52ch,85%)] rounded-2xl px-4 py-2.5 shadow-card ${
           fromCustomer
-            ? 'rounded-tl-sm bg-panel-2 text-ink'
+            ? 'rounded-bl-md border border-edge bg-panel text-ink'
             : fromOperator
-              ? 'rounded-tr-sm bg-platinum/10 text-ink ring-1 ring-inset ring-platinum/25'
-              : 'rounded-tr-sm bg-accent/12 text-ink ring-1 ring-inset ring-accent/25'
+              ? 'rounded-br-md bg-customer/10 text-ink ring-1 ring-inset ring-customer/25'
+              : 'rounded-br-md bg-accent/10 text-ink ring-1 ring-inset ring-accent/20'
         }`}
       >
         {fromOperator && (
-          <span className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-platinum">
-            <User size={10} /> You
+          <span className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-customer">
+            <User size={11} /> You
           </span>
         )}
         {!fromCustomer && !fromOperator && (
-          <span className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-accent">
-            <Sparkles size={10} /> AI agent
+          <span className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-accent">
+            <Sparkles size={11} /> AI agent
           </span>
         )}
         {/* `break-words` alone does not break a 150-character URL, which is
             one unbreakable token; `anywhere` is what stops it overflowing the
             bubble and scrolling the entire board sideways. */}
-        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[13px] leading-relaxed">
+        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-relaxed">
           {withLinks(message.content)}
         </p>
 
@@ -161,7 +162,7 @@ function Bubble({ message }) {
           </div>
         )}
         <span
-          className={`mt-1.5 flex items-center gap-1 font-mono text-[10px] ${
+          className={`mt-1 flex items-center gap-1 text-[11px] tabular-nums ${
             fromCustomer ? 'text-faint' : 'justify-end text-faint'
           }`}
         >
@@ -176,14 +177,14 @@ function Bubble({ message }) {
 function Composing() {
   return (
     <div className="flex animate-land justify-end">
-      <div className="flex items-center gap-2 rounded-2xl rounded-tr-sm bg-accent/8 px-3.5 py-3 ring-1 ring-inset ring-accent/20">
+      <div className="flex items-center gap-2 rounded-2xl rounded-br-md bg-accent/10 px-4 py-3 ring-1 ring-inset ring-accent/20">
         <Bot size={13} className="text-accent" />
         <span className="flex gap-1">
           <span className="dot-1 h-1.5 w-1.5 rounded-full bg-accent" />
           <span className="dot-2 h-1.5 w-1.5 rounded-full bg-accent" />
           <span className="dot-3 h-1.5 w-1.5 rounded-full bg-accent" />
         </span>
-        <span className="text-[11px] text-dim">writing a reply</span>
+        <span className="text-[12px] text-dim">writing a reply</span>
       </div>
     </div>
   )
@@ -196,19 +197,19 @@ function PhotoRead({ contact }) {
 
   const bits = [seen.colour, seen.pattern, seen.category, seen.fabric].filter(Boolean)
   return (
-    <div className="border-b border-edge bg-panel-2/40 px-4 py-2">
-      <p className="eyebrow mb-1">Read from their photo</p>
+    <div className="border-b border-edge px-4 py-2.5">
+      <p className="eyebrow mb-1.5">Read from their photo</p>
       <div className="flex flex-wrap items-center gap-1.5">
         {bits.map((bit) => (
           <span
             key={bit}
-            className="rounded-md bg-accent/12 px-2 py-0.5 text-[10px] capitalize text-accent"
+            className="rounded-md bg-accent/12 px-2 py-0.5 text-[11px] capitalize text-accent"
           >
             {bit}
           </span>
         ))}
         {seen.description && (
-          <span className="text-[11px] text-dim">{seen.description}</span>
+          <span className="text-[12px] text-dim">{seen.description}</span>
         )}
       </div>
     </div>
@@ -241,11 +242,11 @@ function KnownFacts({ contact }) {
   if (facts.length === 0) return null
 
   return (
-    <div className="ml-3 hidden flex-wrap items-center gap-1.5 lg:flex">
+    <div className="ml-2 hidden min-w-0 flex-wrap items-center gap-1.5 xl:flex">
       {facts.map((fact) => (
         <span
           key={fact}
-          className="rounded-md bg-panel-2 px-2 py-0.5 text-[10px] capitalize text-dim"
+          className="rounded-full bg-panel-2 px-2.5 py-0.5 text-[11px] font-medium capitalize text-dim"
           title="Remembered from the conversation"
         >
           {fact}
@@ -310,7 +311,7 @@ function FollowUpControl({ contact, onChanged }) {
     const due = new Date(pending)
     const valid = !Number.isNaN(due.getTime())
     return (
-      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+      <div className="flex flex-wrap items-center gap-2 text-[12px]">
         <span className="flex items-center gap-1.5 rounded-md bg-accent/12 px-2 py-1 text-accent">
           <AlarmClock size={12} />
           Follow-up {valid ? `at ${due.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'scheduled'}
@@ -341,21 +342,21 @@ function FollowUpControl({ contact, onChanged }) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex items-center gap-1.5 rounded-md border border-edge px-2 py-1 text-[11px] text-dim transition-colors hover:border-accent/40 hover:text-accent"
+          className="btn-secondary px-3 py-1.5 text-xs"
         >
-          <AlarmClock size={12} /> Schedule a follow-up
+          <AlarmClock size={14} /> Schedule follow-up
         </button>
-        {error && <span className="text-[11px] text-crit">{error}</span>}
+        {error && <span className="text-[12px] text-crit">{error}</span>}
       </div>
     )
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+    <div className="flex flex-wrap items-center gap-2 text-[12px]">
       <select
         value={minutes}
         onChange={(e) => setMinutes(e.target.value)}
-        className="rounded-md border border-edge bg-bg px-2 py-1 text-[11px] text-ink"
+        className="rounded-lg border border-edge bg-panel px-2.5 py-1.5 text-xs text-ink"
       >
         <option value={2}>in 2 minutes</option>
         <option value={15}>in 15 minutes</option>
@@ -367,13 +368,13 @@ function FollowUpControl({ contact, onChanged }) {
         value={message}
         onChange={(e) => setMessage(e.target.value)}
         placeholder="Leave empty to use the agent's own wording"
-        className="min-w-0 flex-1 rounded-md border border-edge bg-bg px-2 py-1 text-[11px] text-ink placeholder:text-faint"
+        className="min-w-0 flex-1 rounded-lg border border-edge bg-panel px-2.5 py-1.5 text-xs text-ink placeholder:text-faint focus:border-accent/60 focus:outline-none"
       />
       <button
         type="button"
         onClick={schedule}
         disabled={busy}
-        className="rounded-md bg-accent px-2.5 py-1 text-[11px] font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
+        className="btn-primary px-3 py-1.5 text-xs"
       >
         {busy ? 'Scheduling…' : 'Schedule'}
       </button>
@@ -425,11 +426,11 @@ export default function ConversationThread({
     return (
       <section className={`panel flex-1 items-center justify-center ${className}`}>
         <div className="max-w-xs px-6 text-center">
-          <span className="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-full bg-panel-2">
-            <Sparkles size={18} className="text-accent" />
+          <span className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-accent/10">
+            <Sparkles size={24} className="text-accent" />
           </span>
-          <p className="text-sm font-medium text-ink">Your agent is on duty</p>
-          <p className="mt-1 text-xs text-dim">
+          <p className="text-base font-semibold text-ink">Your agent is on duty</p>
+          <p className="mt-1.5 text-sm leading-relaxed text-dim">
             Every WhatsApp message gets an instant, on-brand reply. Pick a conversation to read
             along.
           </p>
@@ -446,28 +447,33 @@ export default function ConversationThread({
             type="button"
             onClick={onBack}
             aria-label="Back to conversations"
-            className="-ml-1 rounded-lg p-1 text-dim transition-colors hover:text-ink lg:hidden"
+            className="-ml-1.5 rounded-lg p-1.5 text-dim transition-colors hover:bg-panel-2 hover:text-ink lg:hidden"
           >
-            <ChevronLeft size={16} />
+            <ChevronLeft size={20} />
           </button>
         )}
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-edge text-2xs font-semibold text-dim">
-          {initialsOf(contact.name, contact.phone_number)}
-        </span>
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold text-ink">
-            {contactLabel(contact)}
-          </h2>
-          <p className="font-mono text-2xs text-faint">
-            {isPlaceholderNumber(contact)
-              ? 'number not shared by WhatsApp'
-              : prettyPhone(contact.phone_number)}
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={onOpenProfile}
+          className="flex min-w-0 items-center gap-3 rounded-xl text-left"
+          title="Lead details"
+        >
+          <Avatar seed={contact.id} text={initialsOf(contact.name, contact.phone_number)} />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-ink hover:underline">
+              {contactLabel(contact)}
+            </span>
+            <span className="block text-2xs tabular-nums text-faint">
+              {isPlaceholderNumber(contact)
+                ? 'number not shared by WhatsApp'
+                : prettyPhone(contact.phone_number)}
+            </span>
+          </span>
+        </button>
         <KnownFacts contact={contact} />
 
         <span
-          className={`ml-auto rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider ${
+          className={`ml-auto hidden shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold sm:inline ${
             stageChip(stages, contact.pipeline_stage)
           }`}
         >
@@ -480,9 +486,9 @@ export default function ConversationThread({
         {contact.ai_enabled === false && (
           <span
             title="You have this conversation — the agent is not replying"
-            className="rounded-full bg-warn/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-warn"
+            className="shrink-0 rounded-full bg-warn/15 px-2.5 py-1 text-[11px] font-semibold text-warn max-sm:ml-auto"
           >
-            Yours
+            You&rsquo;re replying
           </span>
         )}
 
@@ -491,16 +497,17 @@ export default function ConversationThread({
             type="button"
             onClick={onOpenProfile}
             title="Lead details"
-            className="rounded-lg border border-edge p-1.5 text-dim transition-colors hover:border-edge-hi hover:text-ink"
+            className="btn-secondary shrink-0 px-2.5 py-1.5 text-xs max-sm:ml-auto"
           >
-            <UserSquare2 size={13} />
+            <UserSquare2 size={14} />
+            <span className="hidden xl:inline">Details</span>
           </button>
         )}
       </header>
 
       <PhotoRead contact={contact} />
 
-      <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 py-4">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-panel-2/40 px-3 py-5 sm:px-6">
         {messages.map((message) => (
           <Bubble key={message.id} message={message} />
         ))}
@@ -508,11 +515,13 @@ export default function ConversationThread({
         <div ref={endRef} />
       </div>
 
-      <footer className="shrink-0 space-y-2 border-t border-edge px-4 py-2.5">
+      <footer className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-t border-edge px-4 py-3">
         <FollowUpControl contact={contact} onChanged={onChanged} />
-        <p className="flex items-center gap-1.5 text-[11px] text-faint">
-          <Bot size={12} className="text-accent" />
-          Replies are sent automatically — no one has to be at a desk.
+        <p className="ml-auto flex items-center gap-1.5 text-xs text-faint">
+          <Bot size={14} className="text-accent" />
+          {contact.ai_enabled === false
+            ? 'The agent is paused here. Resume it from Details.'
+            : 'The agent replies automatically.'}
         </p>
       </footer>
     </section>

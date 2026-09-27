@@ -57,7 +57,7 @@ export default function ErrorLog() {
   return (
     <section className="space-y-2.5">
       <header className="flex items-start gap-2.5">
-        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-warn/12 ring-1 ring-inset ring-warn/25">
+        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-xl bg-warn/10 ring-1 ring-inset ring-warn/20">
           <CircleAlert size={14} className="text-warn" />
         </span>
         <div className="min-w-0">
@@ -77,10 +77,10 @@ export default function ErrorLog() {
           {errors.map((row) => (
             <div key={row.id} className="rounded-lg border border-edge bg-panel-2/40 p-2.5">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span className="rounded bg-warn/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warn">
+                <span className="rounded bg-warn/12 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-warn">
                   {CATEGORY[row.category] || row.category}
                 </span>
-                <span className="font-mono text-[10px] text-faint">
+                <span className="font-mono text-[11px] text-faint">
                   {new Date(row.created_at).toLocaleString()}
                 </span>
                 <button
@@ -112,7 +112,7 @@ export default function ErrorLog() {
                     {expanded[row.id] ? 'Hide details' : 'Details'}
                   </button>
                   {expanded[row.id] && (
-                    <pre className="mt-1.5 max-h-40 overflow-auto rounded bg-bg px-2 py-1.5 font-mono text-[10px] leading-relaxed text-dim">
+                    <pre className="mt-1.5 max-h-40 overflow-auto rounded bg-bg px-2 py-1.5 font-mono text-[11px] leading-relaxed text-dim">
                       {row.detail}
                     </pre>
                   )}

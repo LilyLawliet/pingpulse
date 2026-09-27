@@ -2,25 +2,32 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BellOff,
   ChartNoAxesColumn,
+  ChevronRight,
   CircleAlert,
   Columns3,
   FlaskConical,
   Inbox,
   LogOut,
+  Menu,
+  MessagesSquare,
+  Monitor,
+  Moon,
   Settings,
   Sparkles,
+  Sun,
+  X,
 } from 'lucide-react'
 import useMonitorSocket from './useMonitorSocket.js'
 import { api, auth } from './api.js'
 import { subscribeQuietly } from './alerts.js'
 import { DEFAULT_STAGES } from './format.js'
+import { useTheme } from './theme.js'
 import SignIn from './components/SignIn.jsx'
 import ConversationList from './components/ConversationList.jsx'
 import ConversationThread from './components/ConversationThread.jsx'
-import PipelineBoard from './components/PipelineBoard.jsx'
-import MetricStrip from './components/MetricStrip.jsx'
+import MetricStrip, { MetricWindow } from './components/MetricStrip.jsx'
 import OrgSelector from './components/OrgSelector.jsx'
-import SettingsPage from './components/SettingsPage.jsx'
+import SettingsPage, { REQUIRED_STEPS, readSetup } from './components/SettingsPage.jsx'
 import PulseLine from './components/PulseLine.jsx'
 import BrandMark from './components/BrandMark.jsx'
 import WhatsNew, { hasUnseenUpgrades } from './components/WhatsNew.jsx'
@@ -29,47 +36,25 @@ import LeadProfileDrawer from './components/LeadProfileDrawer.jsx'
 import SetupChecklist from './components/SetupChecklist.jsx'
 import ConnectionStatus from './components/ConnectionStatus.jsx'
 import AgentSandbox from './components/AgentSandbox.jsx'
-import InboxFilters from './components/InboxFilters.jsx'
 import Analytics from './components/Analytics.jsx'
 import KanbanBoard from './components/KanbanBoard.jsx'
+import { PageBoundary } from './components/ui.jsx'
 
 /**
- * Pane switcher, phones only.
+ * The places you can go. One list drives the sidebar on a desktop and the tab
+ * bar on a phone, so the two can never disagree about what exists.
  *
- * Hidden from `lg` up, where all three panes are on screen at once and a
- * switcher would be a control that does nothing. "Conversation" only appears
- * once there is one open, so it is never a tab leading to an empty panel.
+ * These used to be five full-screen overlays opened from a row of a dozen
+ * buttons in the header, which gave no sense of where you were or how to get
+ * back. They are pages now, and the one you are on is always highlighted.
  */
-function PaneTabs({ pane, onPick, waiting }) {
-  const tabs = [
-    { id: 'list', label: 'Chats', count: waiting },
-    ...(pane === 'thread' ? [{ id: 'thread', label: 'Conversation' }] : []),
-    { id: 'pipeline', label: 'Pipeline' },
-  ]
-
-  return (
-    <div className="flex gap-1 rounded-xl border border-edge bg-panel p-1 lg:hidden">
-      {tabs.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          onClick={() => onPick(tab.id)}
-          aria-current={pane === tab.id ? 'page' : undefined}
-          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12px] font-semibold transition-colors ${
-            pane === tab.id
-              ? 'bg-accent/12 text-accent ring-1 ring-inset ring-accent/25'
-              : 'text-dim hover:text-ink'
-          }`}
-        >
-          {tab.label}
-          {tab.count ? (
-            <span className="font-mono text-2xs text-faint">{tab.count}</span>
-          ) : null}
-        </button>
-      ))}
-    </div>
-  )
-}
+const VIEWS = [
+  { id: 'inbox', label: 'Inbox', short: 'Inbox', icon: MessagesSquare },
+  { id: 'board', label: 'Board', short: 'Board', icon: Columns3 },
+  { id: 'analytics', label: 'Analytics', short: 'Stats', icon: ChartNoAxesColumn },
+  { id: 'test', label: 'Test agent', short: 'Test', icon: FlaskConical },
+  { id: 'setup', label: 'Setup', short: 'Setup', icon: Settings },
+]
 
 /** Is anything narrowing the list right now? */
 function filtering(filters) {
@@ -78,32 +63,199 @@ function filtering(filters) {
   )
 }
 
-/**
- * A header link: an icon and the word for what it opens.
- *
- * The header was five bare icons. Each one opens a different full-screen
- * panel, and the only explanation was a `title` - which is a tooltip, which is
- * not an explanation for anybody who does not already know what they are
- * looking for.
- */
-function NavLink({ icon: Icon, label, onClick, badge = false, muted = false }) {
+/** Light, dark, or whatever the device says. */
+function ThemeSwitch() {
+  const { choice, pick } = useTheme()
+  const options = [
+    ['light', Sun, 'Light'],
+    ['dark', Moon, 'Dark'],
+    ['system', Monitor, 'Match device'],
+  ]
   return (
-    <button
-      onClick={onClick}
-      title={label}
-      className={`relative flex items-center gap-1.5 rounded-lg border border-edge px-2 py-1.5 text-[11px] font-semibold transition-colors hover:border-edge-hi hover:text-ink sm:px-2.5 ${
-        muted ? 'text-faint' : 'text-dim'
-      }`}
-    >
-      <Icon size={13} className="shrink-0" />
-      <span className="hidden sm:inline">{label}</span>
-      {badge && (
-        <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-panel" />
-      )}
-    </button>
+    <div className="seg w-full" role="group" aria-label="Theme">
+      {options.map(([key, Icon, label]) => (
+        <button
+          key={key}
+          type="button"
+          title={label}
+          aria-label={label}
+          aria-pressed={choice === key}
+          onClick={() => pick(key)}
+          className="seg-item flex flex-1 justify-center py-1.5"
+        >
+          <Icon size={14} />
+        </button>
+      ))}
+    </div>
   )
 }
 
+/**
+ * Everything that needs a person, in one place.
+ *
+ * These were four coloured pills in the header - "2 waiting", "Alerts off",
+ * "2 alerts missed" and a connection state - each the same size and shape as
+ * every navigation button beside them, so none of them read as urgent. They
+ * are rows now, each one saying what is wrong and taking you to the fix, and
+ * the block is absent entirely when nothing is.
+ */
+function Attention({ waiting, alertsReach, alertsLost, onProspects, onAlerts }) {
+  const items = []
+  if (alertsLost > 0) {
+    items.push({
+      key: 'lost',
+      icon: CircleAlert,
+      tone: 'text-crit bg-crit/10',
+      title: `${alertsLost} alert${alertsLost === 1 ? '' : 's'} missed`,
+      body: 'They could not be delivered. See why.',
+      onClick: onAlerts,
+    })
+  }
+  if (waiting > 0) {
+    items.push({
+      key: 'waiting',
+      icon: Inbox,
+      tone: 'text-warn bg-warn/10',
+      title: `${waiting} never answered`,
+      body: 'Messaged you and got no reply',
+      onClick: onProspects,
+    })
+  }
+  if (alertsReach === false) {
+    items.push({
+      key: 'off',
+      icon: BellOff,
+      tone: 'text-warn bg-warn/10',
+      title: 'Alerts are off',
+      body: 'Nothing reaches you while this is closed',
+      onClick: onAlerts,
+    })
+  }
+  if (items.length === 0) return null
+
+  return (
+    <div className="space-y-1">
+      <p className="eyebrow px-3 pb-1">Needs attention</p>
+      {items.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          onClick={item.onClick}
+          className="group flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-panel-2"
+        >
+          <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${item.tone}`}>
+            <item.icon size={15} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-ink">{item.title}</span>
+            <span className="block text-2xs leading-snug text-faint">{item.body}</span>
+          </span>
+          <ChevronRight size={14} className="shrink-0 text-faint group-hover:text-dim" />
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** The sidebar: who you are, where you can go, and what needs you. */
+function Sidebar({
+  view,
+  onView,
+  setupLeft,
+  connected,
+  beat,
+  unseen,
+  onWhatsNew,
+  onSignOut,
+  org,
+  attention,
+  onClose,
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto p-3">
+      <div className="flex items-center justify-between gap-2 px-2 pt-2">
+        <BrandMark size={34} />
+        {onClose && (
+          <button type="button" onClick={onClose} aria-label="Close menu" className="btn-ghost p-2">
+            <X size={18} />
+          </button>
+        )}
+      </div>
+
+      {org}
+
+      <nav className="space-y-0.5" aria-label="Main">
+        {VIEWS.map((item) => {
+          const current = view === item.id
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onView(item.id)}
+              aria-current={current ? 'page' : undefined}
+              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                current
+                  ? 'bg-accent/10 text-ink'
+                  : 'text-dim hover:bg-panel-2 hover:text-ink'
+              }`}
+            >
+              <item.icon size={18} className={current ? 'text-accent' : 'text-faint'} />
+              <span className="flex-1 text-left">{item.label}</span>
+              {item.id === 'setup' && setupLeft > 0 && (
+                <span
+                  className="rounded-full bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn"
+                  title={`${setupLeft} step${setupLeft === 1 ? '' : 's'} left`}
+                >
+                  {setupLeft} left
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </nav>
+
+      {attention}
+
+      <div className="mt-auto space-y-3">
+        <div className="space-y-2 rounded-2xl border border-edge bg-panel-2/50 p-3">
+          <div className="flex items-center gap-2">
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${
+                connected ? 'animate-breathe bg-accent' : 'bg-warn'
+              }`}
+            />
+            <span className={`text-xs font-semibold ${connected ? 'text-ink' : 'text-warn'}`}>
+              {connected ? 'Live' : 'Reconnecting…'}
+            </span>
+            <span className="ml-auto">
+              <PulseLine beat={beat} width={84} height={22} />
+            </span>
+          </div>
+          <ConnectionStatus placement="up" />
+        </div>
+
+        <ThemeSwitch />
+
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={onWhatsNew} className="btn-ghost relative flex-1 justify-start">
+            <Sparkles size={15} />
+            What&rsquo;s new
+            {unseen && <span className="ml-auto h-2 w-2 rounded-full bg-accent" />}
+          </button>
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="btn-ghost"
+            title="Sign out"
+            aria-label="Sign out"
+          >
+            <LogOut size={15} />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function App() {
   const [signedIn, setSignedIn] = useState(Boolean(auth.token))
@@ -133,21 +285,22 @@ function Dashboard({ onSignedOut }) {
     taken_over: false,
   })
   const [showDrawer, setShowDrawer] = useState(false)
-  const [showSandbox, setShowSandbox] = useState(false)
   const [window_, setWindow_] = useState('all')
+  // Which page is showing. Pages rather than overlays, so there is always a
+  // "you are here" and nothing to close to get back.
+  const [view, setView] = useState('inbox')
+  // Setup remounts on this, so "open alert settings" lands on that step even
+  // when Setup is already the page on screen.
+  const [setupStep, setSetupStep] = useState({ key: 'business', n: 0 })
+  const [setupLeft, setSetupLeft] = useState(0)
   /**
-   * Which pane a phone is showing. Three panes side by side is the right
-   * layout on a desktop and impossible on a 390px screen, so below `lg` they
-   * become one at a time — list, the conversation, or the pipeline. Above it
-   * the classes below are overridden and this is ignored entirely, so there is
-   * no second layout to keep in step.
+   * Which pane a phone is showing in the inbox: the list, or one
+   * conversation. From `lg` up both are on screen and this is ignored.
    */
   const [mobilePane, setMobilePane] = useState('list')
+  const [menuOpen, setMenuOpen] = useState(false)
   const [showUpgrades, setShowUpgrades] = useState(false)
   const [showProspects, setShowProspects] = useState(false)
-  const [showAnalytics, setShowAnalytics] = useState(false)
-  const [showBoard, setShowBoard] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
   // Null until we know. Shown only once we are sure nothing can reach
   // them, so the warning never flashes up during a normal load.
   const [alertsReach, setAlertsReach] = useState(null)
@@ -262,6 +415,48 @@ function Dashboard({ onSignedOut }) {
   useEffect(() => {
     countWaiting()
   }, [countWaiting, selectedOrg])
+
+  const onSetupProgress = useCallback((ready) => {
+    setSetupLeft(REQUIRED_STEPS.filter((key) => !ready[key]).length)
+  }, [])
+
+  useEffect(() => {
+    if (!selectedOrg) return
+    readSetup()
+      .then(({ next }) => onSetupProgress(next))
+      .catch(() => {})
+  }, [selectedOrg, onSetupProgress])
+
+  const go = useCallback((next) => {
+    setView(next)
+    setMenuOpen(false)
+    if (next === 'inbox') setMobilePane('list')
+  }, [])
+
+  const openSetup = useCallback((step = 'business') => {
+    setSetupStep((was) => ({ key: step, n: was.n + 1 }))
+    setView('setup')
+    setMenuOpen(false)
+  }, [])
+
+  // Escape closes whatever is on top, one layer at a time.
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key !== 'Escape') return
+      if (showProspects) setShowProspects(false)
+      else if (showUpgrades) setShowUpgrades(false)
+      else if (showDrawer) setShowDrawer(false)
+      else if (menuOpen) setMenuOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showProspects, showUpgrades, showDrawer, menuOpen])
+
+  const openConversation = useCallback((id) => {
+    setSelectedContact(id)
+    setView('inbox')
+    setMobilePane('thread')
+  }, [])
 
   useEffect(() => {
     loadContacts()
@@ -413,204 +608,237 @@ function Dashboard({ onSignedOut }) {
 
   const activeContact = contacts.find((c) => c.id === selectedContact) || null
 
-  return (
-    <div className="relative flex h-full flex-col gap-2 p-2 sm:gap-3 sm:p-3">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-edge bg-panel px-3 py-2.5 sm:gap-x-4 sm:px-4 sm:py-3">
-        <BrandMark size={34} />
+  const selectOrg = async (id) => {
+    if (!id || id === selectedOrg) return
+    await api.switchOrganization(id)
+    setSelectedOrg(id)
+    setSelectedContact(null)
+    setThreads({})
+    await loadOrganizations()
+    await loadContacts()
+    await loadStats()
+  }
 
-        <div className="hidden items-center gap-3 border-l border-edge pl-4 md:flex">
-          <PulseLine beat={events.length} />
-        </div>
+  const signOut = () => {
+    auth.clear()
+    onSignedOut()
+  }
 
-        <div className="ml-auto flex flex-wrap items-center gap-3">
-          <OrgSelector
-            // Editing a business is now a page of its own. The switcher keeps
-            // only the thing it is for: choosing one, or adding another.
-            onEdit={() => setShowSettings(true)}
-            organizations={organizations}
-            selectedId={selectedOrg}
-            onSelect={async (id) => {
-              if (!id || id === selectedOrg) return
-              await api.switchOrganization(id)
-              setSelectedOrg(id)
+  const attentionCount =
+    (waiting > 0 ? 1 : 0) + (alertsReach === false ? 1 : 0) + (alertsLost > 0 ? 1 : 0)
+
+  const sidebar = (onClose) => (
+    <Sidebar
+      view={view}
+      onView={go}
+      setupLeft={setupLeft}
+      connected={connected}
+      beat={events.length}
+      unseen={unseen}
+      onClose={onClose}
+      onWhatsNew={() => {
+        setShowUpgrades(true)
+        setUnseen(false)
+        setMenuOpen(false)
+      }}
+      onSignOut={signOut}
+      org={
+        <OrgSelector
+          organizations={organizations}
+          selectedId={selectedOrg}
+          onSelect={selectOrg}
+          onSaved={async (saved) => {
+            await loadOrganizations()
+            if (saved?.id) {
               setSelectedContact(null)
               setThreads({})
-              await loadOrganizations()
               await loadContacts()
-              await loadStats()
-            }}
-            onSaved={async (saved) => {
-              await loadOrganizations()
-              if (saved?.id) {
-                setSelectedContact(null)
-                setThreads({})
-                await loadContacts()
-              }
-            }}
+            }
+          }}
+        />
+      }
+      attention={
+        <Attention
+          waiting={waiting}
+          alertsReach={alertsReach}
+          alertsLost={alertsLost}
+          onProspects={() => {
+            setShowProspects(true)
+            setMenuOpen(false)
+          }}
+          onAlerts={() => openSetup('alerts')}
+        />
+      }
+    />
+  )
+
+  const inThread = view === 'inbox' && mobilePane === 'thread'
+  const emptyInbox = contacts.length === 0 && !filtering(filters)
+  const currentView = VIEWS.find((item) => item.id === view) || VIEWS[0]
+
+  return (
+    <div className="flex h-full min-h-0">
+      {/* Desktop sidebar. */}
+      <aside className="hidden w-[264px] shrink-0 border-r border-edge bg-panel lg:block">
+        {sidebar(null)}
+      </aside>
+
+      {/* The same sidebar as a drawer on a phone or tablet. */}
+      {menuOpen && (
+        <div className="fixed inset-0 z-50 flex lg:hidden">
+          <button
+            type="button"
+            aria-label="Close menu"
+            className="scrim absolute inset-0"
+            onClick={() => setMenuOpen(false)}
           />
-
-          <span
-            className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold ${
-              connected
-                ? 'border-accent/25 bg-accent/10 text-accent'
-                : 'border-warn/25 bg-warn/10 text-warn'
-            }`}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                connected ? 'animate-breathe bg-accent' : 'bg-warn'
-              }`}
-            />
-            {connected ? 'Live' : 'Reconnecting'}
-          </span>
-
-          {waiting > 0 && (
-            <button
-              onClick={() => setShowProspects(true)}
-              title="People who never got a reply"
-              className="flex items-center gap-1.5 rounded-full border border-warn/25 bg-warn/10 px-3 py-1.5 text-[11px] font-semibold text-warn transition-colors hover:bg-warn/15"
-            >
-              <Inbox size={12} />
-              {waiting} waiting
-            </button>
-          )}
-
-          {alertsReach === false && (
-            <button
-              onClick={() => setShowSettings(true)}
-              title="Nothing can reach you when this page is closed"
-              className="flex items-center gap-1.5 rounded-full border border-warn/25 bg-warn/10 px-3 py-1.5 text-[11px] font-semibold text-warn transition-colors hover:bg-warn/15"
-            >
-              <BellOff size={12} />
-              <span className="hidden sm:inline">Alerts off</span>
-            </button>
-          )}
-
-          {/*
-            Louder than "Alerts off", because it is worse. Alerts off means
-            nothing was ever set up; this means something was, and it failed
-            anyway - so the person believes they are covered and is not.
-          */}
-          {alertsLost > 0 && (
-            <button
-              onClick={() => setShowSettings(true)}
-              title={`${alertsLost} alert${alertsLost === 1 ? '' : 's'} could not be delivered - open alert settings to see why`}
-              className="flex items-center gap-1.5 rounded-full border border-crit/25 bg-crit/10 px-3 py-1.5 text-[11px] font-semibold text-crit transition-colors hover:bg-crit/15"
-            >
-              <CircleAlert size={12} />
-              <span className="hidden sm:inline">
-                {alertsLost} alert{alertsLost === 1 ? '' : 's'} missed
-              </span>
-              <span className="sm:hidden">{alertsLost}</span>
-            </button>
-          )}
-
-          <ConnectionStatus />
-
-          <NavLink icon={Settings} label="Setup" onClick={() => setShowSettings(true)} />
-          <NavLink icon={Columns3} label="Board" onClick={() => setShowBoard(true)} />
-          <NavLink icon={ChartNoAxesColumn} label="Analytics" onClick={() => setShowAnalytics(true)} />
-          <NavLink icon={FlaskConical} label="Try it" onClick={() => setShowSandbox(true)} />
-          <NavLink
-            icon={Sparkles}
-            label="What's new"
-            badge={unseen}
-            onClick={() => {
-              setShowUpgrades(true)
-              setUnseen(false)
-            }}
-          />
-          <NavLink
-            icon={LogOut}
-            label="Sign out"
-            muted
-            onClick={() => {
-              auth.clear()
-              onSignedOut()
-            }}
-          />
+          <aside className="animate-slide-left relative h-full w-[300px] max-w-[85vw] border-r border-edge bg-panel shadow-lift">
+            {sidebar(() => setMenuOpen(false))}
+          </aside>
         </div>
-      </header>
+      )}
 
-      {/* A phone reading a conversation should spend its height on the
-          conversation. The numbers stay one tap away under Chats, and on a
-          desktop nothing moves. */}
-      <div className={mobilePane === 'thread' ? 'hidden lg:block' : ''}>
-        <MetricStrip stats={stats} contacts={contacts} window={window_} onWindow={setWindow_} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Phone top bar. Hidden inside a conversation, which has its own. */}
+        <header
+          className={`${inThread ? 'hidden' : 'flex'} shrink-0 items-center gap-2 border-b border-edge bg-panel px-3 py-2.5 lg:hidden`}
+        >
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+            className="btn-ghost relative p-2"
+          >
+            <Menu size={20} />
+            {(attentionCount > 0 || unseen) && (
+              <span
+                className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ring-2 ring-panel ${
+                  attentionCount > 0 ? 'bg-warn' : 'bg-accent'
+                }`}
+              />
+            )}
+          </button>
+          <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-ink">
+            {currentView.label}
+          </h1>
+          <span
+            className={`h-2 w-2 shrink-0 rounded-full ${connected ? 'animate-breathe bg-accent' : 'bg-warn'}`}
+            title={connected ? 'Live' : 'Reconnecting'}
+          />
+          <ConnectionStatus compact />
+        </header>
+
+        <main className="min-h-0 flex-1">
+          <PageBoundary key={view}>
+          {view === 'inbox' && (
+            <div className="flex h-full min-h-0 flex-col">
+              <div
+                className={`${inThread ? 'hidden lg:block' : 'block'} shrink-0 space-y-3 px-3 pt-3 sm:px-6 lg:space-y-4 lg:px-8 lg:pt-7`}
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="hidden min-w-0 flex-1 lg:block">
+                    <h2 className="text-xl font-semibold tracking-tight text-ink">Inbox</h2>
+                    <p className="mt-0.5 text-sm text-dim">
+                      Every WhatsApp conversation, answered as it arrives.
+                    </p>
+                  </div>
+                  <MetricWindow value={window_} onChange={setWindow_} />
+                </div>
+                <MetricStrip stats={stats} contacts={contacts} />
+              </div>
+
+              <div className="flex min-h-0 flex-1 gap-4 p-3 sm:px-6 lg:px-8 lg:pb-6 lg:pt-5">
+                <ConversationList
+                  className={`${mobilePane === 'list' && !emptyInbox ? 'flex' : 'hidden'} w-full lg:flex lg:w-[340px]`}
+                  contacts={contacts}
+                  filters={filters}
+                  onFilters={setFilters}
+                  selectedId={selectedContact}
+                  onSelect={(id) => {
+                    setSelectedContact(id)
+                    setMobilePane('thread')
+                  }}
+                  previews={previews}
+                  composing={composing}
+                  stages={stages}
+                />
+                {emptyInbox ? (
+                  <SetupChecklist
+                    onOpenSettings={() => openSetup()}
+                    onTest={() => go('test')}
+                  />
+                ) : (
+                  <ConversationThread
+                    className={`${mobilePane === 'thread' ? 'flex' : 'hidden'} lg:flex`}
+                    onBack={() => setMobilePane('list')}
+                    contact={activeContact}
+                    messages={threads[selectedContact] || []}
+                    composing={composing.has(selectedContact)}
+                    // A conversation can be selected by a live event a moment
+                    // before the contact list catches up - that is arriving,
+                    // not idle.
+                    arriving={Boolean(selectedContact) && !activeContact}
+                    // A follow-up is stored on the contact, so the list is
+                    // re-read for the panel to show what it now says.
+                    onChanged={loadContacts}
+                    stages={stages}
+                    onOpenProfile={() => setShowDrawer(true)}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          {view === 'board' && (
+            <KanbanBoard
+              contacts={contacts}
+              stages={stages}
+              onChanged={loadContacts}
+              onOpen={openConversation}
+            />
+          )}
+          {view === 'analytics' && <Analytics />}
+          {view === 'test' && <AgentSandbox />}
+          {view === 'setup' && (
+            <SettingsPage
+              key={setupStep.n}
+              initialStep={setupStep.key}
+              onSaved={loadOrganizations}
+              onProgress={onSetupProgress}
+            />
+          )}
+          </PageBoundary>
+        </main>
+
+        {/* Phone tab bar. A conversation gets the whole screen. */}
+        <nav
+          aria-label="Main"
+          className={`${inThread ? 'hidden' : 'grid'} shrink-0 grid-cols-5 border-t border-edge bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden`}
+        >
+          {VIEWS.map((item) => {
+            const current = view === item.id
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => go(item.id)}
+                aria-current={current ? 'page' : undefined}
+                className={`relative flex flex-col items-center gap-1 py-2 text-[11px] font-medium transition-colors ${
+                  current ? 'text-accent' : 'text-faint hover:text-ink'
+                }`}
+              >
+                <item.icon size={20} />
+                {item.short}
+                {item.id === 'setup' && setupLeft > 0 && (
+                  <span className="absolute right-[calc(50%-16px)] top-1.5 h-2 w-2 rounded-full bg-warn ring-2 ring-panel" />
+                )}
+              </button>
+            )
+          })}
+        </nav>
       </div>
 
-      <PaneTabs pane={mobilePane} onPick={setMobilePane} waiting={contacts.length} />
-
-      <main className="flex min-h-0 flex-1 gap-2 sm:gap-3">
-        <ConversationList
-          className={`${mobilePane === 'list' ? 'flex' : 'hidden'} w-full lg:flex lg:w-[280px]`}
-          contacts={contacts}
-          filters={filters}
-          onFilters={setFilters}
-          selectedId={selectedContact}
-          onSelect={(id) => {
-            setSelectedContact(id)
-            setMobilePane('thread')
-          }}
-          previews={previews}
-          composing={composing}
-          stages={stages}
-        />
-        {contacts.length === 0 && !filtering(filters) ? (
-          <SetupChecklist
-            onOpenSettings={() => setShowSettings(true)}
-          />
-        ) : (
-        <ConversationThread
-          className={`${mobilePane === 'thread' ? 'flex' : 'hidden'} lg:flex`}
-          onBack={() => setMobilePane('list')}
-          contact={activeContact}
-          messages={threads[selectedContact] || []}
-          composing={composing.has(selectedContact)}
-          // A conversation can be selected by a live event a moment before the
-          // contact list catches up — that is arriving, not idle.
-          arriving={Boolean(selectedContact) && !activeContact}
-          // Scheduling or cancelling a follow-up is stored on the contact, so
-          // the list has to be re-read for the panel to show what it now says.
-          onChanged={loadContacts}
-          stages={stages}
-          onOpenProfile={() => setShowDrawer(true)}
-        />
-        )}
-        <PipelineBoard
-          className={`${mobilePane === 'pipeline' ? 'flex' : 'hidden'} w-full lg:flex lg:w-[290px]`}
-          contacts={contacts}
-          stages={stages}
-          selectedId={selectedContact}
-          onSelect={(id) => {
-            setSelectedContact(id)
-            setMobilePane('thread')
-          }}
-        />
-      </main>
-
-      <SettingsPage
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-        onSaved={loadOrganizations}
-      />
-
       {showUpgrades && <WhatsNew onClose={() => setShowUpgrades(false)} />}
-      {showSandbox && <AgentSandbox onClose={() => setShowSandbox(false)} />}
-      {showAnalytics && <Analytics onClose={() => setShowAnalytics(false)} />}
-      {showBoard && (
-        <KanbanBoard
-          contacts={contacts}
-          stages={stages}
-          onClose={() => setShowBoard(false)}
-          onChanged={loadContacts}
-          onOpen={(id) => {
-            setSelectedContact(id)
-            setShowBoard(false)
-            setMobilePane('thread')
-          }}
-        />
-      )}
       {showDrawer && activeContact && (
         <LeadProfileDrawer
           contact={activeContact}

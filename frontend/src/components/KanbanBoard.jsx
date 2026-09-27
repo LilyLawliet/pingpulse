@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Columns3, Loader2, TriangleAlert, X } from 'lucide-react'
+import { Columns3, Loader2, TriangleAlert } from 'lucide-react'
+import { Avatar, PageHeader } from './ui.jsx'
 import { api } from '../api.js'
 import { DEFAULT_STAGES, contactLabel, initialsOf, stageDot } from '../format.js'
 
@@ -21,7 +22,7 @@ import { DEFAULT_STAGES, contactLabel, initialsOf, stageDot } from '../format.js
  * alternative is a card that hangs in mid-air for the length of a round trip
  * and makes the whole board feel broken.
  */
-export default function KanbanBoard({ contacts, stages = DEFAULT_STAGES, onClose, onChanged, onOpen }) {
+export default function KanbanBoard({ contacts, stages = DEFAULT_STAGES, onChanged, onOpen }) {
   const [board, setBoard] = useState(contacts)
   const [dragging, setDragging] = useState(null)
   const [over, setOver] = useState(null)
@@ -68,29 +69,15 @@ export default function KanbanBoard({ contacts, stages = DEFAULT_STAGES, onClose
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-bg/95 backdrop-blur-sm">
-      <header className="flex shrink-0 flex-wrap items-center gap-2.5 border-b border-edge bg-panel px-4 py-3">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/12 ring-1 ring-inset ring-accent/25">
-          <Columns3 size={15} className="text-accent" />
-        </span>
-        <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-ink">Your board</h3>
-          <p className="mt-0.5 text-2xs text-dim">
-            Drag a lead to move it, or use the menu on the card
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="ml-auto rounded-lg p-1 text-faint transition-colors hover:bg-panel-2 hover:text-ink"
-        >
-          <X size={16} />
-        </button>
-      </header>
+    <div className="flex h-full min-h-0 flex-col">
+      <PageHeader
+        icon={Columns3}
+        title="Board"
+        subtitle="Every lead by stage. Drag a card to move it, or pick a stage on the card."
+      />
 
       {error && (
-        <p className="flex shrink-0 items-start gap-2 bg-crit/10 px-4 py-2 text-2xs text-crit">
+        <p className="mx-4 mb-3 flex shrink-0 items-start gap-2 rounded-xl bg-crit/10 px-4 py-2.5 text-xs text-crit sm:mx-6 lg:mx-8">
           <TriangleAlert size={12} className="mt-0.5 shrink-0" />
           {error}
         </p>
@@ -99,7 +86,7 @@ export default function KanbanBoard({ contacts, stages = DEFAULT_STAGES, onClose
       {/* The horizontal scroll the whole component exists for. Columns keep a
           fixed width and refuse to shrink, so nine stages stay legible rather
           than being squeezed into whatever is on screen. */}
-      <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden p-3">
+      <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4 sm:px-6 lg:px-8 lg:pb-6">
         <div className="flex h-full gap-3">
           {columns.map(({ stage, people }) => (
             <section
@@ -115,21 +102,25 @@ export default function KanbanBoard({ contacts, stages = DEFAULT_STAGES, onClose
                 const id = event.dataTransfer.getData('text/plain') || dragging
                 if (id) move(id, stage.key)
               }}
-              className={`flex h-full w-64 shrink-0 flex-col rounded-xl border bg-panel transition-colors ${
-                over === stage.key ? 'border-accent/50 bg-panel-2' : 'border-edge'
+              className={`flex h-full w-72 shrink-0 flex-col rounded-2xl border transition-colors ${
+                over === stage.key ? 'border-accent/60 bg-accent/5' : 'border-edge bg-panel-2/60'
               }`}
             >
-              <header className="flex shrink-0 items-center gap-2 border-b border-edge px-3 py-2.5">
-                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${stageDot(stages, stage.key)}`} />
-                <span className="min-w-0 flex-1 truncate text-2xs font-semibold text-ink">
+              <header className="flex shrink-0 items-center gap-2 px-3.5 pb-2 pt-3">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${stageDot(stages, stage.key)}`} />
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
                   {stage.label}
                 </span>
-                <span className="font-mono text-2xs tabular-nums text-dim">{people.length}</span>
+                <span className="rounded-full bg-panel px-2 py-0.5 text-xs font-semibold tabular-nums text-dim ring-1 ring-inset ring-edge">
+                  {people.length}
+                </span>
               </header>
 
-              <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2.5 pb-2.5">
                 {people.length === 0 && (
-                  <p className="px-1 py-2 text-2xs text-faint">Nobody here</p>
+                  <p className="rounded-xl border border-dashed border-edge px-3 py-6 text-center text-xs text-faint">
+                    Drop a lead here
+                  </p>
                 )}
                 {people.map((person) => (
                   <article
@@ -144,24 +135,26 @@ export default function KanbanBoard({ contacts, stages = DEFAULT_STAGES, onClose
                       setDragging(null)
                       setOver(null)
                     }}
-                    className={`rounded-lg border border-edge bg-panel-2/60 p-2 transition-opacity ${
+                    className={`cursor-grab rounded-xl border border-edge bg-panel p-2.5 shadow-card transition hover:border-edge-hi active:cursor-grabbing ${
                       dragging === person.id ? 'opacity-40' : ''
                     } ${busy === person.id ? 'opacity-60' : ''}`}
                   >
                     <button
                       type="button"
                       onClick={() => onOpen?.(person.id)}
-                      className="flex w-full items-center gap-2 text-left"
+                      className="flex w-full items-center gap-2.5 text-left"
                     >
-                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-edge text-[9px] font-semibold text-dim">
-                        {initialsOf(person.name, person.phone_number)}
-                      </span>
+                      <Avatar
+                        size="sm"
+                        seed={person.id}
+                        text={initialsOf(person.name, person.phone_number)}
+                      />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-2xs text-ink">
+                        <span className="block truncate text-sm font-medium text-ink">
                           {contactLabel(person)}
                         </span>
                         {person.deal_value != null && (
-                          <span className="block font-mono text-[10px] tabular-nums text-accent">
+                          <span className="block font-mono text-[11px] tabular-nums text-accent">
                             {Number(person.deal_value).toLocaleString()}
                           </span>
                         )}
@@ -180,7 +173,7 @@ export default function KanbanBoard({ contacts, stages = DEFAULT_STAGES, onClose
                       // loudest thing on the card, which made a board of leads
                       // read as a board of dropdowns. It comes forward on
                       // hover and focus, and is always there for a finger.
-                      className="mt-1 w-full cursor-pointer rounded border border-transparent bg-transparent px-1 py-0.5 text-[10px] text-faint transition-colors hover:border-edge hover:bg-bg hover:text-dim focus:border-accent/60 focus:bg-bg focus:text-ink"
+                      className="mt-1 w-full cursor-pointer rounded border border-transparent bg-transparent px-1 py-0.5 text-[11px] text-faint transition-colors hover:border-edge hover:bg-bg hover:text-dim focus:border-accent/60 focus:bg-bg focus:text-ink"
                     >
                       {(stages.length ? stages : DEFAULT_STAGES).map((option) => (
                         <option key={option.key} value={option.key}>

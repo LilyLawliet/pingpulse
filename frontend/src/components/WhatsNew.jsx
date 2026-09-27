@@ -219,10 +219,14 @@ export default function WhatsNew({ onClose }) {
   }, [])
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="max-h-[88vh] w-full max-w-lg overflow-auto rounded-2xl border border-edge bg-panel shadow-lift">
+    <div
+      className="fixed inset-0 z-50 grid place-items-center scrim p-4"
+      // A click on the dimmed area outside closes it, as it does everywhere else.
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <div className="max-h-[88vh] w-full max-w-lg overflow-auto rounded-2xl border border-edge bg-panel shadow-lift animate-pop">
         <header className="sticky top-0 flex items-center gap-2.5 border-b border-edge bg-panel px-5 py-4">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent/12 ring-1 ring-inset ring-accent/25">
+          <span className="grid h-8 w-8 place-items-center rounded-xl bg-accent/10 ring-1 ring-inset ring-accent/20">
             <Sparkles size={15} className="text-accent" />
           </span>
           <div>

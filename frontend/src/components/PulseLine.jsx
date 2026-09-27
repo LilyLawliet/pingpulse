@@ -25,9 +25,19 @@ export default function PulseLine({ beat, width = 132, height = 30 }) {
 
     let frame
     let tick = 0
+    // Read from the theme tokens so the trace matches light and dark alike.
+    let accent = '52 211 153'
+    let edge = '37 42 51'
+    const readColours = () => {
+      const css = getComputedStyle(document.documentElement)
+      accent = css.getPropertyValue('--accent').trim() || accent
+      edge = css.getPropertyValue('--edge').trim() || edge
+    }
+    readColours()
 
     const render = () => {
       tick += 1
+      if (tick % 60 === 0) readColours()
       if (tick % 3 === 0) {
         const samples = samplesRef.current
         const spike = pendingRef.current
@@ -40,7 +50,7 @@ export default function PulseLine({ beat, width = 132, height = 30 }) {
       ctx.clearRect(0, 0, width, height)
 
       // Baseline
-      ctx.strokeStyle = 'rgba(44, 61, 77, 0.85)'
+      ctx.strokeStyle = `rgb(${edge})`
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(0, height - 4.5)
@@ -56,13 +66,13 @@ export default function PulseLine({ beat, width = 132, height = 30 }) {
       samples.forEach((v, i) => ctx.lineTo(i * step, yFor(v)))
       ctx.lineTo(width, height - 4.5)
       ctx.closePath()
-      ctx.fillStyle = 'rgba(47, 216, 168, 0.14)'
+      ctx.fillStyle = `rgb(${accent} / 0.14)`
       ctx.fill()
 
       // The trace itself
       ctx.beginPath()
       samples.forEach((v, i) => (i === 0 ? ctx.moveTo(0, yFor(v)) : ctx.lineTo(i * step, yFor(v))))
-      ctx.strokeStyle = '#2fd8a8'
+      ctx.strokeStyle = `rgb(${accent})`
       ctx.lineWidth = 1.5
       ctx.lineJoin = 'round'
       ctx.stroke()
@@ -71,7 +81,7 @@ export default function PulseLine({ beat, width = 132, height = 30 }) {
       const last = samples[samples.length - 1]
       ctx.beginPath()
       ctx.arc(width - 1.5, yFor(last), last > 0.05 ? 2.6 : 1.6, 0, Math.PI * 2)
-      ctx.fillStyle = '#2fd8a8'
+      ctx.fillStyle = `rgb(${accent})`
       ctx.fill()
 
       frame = requestAnimationFrame(render)

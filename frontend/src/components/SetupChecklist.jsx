@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Circle, Loader2, Rocket } from 'lucide-react'
+import { ArrowRight, Check, FlaskConical, Loader2, Rocket } from 'lucide-react'
 import { api } from '../api.js'
 
 /**
@@ -18,7 +18,7 @@ import { api } from '../api.js'
  * It disappears the moment a conversation exists. An onboarding panel that
  * outstays its welcome is clutter on the screen somebody uses all day.
  */
-export default function SetupChecklist({ onOpenSettings }) {
+export default function SetupChecklist({ onOpenSettings, onTest, className = '' }) {
   const [state, setState] = useState(null)
 
   const load = useCallback(async () => {
@@ -55,7 +55,7 @@ export default function SetupChecklist({ onOpenSettings }) {
 
   if (!state) {
     return (
-      <section className="panel flex flex-1 items-center justify-center">
+      <section className={`panel flex-1 items-center justify-center ${className}`}>
         <Loader2 size={16} className="animate-spin text-faint" />
       </section>
     )
@@ -85,56 +85,74 @@ export default function SetupChecklist({ onOpenSettings }) {
   ]
   const remaining = steps.filter((step) => !step.done).length
 
-  return (
-    <section className="panel flex flex-1 flex-col">
-      <header className="panel-head">
-        <Rocket size={14} className="text-accent" />
-        <h2 className="text-xs font-semibold text-ink">Getting set up</h2>
-        <span className="ml-auto font-mono text-2xs text-faint">
-          {steps.length - remaining} of {steps.length}
-        </span>
-      </header>
+  const done = steps.length - remaining
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <p className="mb-4 text-2xs leading-relaxed text-dim">
+  return (
+    <section className={`panel flex-1 overflow-y-auto ${className}`}>
+      <div className="mx-auto w-full max-w-xl px-5 py-8 sm:px-8 sm:py-12">
+        <span className="mb-5 grid h-12 w-12 place-items-center rounded-2xl bg-accent/10 text-accent">
+          <Rocket size={22} />
+        </span>
+        <h2 className="text-xl font-semibold tracking-tight text-ink">
+          {remaining === 0 ? 'You are ready for customers' : 'Let’s get you live'}
+        </h2>
+        <p className="mt-1.5 text-sm leading-relaxed text-dim">
           {remaining === 0
             ? 'Everything is ready. Your first conversation will appear here as soon as somebody messages you.'
             : 'Four things, and then the first customer who messages you gets an answer.'}
         </p>
 
-        <ol className="space-y-3">
-          {steps.map((step) => (
-            <li key={step.title} className="flex gap-2.5">
+        <div className="mt-5 flex items-center gap-3">
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-edge">
+            <div
+              className="h-full rounded-full bg-accent transition-[width] duration-500"
+              style={{ width: `${(done / steps.length) * 100}%` }}
+            />
+          </div>
+          <span className="text-xs font-semibold tabular-nums text-dim">
+            {done} of {steps.length}
+          </span>
+        </div>
+
+        <ol className="mt-6 space-y-2.5">
+          {steps.map((step, index) => (
+            <li
+              key={step.title}
+              className={`flex gap-3.5 rounded-2xl border px-4 py-3.5 ${
+                step.done ? 'border-edge bg-panel-2/50' : 'border-edge bg-panel'
+              }`}
+            >
               <span
-                className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ${
-                  step.done ? 'bg-accent/15 text-accent' : 'bg-panel-2 text-faint'
+                className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-semibold ${
+                  step.done ? 'bg-accent text-on-accent' : 'bg-panel-2 text-dim ring-1 ring-inset ring-edge'
                 }`}
               >
-                {step.done ? <Check size={12} /> : <Circle size={8} />}
+                {step.done ? <Check size={14} /> : index + 1}
               </span>
               <div className="min-w-0">
                 <p
-                  className={`text-xs font-semibold ${
-                    step.done ? 'text-dim line-through' : 'text-ink'
-                  }`}
+                  className={`text-sm font-semibold ${step.done ? 'text-dim line-through' : 'text-ink'}`}
                 >
                   {step.title}
                 </p>
-                <p className="mt-0.5 text-2xs leading-relaxed text-dim">{step.body}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-dim">{step.body}</p>
               </div>
             </li>
           ))}
         </ol>
 
-        {remaining > 0 && (
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className="mt-5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-bg transition-opacity hover:opacity-90"
-          >
-            Open settings
-          </button>
-        )}
+        <div className="mt-6 flex flex-wrap gap-2">
+          {remaining > 0 && (
+            <button type="button" onClick={onOpenSettings} className="btn-primary">
+              Continue setup <ArrowRight size={15} />
+            </button>
+          )}
+          {onTest && (
+            <button type="button" onClick={onTest} className="btn-secondary">
+              <FlaskConical size={15} /> Test the agent
+            </button>
+          )}
+        </div>
       </div>
     </section>
   )

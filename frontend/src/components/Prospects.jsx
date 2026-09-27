@@ -60,10 +60,14 @@ export default function Prospects({ onClose, onReplied }) {
   const people = (state?.prospects || []).filter((p) => !done[p.jid])
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="max-h-[88vh] w-full max-w-2xl overflow-auto rounded-2xl border border-edge bg-panel shadow-lift">
+    <div
+      className="fixed inset-0 z-50 grid place-items-center scrim p-4"
+      // A click on the dimmed area outside closes it, as it does everywhere else.
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <div className="max-h-[88vh] w-full max-w-2xl overflow-auto rounded-2xl border border-edge bg-panel shadow-lift animate-pop">
         <header className="sticky top-0 flex items-center gap-2.5 border-b border-edge bg-panel px-5 py-4">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-warn/12 ring-1 ring-inset ring-warn/25">
+          <span className="grid h-8 w-8 place-items-center rounded-xl bg-warn/10 ring-1 ring-inset ring-warn/20">
             <Inbox size={15} className="text-warn" />
           </span>
           <div className="min-w-0">
@@ -148,7 +152,7 @@ export default function Prospects({ onClose, onReplied }) {
                   {person.matched.map((term) => (
                     <span
                       key={term}
-                      className="rounded-md bg-accent/10 px-2 py-0.5 text-[10px] text-accent"
+                      className="rounded-md bg-accent/10 px-2 py-0.5 text-[11px] text-accent"
                     >
                       {term}
                     </span>
@@ -171,7 +175,7 @@ export default function Prospects({ onClose, onReplied }) {
                   type="button"
                   disabled={sending === person.jid || !(drafts[person.jid] || '').trim()}
                   onClick={() => send(person)}
-                  className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
+                  className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
                 >
                   {sending === person.jid ? (
                     <Loader2 size={13} className="animate-spin" />

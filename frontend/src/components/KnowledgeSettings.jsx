@@ -156,7 +156,7 @@ export default function KnowledgeSettings() {
                   setBusy(false)
                   await load()
                 }}
-                className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-2xs font-semibold text-bg transition-opacity hover:opacity-90"
+                className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-2xs font-semibold text-on-accent transition-opacity hover:opacity-90"
               >
                 <Check size={12} /> Looks right — import
               </button>
@@ -214,7 +214,7 @@ export default function KnowledgeSettings() {
           type="button"
           disabled={busy}
           onClick={() => picker.current?.click()}
-          className="mx-auto flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
+          className="mx-auto flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
           {busy ? 'Reading…' : 'Choose files'}

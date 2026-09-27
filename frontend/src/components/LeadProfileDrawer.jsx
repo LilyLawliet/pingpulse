@@ -113,10 +113,14 @@ export default function LeadProfileDrawer({ contact, stages = DEFAULT_STAGES, on
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm">
-      <aside className="flex h-full w-full max-w-md flex-col border-l border-edge bg-panel shadow-lift">
+    <div
+      className="fixed inset-0 z-50 flex justify-end scrim"
+      // A click on the dimmed area outside closes it, as it does everywhere else.
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <aside className="animate-slide-right flex h-full w-full max-w-md flex-col border-l border-edge bg-panel shadow-lift">
         <header className="flex items-start gap-2.5 border-b border-edge px-5 py-4">
-          <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/12 ring-1 ring-inset ring-accent/25">
+          <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-accent/10 ring-1 ring-inset ring-accent/20">
             <User size={15} className="text-accent" />
           </span>
           <div className="min-w-0 flex-1">
@@ -204,7 +208,7 @@ export default function LeadProfileDrawer({ contact, stages = DEFAULT_STAGES, on
                 disabled={busy}
                 onClick={toggleAgent}
                 className={`shrink-0 rounded-lg px-2.5 py-1.5 text-2xs font-semibold transition-opacity hover:opacity-90 disabled:opacity-40 ${
-                  contact.ai_enabled ? 'bg-warn text-bg' : 'bg-accent text-bg'
+                  contact.ai_enabled ? 'bg-warn text-on-accent' : 'bg-accent text-on-accent'
                 }`}
               >
                 {busy ? (
@@ -307,7 +311,7 @@ export default function LeadProfileDrawer({ contact, stages = DEFAULT_STAGES, on
             type="button"
             disabled={saving || !dirty}
             onClick={save}
-            className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
             Save
