@@ -1,11 +1,11 @@
 {
-  "version": "1.4.8",
-  "notes": "Your name and your access token are now in the sidebar, hidden until you ask for them. Setup steps can be done in any order, an uploaded price list finally ticks its own step, and the dashboard no longer shows you an inbox it is about to lock. Without opening hours the agent cannot book - that is now said plainly, with a link to the timezone step it needs.",
-  "pub_date": "2026-09-27T22:50:49+00:00",
+  "version": "1.4.9",
+  "notes": "A setup step is only ticked when it is really done. Prices and knowledge counted itself finished the moment What you sell had a single line in it, even with no price list and nothing to quote. It now follows the same judgement the panel shows, so removing your last document unticks the step - and a required step that is not done says plainly that your agent will not start until it is.",
+  "pub_date": "2026-09-27T23:39:25+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMnliaFhIMmNkQW1NbGN3NFFJN1hwMUtvSDZjNVJnckxUNDViaTl5aWZZZmNYS05DZFJvWGkzYXEwRWQ1VW1rZzdIY1hiQmMwU3J2bVF1RTBnb3BpQVFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTQ5NDQ3CWZpbGU6UGluZ1B1bHNlXzEuNC44X3g2NC1zZXR1cC5leGUKeUZEdlc2T0V6cW1oR1h6a0lEMEtpeDU5Z2owc3Q3QkxGb0FuWE1lY2pXcGJrTWpoSm42QVBEK3dhOFdtQkdTTStjL2h2dFlPVWtRWnI1bUE3Y0VmREE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.8_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMngyQ0hQWlNoR0l3YjdFTTIyZGdwUEYxR1M3cjl4ZC9PN2VsTm1vYWErMmVORnRUVGJwci85VHJNSy9ndnhyOFBqbXpPVUVkMk9ralpLczZMckhIb3drPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTUyMzY0CWZpbGU6UGluZ1B1bHNlXzEuNC45X3g2NC1zZXR1cC5leGUKSjhOWGlUYTBPVTgyak4zRStDSmZOUFpocnpmVE9jcSswMFNOdUlvaTlwbnFIV1ptTkpSWUUyRDNxQ1UrYTQ3U3ZVNHE2OEdpb3hFdEUvK3cxNzVFRFE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.9_x64-setup.exe"
     }
   }
 }
