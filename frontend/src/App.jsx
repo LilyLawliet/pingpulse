@@ -7,6 +7,7 @@ import {
   Columns3,
   FlaskConical,
   Inbox,
+  Loader2,
   Lock,
   LogOut,
   Menu,
@@ -30,7 +31,14 @@ import MetricStrip, { MetricWindow } from './components/MetricStrip.jsx'
 import OrgSelector from './components/OrgSelector.jsx'
 import SettingsPage from './components/SettingsPage.jsx'
 import { LockedPage, SetupWelcome } from './components/SetupGate.jsx'
-import { missingFor, readSetup, recommendedLeft, requiredLeft } from './setup.js'
+import {
+  mergeSetup,
+  missingFor,
+  readSetup,
+  recommendedLeft,
+  requiredLeft,
+  setupKnown,
+} from './setup.js'
 import PulseLine from './components/PulseLine.jsx'
 import BrandMark from './components/BrandMark.jsx'
 import WhatsNew, { hasUnseenUpgrades } from './components/WhatsNew.jsx'
@@ -296,6 +304,32 @@ function Sidebar({
   )
 }
 
+/** Shown in place of a gated page while the server is asked about setup. */
+function CheckingSetup({ failed, onRetry }) {
+  return (
+    <div className="grid h-full place-items-center p-6">
+      <div className="flex max-w-sm flex-col items-center text-center">
+        {failed ? (
+          <>
+            <p className="text-sm font-semibold text-ink">Could not reach PingPulse</p>
+            <p className="mt-1 text-sm text-dim">
+              Your setup could not be checked. Trying again in a few seconds.
+            </p>
+            <button type="button" onClick={onRetry} className="btn-secondary mt-4">
+              Try now
+            </button>
+          </>
+        ) : (
+          <>
+            <Loader2 size={20} className="animate-spin text-faint" />
+            <p className="mt-3 text-sm text-dim">Checking your setup…</p>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [signedIn, setSignedIn] = useState(Boolean(auth.token))
 
@@ -463,16 +497,58 @@ function Dashboard({ onSignedOut }) {
     countWaiting()
   }, [countWaiting, selectedOrg])
 
-  const onSetupProgress = useCallback((state) => setSetup(state), [])
+  const onSetupProgress = useCallback((state) => {
+    setSetup((previous) => mergeSetup(previous, state))
+  }, [])
 
-  // Read once the business list is known - including when it is empty, which
-  // is a token issued with no business yet and the first thing to set up.
+  // Only the newest check may change what is on screen. A slow answer about
+  // the business somebody just switched away from must not land on top of the
+  // one they switched to.
+  const checkSeq = useRef(0)
+  const checkSetup = useCallback(() => {
+    checkSeq.current += 1
+    const mine = checkSeq.current
+    const report = (state) => {
+      if (mine === checkSeq.current) onSetupProgress(state)
+    }
+    return readSetup(report)
+      .then(report)
+      .catch(() => {})
+  }, [onSetupProgress])
+
+  // Asked the moment the dashboard opens, alongside the business list rather
+  // than after it: the lock is decided by this answer, and every request
+  // queued in front of it is time the wrong page could be on screen.
+  useEffect(() => {
+    checkSetup()
+  }, [checkSetup])
+
+  // Asked again when the business changes. The first time selectedOrg is set
+  // is the list arriving for the business already being checked, so that one
+  // is skipped rather than asked twice.
+  const checkedOrg = useRef(undefined)
   useEffect(() => {
     if (!orgsLoaded) return
-    readSetup()
-      .then(onSetupProgress)
-      .catch(() => {})
-  }, [orgsLoaded, selectedOrg, onSetupProgress])
+    if (checkedOrg.current === undefined) {
+      checkedOrg.current = selectedOrg
+      return
+    }
+    if (checkedOrg.current === selectedOrg) return
+    checkedOrg.current = selectedOrg
+    // Forget the last business's answer first, so its unlocked pages are not
+    // shown for the new one while the new one is being asked about.
+    setSetup(null)
+    checkSetup()
+  }, [orgsLoaded, selectedOrg, checkSetup])
+
+  // A failed check is not an answer. Ask again rather than lock, or unlock,
+  // on it.
+  useEffect(() => {
+    if (!setup?.error) return
+    const timer = setTimeout(checkSetup, 5000)
+    return () => clearTimeout(timer)
+  }, [setup, checkSetup])
+
 
   const setupLeft = requiredLeft(setup)
   const suggestedLeft = recommendedLeft(setup)
@@ -481,7 +557,7 @@ function Dashboard({ onSignedOut }) {
   // Coming in to a business that cannot run yet: say so, and start them on
   // Setup at the first thing missing rather than on a locked inbox.
   useEffect(() => {
-    if (!setup || welcomed) return
+    if (!setupKnown(setup) || welcomed) return
     setWelcomed(true)
     const left = requiredLeft(setup)
     if (left.length === 0) return
@@ -674,6 +750,10 @@ function Dashboard({ onSignedOut }) {
 
   const selectOrg = async (id) => {
     if (!id || id === selectedOrg) return
+    // Say straight away that the new business is being checked, rather than
+    // leaving the old one's pages up for the length of the switch.
+    checkSeq.current += 1
+    setSetup(null)
     await api.switchOrganization(id)
     setSelectedOrg(id)
     setSelectedContact(null)
@@ -721,6 +801,7 @@ function Dashboard({ onSignedOut }) {
           organizations={organizations}
           selectedId={selectedOrg}
           onSelect={selectOrg}
+          emptyLabel={setupKnown(setup) && !setup.hasOrg ? 'No business yet' : 'Loading…'}
           onSaved={async (saved) => {
             await loadOrganizations()
             if (saved?.id) {
@@ -806,7 +887,14 @@ function Dashboard({ onSignedOut }) {
 
         <main className="min-h-0 flex-1">
           <PageBoundary key={view}>
-          {missingFor(view, setup).length > 0 ? (
+          {/* Nothing gated is drawn until the server has said whether it is
+              allowed. Drawing the inbox first and locking it a moment later
+              shows conversations to somebody who is meant to be finishing
+              setup - and remembering the last answer to skip the wait would
+              do the same on the visit after it stopped being true. */}
+          {!setupKnown(setup) && view !== 'setup' ? (
+            <CheckingSetup failed={Boolean(setup?.error)} onRetry={checkSetup} />
+          ) : missingFor(view, setup).length > 0 ? (
             <LockedPage
               title={currentView.label}
               missing={missingFor(view, setup)}
@@ -890,6 +978,7 @@ function Dashboard({ onSignedOut }) {
             <SettingsPage
               key={setupStep.n}
               initialStep={setupStep.key}
+              initialState={setupKnown(setup) ? setup : null}
               onSaved={async () => {
                 // A business created from Setup becomes the active one, and
                 // everything shown for the old "no business" has to be re-read.

@@ -144,91 +144,158 @@ export const TIER_HINT = {
 export const REQUIRED_STEPS = STEPS.filter((s) => s.tier === 'required').map((s) => s.key)
 export const RECOMMENDED_STEPS = STEPS.filter((s) => s.tier === 'recommended').map((s) => s.key)
 
+const RECOMMENDED_KEYS = ['alerts', 'hours', 'calendar']
+
+/**
+ * Whether WhatsApp is connected, from the channel list.
+ *
+ * The same rule /whatsapp/status applies - the active channel, a live paired
+ * session first, then the oldest; Twilio counts as connected once configured,
+ * a paired phone only while it is authenticated - but read from
+ * /organizations/active/channels, which answers from the database alone.
+ * /whatsapp/status also asks the WhatsApp bridge whether it is alive, which
+ * can take seconds, and nothing that decides whether the inbox is locked
+ * should wait on that.
+ */
+function whatsappFrom(channels) {
+  const active = (channels || []).filter((c) => c.is_active)
+  const paired = (c) => (c.whatsapp_provider || 'TWILIO').toUpperCase() === 'QR_SESSION'
+  const live = (c) => !paired(c) || c.session_status === 'AUTHENTICATED'
+  const connected = active.some(live)
+  // Connected at some point: set up and working before, whatever it is now.
+  const ever = connected || active.some((c) => paired(c) && c.session_connected_at)
+  return { connected, ever }
+}
+
 /**
  * Which steps are done, read from the real backend.
  *
  * Nothing is ticked locally, so a step cannot be completed by visiting it, and
  * one done on another machine shows as done here.
  *
- * Returns two views of WhatsApp, because they answer different questions:
+ * Every request goes out at once. As soon as the three that decide the lock
+ * have answered - the business, its channels, its knowledge - `onRequired` is
+ * called with a state marked `pending`, so the lock and the welcome never wait
+ * on the recommended checks. The returned promise resolves with everything.
  *
- *   done.whatsapp   Connected right now. What the Setup page ticks.
- *   gate.whatsapp   Has this business ever been connected. What the lock reads.
+ * Two views of WhatsApp, because they answer different questions:
  *
- * Without the second, a phone that went offline for an hour would lock a
- * working shop out of its own inbox at the moment it most needs to look.
+ *   done.whatsapp   Connected right now. What Setup ticks.
+ *   gate.whatsapp   Has this business ever been connected. What the lock reads,
+ *                   so a phone offline for an hour does not lock a working shop
+ *                   out of its own inbox.
+ *
+ * `error` is set when a required check failed for any reason other than "no
+ * business yet". That is not an answer, and nothing locks on it.
  */
-export async function readSetup() {
-  const done = {
-    business: false,
-    knowledge: false,
-    timezone: false,
-    whatsapp: false,
-    alerts: false,
-    hours: false,
-    calendar: false,
-  }
+export async function readSetup(onRequired) {
   let org = null
-  let whatsappEver = false
+  let hasOrg = true
+  let error = false
+  let rules = false
+  let documents = false
+  let whatsapp = { connected: false, ever: false }
+  const rest = { alerts: false, hours: false, calendar: false }
 
-  try {
-    org = await api.activeOrganization()
-  } catch (err) {
-    // 409 is the backend saying this account has no business yet - an access
-    // token issued without one. That is the very first thing to set up, not
-    // an error to hide.
-    if (err?.status === 409) {
-      return { done, gate: { ...done }, org: null, hasOrg: false }
+  const failed = (err) => {
+    // 409 is the backend saying this account has no business yet - a token
+    // issued without one. That is the first thing to set up, not a failure.
+    if (err?.status === 409) hasOrg = false
+    else error = true
+  }
+
+  const required = [
+    api.activeOrganization().then((found) => {
+      org = found
+      rules = Boolean((found?.product_rules || '').trim())
+    }, failed),
+    api.listChannels().then((channels) => {
+      whatsapp = whatsappFrom(channels)
+    }, failed),
+    api.knowledgeReadiness().then((readiness) => {
+      documents = Boolean(readiness?.ready || readiness?.documents > 0)
+    }, failed),
+  ]
+  // One that fails is a step not yet done, never a reason to hold the rest up.
+  const recommended = [
+    api.getAgentConfig().then((config) => {
+      rest.hours = Object.keys(config?.agent_config?.business_hours || {}).length > 0
+    }),
+    api.getCalendarSubscription().then((calendar) => {
+      rest.calendar = Boolean(calendar?.active)
+    }),
+    api.notificationSettings().then((alerts) => {
+      rest.alerts = Boolean(alerts?.email || alerts?.devices > 0 || alerts?.subscribed)
+    }),
+  ].map((check) => check.catch(() => {}))
+
+  const snapshot = (pending) => {
+    const zone = (org?.timezone || '').trim()
+    const done = {
+      // The server fills in "You are a helpful sales agent." for a business
+      // that never wrote its own, so a line that short is not an answer.
+      business: Boolean((org?.sales_prompt || '').trim().length > 40),
+      knowledge: rules || documents,
+      // Created businesses start on UTC. Nobody chose that, so it does not count.
+      timezone: Boolean(zone) && zone !== 'UTC',
+      whatsapp: whatsapp.connected,
+      ...rest,
+    }
+    return {
+      done,
+      gate: { ...done, whatsapp: whatsapp.ever },
+      org,
+      hasOrg: hasOrg && Boolean(org),
+      error,
+      pending,
     }
   }
 
-  if (org) {
-    // The server fills in "You are a helpful sales agent." for a business that
-    // never wrote its own, so a line that short is not an answer.
-    done.business = Boolean((org.sales_prompt || '').trim().length > 40)
-    // Created businesses start on UTC. Nobody chose that, so it does not count.
-    const zone = (org.timezone || '').trim()
-    done.timezone = Boolean(zone) && zone !== 'UTC'
-    done.knowledge = Boolean((org.product_rules || '').trim())
+  await Promise.all(required)
+  // With no business every other call is a 409 too; there is nothing to wait for.
+  if (!hasOrg) {
+    const state = snapshot(false)
+    onRequired?.(state)
+    return state
   }
+  onRequired?.(snapshot(true))
+  await Promise.all(recommended)
+  return snapshot(false)
+}
 
-  const checks = [
-    api.whatsappStatus().then((status) => {
-      done.whatsapp = Boolean(status?.connected)
-      // Twilio is connected whenever it is configured; a paired phone was
-      // connected at some point if it ever authenticated or anything arrived.
-      whatsappEver =
-        done.whatsapp || Boolean(status?.session_connected_at || status?.last_inbound_at)
-    }),
-    api.knowledgeReadiness().then((readiness) => {
-      done.knowledge = done.knowledge || Boolean(readiness?.ready || readiness?.documents > 0)
-    }),
-    api.getAgentConfig().then((config) => {
-      done.hours = Object.keys(config?.agent_config?.business_hours || {}).length > 0
-    }),
-    api.getCalendarSubscription().then((calendar) => {
-      done.calendar = Boolean(calendar?.active)
-    }),
-    api.notificationSettings().then((alerts) => {
-      done.alerts = Boolean(alerts?.email || alerts?.devices > 0 || alerts?.subscribed)
-    }),
-  ]
-  // Each check stands alone: one that fails is a step not yet done, never a
-  // reason to report the others wrongly.
-  await Promise.allSettled(checks)
+/**
+ * Fold a fresh answer into the one on screen.
+ *
+ * A `pending` answer has not heard back about the recommended steps yet, so it
+ * keeps what was already known about them for the same business rather than
+ * flickering every badge to "not done" for the length of a request.
+ */
+export function mergeSetup(previous, next) {
+  if (!next) return previous
+  if (!next.pending || !previous || previous.org?.id !== next.org?.id) return next
+  const kept = Object.fromEntries(RECOMMENDED_KEYS.map((key) => [key, previous.done[key]]))
+  return {
+    ...next,
+    done: { ...next.done, ...kept },
+    gate: { ...next.gate, ...kept },
+    pending: previous.pending,
+  }
+}
 
-  return { done, gate: { ...done, whatsapp: whatsappEver }, org, hasOrg: Boolean(org) }
+/** Whether this answer can be acted on: it came back, and it is not a failure. */
+export function setupKnown(state) {
+  return Boolean(state) && !state.error
 }
 
 /** The required steps still open, in order. */
 export function requiredLeft(state) {
-  if (!state) return []
+  if (!setupKnown(state)) return []
   if (!state.hasOrg) return STEPS.filter((s) => s.tier === 'required')
   return STEPS.filter((s) => s.tier === 'required' && !state.gate[s.key])
 }
 
 export function recommendedLeft(state) {
-  if (!state?.hasOrg) return []
+  if (!setupKnown(state) || !state.hasOrg || state.pending) return []
   return STEPS.filter((s) => s.tier === 'recommended' && !state.done[s.key])
 }
 
@@ -251,7 +318,7 @@ const NEEDS = {
 export function missingFor(view, state) {
   const needs = NEEDS[view] || []
   if (needs.length === 0) return []
-  if (!state) return []
+  if (!setupKnown(state)) return []
   if (!state.hasOrg) return STEPS.filter((s) => needs.includes(s.key))
   return STEPS.filter((s) => needs.includes(s.key) && !state.gate[s.key])
 }

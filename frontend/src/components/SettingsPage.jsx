@@ -1,8 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowRight, Check, Loader2, Lock, PartyPopper, Save, Settings, TriangleAlert } from 'lucide-react'
 import { PageHeader } from './ui.jsx'
 import { api } from '../api.js'
-import { STEPS, TIER_HINT, TIER_LABEL, readSetup, requiredLeft } from '../setup.js'
+import {
+  STEPS,
+  TIER_HINT,
+  TIER_LABEL,
+  mergeSetup,
+  readSetup,
+  requiredLeft,
+  setupKnown,
+} from '../setup.js'
 import AgentSettings from './AgentSettings.jsx'
 import CalendarSettings from './CalendarSettings.jsx'
 import ErrorLog from './ErrorLog.jsx'
@@ -120,38 +128,80 @@ function sellingExample(currency) {
 const inputClass =
   'w-full rounded-xl border border-edge bg-panel px-3.5 py-2.5 text-sm text-ink placeholder:text-faint focus:border-accent/60 focus:outline-none focus:ring-4 focus:ring-accent/10'
 
-export default function SettingsPage({ open = true, onSaved, onProgress, initialStep = 'business' }) {
+/** The business form's fields, from the organization the server returned. */
+function formFrom(org) {
+  return {
+    name: org.name || '',
+    target_tone: org.target_tone || '',
+    product_rules: org.product_rules || '',
+    sales_prompt: org.sales_prompt || '',
+    default_currency: org.default_currency || 'USD',
+    default_language: org.default_language || 'en',
+    timezone: org.timezone || '',
+  }
+}
+
+export default function SettingsPage({
+  open = true,
+  onSaved,
+  onProgress,
+  initialStep = 'business',
+  // What the dashboard already knows. Rendered from straight away, so a step
+  // is on screen the moment Setup opens instead of after a second round of
+  // the same checks; the page still re-reads in the background.
+  initialState = null,
+}) {
   const [active, setActive] = useState(initialStep)
-  const [setup, setSetup] = useState(null)
+  const [setup, setSetup] = useState(initialState)
   // Shown once, the moment the last required step is done.
   const [justFinished, setJustFinished] = useState(false)
-  const [form, setForm] = useState(null)
+  const [form, setForm] = useState(() =>
+    initialState?.org ? formFrom(initialState.org) : initialState ? { ...EMPTY_FORM } : null,
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)
 
   // Every step's state comes from the backend. A step cannot be completed by
   // looking at it, and one done elsewhere already shows as done.
-  const check = useCallback(async () => {
-    const state = await readSetup()
-    const org = state.org
-    if (org) {
-      setForm({
-        name: org.name || '',
-        target_tone: org.target_tone || '',
-        product_rules: org.product_rules || '',
-        sales_prompt: org.sales_prompt || '',
-        default_currency: org.default_currency || 'USD',
-        default_language: org.default_language || 'en',
-        timezone: org.timezone || '',
-      })
-    } else {
-      setForm((was) => was || { ...EMPTY_FORM })
-    }
-    setSetup(state)
-    onProgress?.(state)
-    return state
-  }, [onProgress])
+  //
+  // The form is filled from the server only when there is nothing in it yet,
+  // or straight after a save. A background re-read that rewrote it would throw
+  // away whatever somebody was halfway through typing.
+  const check = useCallback(
+    async ({ refill = false } = {}) => {
+      const apply = (state) => {
+        if (!setupKnown(state)) return
+        setForm((was) => {
+          if (was && !refill) return was
+          return state.org ? formFrom(state.org) : was || { ...EMPTY_FORM }
+        })
+        setSetup((was) => mergeSetup(was, state))
+        onProgress?.(state)
+      }
+      // The steps and the form appear as soon as the business itself has
+      // answered, not after every check has.
+      const state = await readSetup(apply)
+      apply(state)
+      // A check that failed is not an answer; ask again rather than leave the
+      // page saying "checking" for good.
+      if (state.error && mounted.current) {
+        retry.current = setTimeout(() => check(), 5000)
+      }
+      return state
+    },
+    [onProgress],
+  )
+
+  const mounted = useRef(true)
+  const retry = useRef(null)
+  useEffect(
+    () => () => {
+      mounted.current = false
+      clearTimeout(retry.current)
+    },
+    [],
+  )
 
   useEffect(() => {
     if (open) check()
@@ -168,7 +218,7 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
   // between this business and a running agent.
   const recheck = async () => {
     const before = requiredLeft(setup).length
-    const after = requiredLeft(await check()).length
+    const after = requiredLeft(await check({ refill: true })).length
     if (before > 0 && after === 0) setJustFinished(true)
   }
 

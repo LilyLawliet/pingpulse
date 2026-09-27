@@ -63,6 +63,9 @@ export default function OrgSelector({
   selectedId,
   onSelect,
   onSaved,
+  // Only "No business yet" once the server has said so; before that, or when
+  // it could not be reached, an empty list means nothing has loaded.
+  emptyLabel = 'Loading…',
 }) {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState(EMPTY)
@@ -119,7 +122,7 @@ export default function OrgSelector({
           >
             {/* A token can arrive with no business yet. An empty box reads as
                 broken; this says what is true and where it gets fixed. */}
-            {organizations.length === 0 && <option value="">No business yet</option>}
+            {organizations.length === 0 && <option value="">{emptyLabel}</option>}
             {organizations.map((org) => (
               <option key={org.id} value={org.id}>
                 {org.name}
