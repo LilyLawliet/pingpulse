@@ -1,11 +1,11 @@
 {
-  "version": "1.4.7",
-  "notes": "Setup now says which steps your agent cannot run without - your business, your prices, your timezone and your WhatsApp number - and holds the inbox shut until they are done, telling you exactly what is missing. Your timezone and your calendar link are steps of their own, and a phone that drops offline is now reported rather than left to be noticed.",
-  "pub_date": "2026-09-27T19:35:36+00:00",
+  "version": "1.4.8",
+  "notes": "Your name and your access token are now in the sidebar, hidden until you ask for them. Setup steps can be done in any order, an uploaded price list finally ticks its own step, and the dashboard no longer shows you an inbox it is about to lock. Without opening hours the agent cannot book - that is now said plainly, with a link to the timezone step it needs.",
+  "pub_date": "2026-09-27T22:50:49+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjBmb3Fja21rbVRzK0JrT3lyMTByZ3RDa2plREtHdnQvNjJJMktzalhOSGV6WlNxZ1d3ampFV1U3N1pDQTUvclpEQ1kxUDhBK2w2dXlYTGJicEVINmc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTM3NzM1CWZpbGU6UGluZ1B1bHNlXzEuNC43X3g2NC1zZXR1cC5leGUKc1dmemJsdUJjdVJXNWZmQnhPWjlQUTRDWUs5ZzZRbWN0bUUwazhkaHBDZmxkcVNNWXluSWllc0NjRVA4ZjZvWmUyWGRXK2tYamJpc212dnUzTTVCRHc9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.7_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMnliaFhIMmNkQW1NbGN3NFFJN1hwMUtvSDZjNVJnckxUNDViaTl5aWZZZmNYS05DZFJvWGkzYXEwRWQ1VW1rZzdIY1hiQmMwU3J2bVF1RTBnb3BpQVFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTQ5NDQ3CWZpbGU6UGluZ1B1bHNlXzEuNC44X3g2NC1zZXR1cC5leGUKeUZEdlc2T0V6cW1oR1h6a0lEMEtpeDU5Z2owc3Q3QkxGb0FuWE1lY2pXcGJrTWpoSm42QVBEK3dhOFdtQkdTTStjL2h2dFlPVWtRWnI1bUE3Y0VmREE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.8_x64-setup.exe"
     }
   }
 }

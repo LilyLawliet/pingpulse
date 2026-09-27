@@ -58,7 +58,7 @@ DOCUMENTS = {
         "title": "The Guide",
         "lede": "Every screen, what it is for, and what to put in it.",
         "meta": (
-            "Release 1.4.7 &nbsp;·&nbsp; 28 September 2026 &nbsp;·&nbsp; "
+            "Release 1.4.8 &nbsp;·&nbsp; 28 September 2026 &nbsp;·&nbsp; "
             "Screenshots from a demonstration account"
         ),
     },
