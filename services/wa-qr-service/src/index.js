@@ -96,6 +96,11 @@ const opened = new Set()
 const attempts = new Map()
 const MAX_PAIRING_ATTEMPTS = 5
 
+// Ceiling on the wait between reconnects of an already-paired phone. Five
+// minutes is slow enough to be invisible to WhatsApp during a long outage and
+// fast enough that a client is not offline for an afternoon after a blip.
+const RECONNECT_MAX_WAIT_MS = 5 * 60 * 1000
+
 // Pairings that have exhausted their attempts and must not start themselves
 // again. Only a person asking - POST /pair - clears one.
 //
@@ -275,6 +280,18 @@ async function startSession(sessionId) {
   const folder = path.join(SESSIONS_DIR, sessionId)
   const { state, saveCreds } = await useMultiFileAuthState(folder)
 
+  // Whether this phone has ever been scanned. Read once, here, because it is
+  // what separates "reconnect this for as long as it takes" from "this
+  // pairing is not working, stop asking".
+  //
+  // `registered` is not the flag to read. A live client's session, scanned
+  // minutes earlier and holding a full identity, had registered: false on
+  // disk - so a check on it decided a working phone had never been paired,
+  // gave up after five reconnects and marked the number unreachable. `me` is
+  // the account WhatsApp handed back at pairing; nothing but a real scan puts
+  // it there.
+  const wasPaired = Boolean(state.creds?.me?.id || state.creds?.registered)
+
   const version = await whatsappVersion()
   const socket = makeWASocket({
     // Omitted when the lookup failed, so Baileys falls back to its own.
@@ -289,7 +306,7 @@ async function startSession(sessionId) {
   sessions.set(sessionId, socket)
   // Only a genuinely new pairing needs a QR. Resuming a stored session would
   // otherwise flash "waiting for a scan" at a client who scanned weeks ago.
-  if (!state.creds?.registered) {
+  if (!wasPaired) {
     reportStatus(sessionId, 'GENERATING_QR')
   }
 
@@ -386,10 +403,26 @@ async function startSession(sessionId) {
 
       // A session that has connected before is worth waiting on for as long
       // as it takes - the phone is paired and the network will come back.
-      if (opened.has(sessionId)) {
-        log.info({ sessionId, status }, 'connection dropped, reconnecting')
+      //
+      // `opened` only remembers this process, so after a restart a perfectly
+      // good paired session looks brand new. Credentials on disk say
+      // otherwise: this phone has been scanned, so a drop is a reconnect and
+      // never a pairing that should be given up on. Without this the bridge
+      // restarted, failed five reconnects, marked a live client's WhatsApp as
+      // unreachable and - once giving up became permanent - stayed that way
+      // until somebody scanned a QR that was never needed.
+      if (opened.has(sessionId) || wasPaired) {
+        // Backed off rather than every three seconds forever. This path never
+        // gives up, which is right for a paired phone - but retrying at three
+        // seconds for hours is exactly the hammering that got this host
+        // refused by WhatsApp in the first place, and it would do it again
+        // during any outage long enough to matter.
+        const tries = (attempts.get(sessionId) || 0) + 1
+        attempts.set(sessionId, tries)
+        const wait = Math.min(3000 * 2 ** (tries - 1), RECONNECT_MAX_WAIT_MS)
+        log.info({ sessionId, status, tries, wait }, 'connection dropped, reconnecting')
         reportStatus(sessionId, 'DISCONNECTED', { reason: 'reconnecting' })
-        setTimeout(() => startSession(sessionId).catch(() => {}), 3000)
+        setTimeout(() => startSession(sessionId).catch(() => {}), wait)
         return
       }
 
