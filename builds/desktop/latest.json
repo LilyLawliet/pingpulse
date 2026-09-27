@@ -1,11 +1,11 @@
 {
-  "version": "1.4.4",
-  "notes": "What's new now lists everything since 1.3.4: appointments in your phone's calendar, being told when booking cannot run, and being heard when you ask for a person.",
-  "pub_date": "2026-09-26T09:17:04+00:00",
+  "version": "1.4.5",
+  "notes": "Connecting WhatsApp no longer buries the QR code under the Twilio form, and a pairing that has given up stops retrying instead of quietly blocking every later attempt.",
+  "pub_date": "2026-09-27T15:29:48+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjMxTjVMdHc0RUlGMGovQldsY2s5ZFZaTWluVXh5Mm5TeXd3UE1wY0RNWXEySUt2MlFEcnl0RDl3UUx0c2hTbVVPOXVvNXQ3SUdNNUQ3MXFYTndHa2cwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNDE0MjIyCWZpbGU6UGluZ1B1bHNlXzEuNC40X3g2NC1zZXR1cC5leGUKdENZTVFybTJKMEJkbHI4TjU2bFgxTHdYV0ZNQlhYWHJ0ZzN4Vm5wZVNHd2FYRVZ0WTdyaXZ5MGdrNGJpNnE2ZVRJd1dReHNiSVprQ2lyVWNSVGQ1QXc9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.4_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjJTT2JFaDhLUHJmTDBiZzRHZDdsWklLZjc4Q2IzbldqM3ZZTnN2UTE0S0JKcDltY2d1K3Y3VXUvbzdPaTU4d0VRdG51Vi8rWElmK0JLM2pRK0JUd3dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTIyOTg0CWZpbGU6UGluZ1B1bHNlXzEuNC41X3g2NC1zZXR1cC5leGUKc3hTbDJYSUZBY0Y5UTZUM2xsbW1aKy9wWWtNbUJxYjgvS1ludE14aGptQmpEOEswRk5wZGpiM2syS0RNYTFJRHBDQXZScithS2FKSlQ0VnBWaXRtQVE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.5_x64-setup.exe"
     }
   }
 }
