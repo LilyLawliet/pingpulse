@@ -12,6 +12,54 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.4.8',
+    date: '28 September 2026',
+    items: [
+      {
+        title: 'Your name, and your access token, in the sidebar',
+        body:
+          'At the bottom of the sidebar is the name your licence was issued to. Open it and '
+          + 'your access token is there — hidden until you press the eye, with a button to '
+          + 'copy it, and the date it runs until. It is there for the day you need to sign in '
+          + 'on another computer. Keep it to your own team: anyone holding it can open your '
+          + 'dashboard, and each computer uses one of your seats.',
+      },
+      {
+        title: 'Set up in any order',
+        body:
+          'The steps were locked behind the business description, which made an order into a '
+          + 'rule it never was. Start with whichever you have to hand — putting the price '
+          + 'list up before writing the description is fine. If your token arrived without a '
+          + 'business attached, opening any step creates it, named after you, and Your '
+          + 'business is where you rename it.',
+      },
+      {
+        title: 'An uploaded price list now counts',
+        body:
+          'Prices and knowledge only ticked itself if you typed into "What you sell". A real '
+          + 'document — the price list, the brochure — could be uploaded, read and searched '
+          + 'correctly, and the step still said it was not done. It counts now, as soon as the '
+          + 'upload has been read.',
+      },
+      {
+        title: 'No inbox that turns into a lock',
+        body:
+          'Coming in to an unfinished setup drew the inbox first and replaced it with the '
+          + 'lock a few seconds later, and Setup then sat on a spinner for several more. '
+          + 'Nothing shut is drawn until the answer is in, and Setup opens on the step '
+          + 'straight away. If we cannot be reached at all, it says so and keeps trying '
+          + 'rather than locking anything.',
+      },
+      {
+        title: 'Hours is what turns booking on',
+        body:
+          'It is worded plainly now: without your opening hours the agent cannot book '
+          + 'anything and hands every booking request to a person instead. Where the hours '
+          + 'panel needs your timezone, it links straight to the step that sets it.',
+      },
+    ],
+  },
+  {
     version: '1.4.7',
     date: '28 September 2026',
     items: [
