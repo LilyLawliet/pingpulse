@@ -1,158 +1,110 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ArrowRight, Check, FlaskConical, Loader2, Rocket } from 'lucide-react'
-import { api } from '../api.js'
+import { ArrowRight, Check, FlaskConical, Radio, TriangleAlert } from 'lucide-react'
+import { STEPS } from '../setup.js'
 
 /**
- * What a shop with no conversations yet should be looking at.
+ * What a business with no conversations yet looks at.
  *
- * The middle of the dashboard used to be blank until the first customer
- * messaged, which is the worst moment to say nothing: it is the point where
- * somebody is deciding whether this thing works. The blank panel reads as
- * broken rather than as empty, and the four things that need doing before a
- * first message can arrive are not obvious from anywhere else on the screen.
+ * The inbox only opens once the required steps are done, so by the time this
+ * is on screen the agent is already able to answer. What is left to say is
+ * that it is waiting for the first customer, and which of the recommended
+ * steps would make that first conversation go better.
  *
- * The steps are checked against the real state rather than ticked off locally,
- * so a shop that connected WhatsApp on another machine sees it done here, and
- * so a step cannot be marked complete by clicking it.
- *
- * It disappears the moment a conversation exists. An onboarding panel that
- * outstays its welcome is clutter on the screen somebody uses all day.
+ * Steps are read from the same list and the same server answer as Setup, so
+ * this can never disagree with it about what is done. It disappears the moment
+ * a conversation exists.
  */
-export default function SetupChecklist({ onOpenSettings, onTest, className = '' }) {
-  const [state, setState] = useState(null)
-
-  const load = useCallback(async () => {
-    const next = { whatsapp: false, knowledge: false, prompt: false, tested: false }
-    try {
-      const status = await api.whatsappStatus()
-      next.whatsapp = Boolean(status.connected)
-    } catch {
-      // A failed check is not a completed step.
-    }
-    try {
-      const readiness = await api.knowledgeReadiness()
-      next.knowledge = Boolean(readiness?.ready || readiness?.documents > 0)
-    } catch {
-      /* not ready */
-    }
-    try {
-      const org = await api.activeOrganization()
-      next.prompt = Boolean((org?.sales_prompt || '').trim().length > 40)
-    } catch {
-      /* not ready */
-    }
-    try {
-      next.tested = localStorage.getItem('pingpulse.tested') === 'yes'
-    } catch {
-      /* storage blocked */
-    }
-    setState(next)
-  }, [])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  if (!state) {
-    return (
-      <section className={`panel flex-1 items-center justify-center ${className}`}>
-        <Loader2 size={16} className="animate-spin text-faint" />
-      </section>
-    )
-  }
-
-  const steps = [
-    {
-      done: state.whatsapp,
-      title: 'Connect your WhatsApp',
-      body: 'Scan the QR with the phone that owns your business number, or enter your Twilio details.',
-    },
-    {
-      done: state.prompt,
-      title: 'Say what you sell and how',
-      body: 'A few sentences in your own words. This is what the agent works from before anything else.',
-    },
-    {
-      done: state.knowledge,
-      title: 'Give it your prices',
-      body: 'Upload a price list or import your WhatsApp catalogue. It will never invent a price, so it can only quote what you give it.',
-    },
-    {
-      done: state.tested,
-      title: 'Try it before a customer does',
-      body: 'Use the sandbox to see exactly what it would say. Nothing is sent.',
-    },
-  ]
-  const remaining = steps.filter((step) => !step.done).length
-
-  const done = steps.length - remaining
+export default function SetupChecklist({ setup, offline = false, onOpenStep, onTest, className = '' }) {
+  const recommended = STEPS.filter((step) => step.tier === 'recommended')
+  const open = recommended.filter((step) => !setup?.done?.[step.key])
 
   return (
     <section className={`panel flex-1 overflow-y-auto ${className}`}>
       <div className="mx-auto w-full max-w-xl px-5 py-8 sm:px-8 sm:py-12">
-        <span className="mb-5 grid h-12 w-12 place-items-center rounded-2xl bg-accent/10 text-accent">
-          <Rocket size={22} />
-        </span>
-        <h2 className="text-xl font-semibold tracking-tight text-ink">
-          {remaining === 0 ? 'You are ready for customers' : 'Let’s get you live'}
-        </h2>
-        <p className="mt-1.5 text-sm leading-relaxed text-dim">
-          {remaining === 0
-            ? 'Everything is ready. Your first conversation will appear here as soon as somebody messages you.'
-            : 'Four things, and then the first customer who messages you gets an answer.'}
-        </p>
+        {offline ? (
+          <>
+            <span className="mb-5 grid h-12 w-12 place-items-center rounded-2xl bg-crit/10 text-crit">
+              <TriangleAlert size={22} />
+            </span>
+            <h2 className="text-xl font-semibold tracking-tight text-ink">
+              WhatsApp is not connected right now
+            </h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-dim">
+              Nothing reaches the agent until it reconnects, so nobody who messages you now
+              gets an answer.
+            </p>
+            <button type="button" onClick={() => onOpenStep?.('whatsapp')} className="btn-primary mt-4">
+              Reconnect WhatsApp <ArrowRight size={15} />
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="mb-5 grid h-12 w-12 place-items-center rounded-2xl bg-accent/10 text-accent">
+              <Radio size={22} />
+            </span>
+            <h2 className="text-xl font-semibold tracking-tight text-ink">
+              Your agent is ready for customers
+            </h2>
+            <p className="mt-1.5 text-sm leading-relaxed text-dim">
+              The first conversation appears here the moment somebody messages your WhatsApp
+              number, and the agent answers it straight away.
+            </p>
+          </>
+        )}
 
-        <div className="mt-5 flex items-center gap-3">
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-edge">
-            <div
-              className="h-full rounded-full bg-accent transition-[width] duration-500"
-              style={{ width: `${(done / steps.length) * 100}%` }}
-            />
-          </div>
-          <span className="text-xs font-semibold tabular-nums text-dim">
-            {done} of {steps.length}
-          </span>
-        </div>
+        {open.length > 0 && (
+          <>
+            <p className="mt-7 text-sm font-semibold text-ink">
+              Worth doing before they arrive
+            </p>
+            <p className="mt-0.5 text-xs text-dim">
+              Not required. Each one fills a gap the agent otherwise works around.
+            </p>
+          </>
+        )}
 
-        <ol className="mt-6 space-y-2.5">
-          {steps.map((step, index) => (
-            <li
-              key={step.title}
-              className={`flex gap-3.5 rounded-2xl border px-4 py-3.5 ${
-                step.done ? 'border-edge bg-panel-2/50' : 'border-edge bg-panel'
-              }`}
-            >
-              <span
-                className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-semibold ${
-                  step.done ? 'bg-accent text-on-accent' : 'bg-panel-2 text-dim ring-1 ring-inset ring-edge'
-                }`}
-              >
-                {step.done ? <Check size={14} /> : index + 1}
-              </span>
-              <div className="min-w-0">
-                <p
-                  className={`text-sm font-semibold ${step.done ? 'text-dim line-through' : 'text-ink'}`}
+        <ol className="mt-3 space-y-2.5">
+          {recommended.map((step) => {
+            const done = Boolean(setup?.done?.[step.key])
+            return (
+              <li key={step.key}>
+                <button
+                  type="button"
+                  onClick={() => onOpenStep?.(step.key)}
+                  className={`flex w-full items-center gap-3.5 rounded-2xl border px-4 py-3.5 text-left transition-colors ${
+                    done
+                      ? 'border-edge bg-panel-2/50'
+                      : 'border-edge bg-panel hover:border-accent/40 hover:bg-accent/5'
+                  }`}
                 >
-                  {step.title}
-                </p>
-                <p className="mt-0.5 text-xs leading-relaxed text-dim">{step.body}</p>
-              </div>
-            </li>
-          ))}
+                  <span
+                    className={`grid h-7 w-7 shrink-0 place-items-center rounded-full ${
+                      done ? 'bg-accent text-on-accent' : 'bg-panel-2 text-dim ring-1 ring-inset ring-edge'
+                    }`}
+                  >
+                    {done ? <Check size={14} /> : <step.icon size={14} />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={`block text-sm font-semibold ${done ? 'text-dim line-through' : 'text-ink'}`}
+                    >
+                      {step.title}
+                    </span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-dim">
+                      {done ? step.short : step.skipped}
+                    </span>
+                  </span>
+                  {!done && <ArrowRight size={15} className="shrink-0 text-faint" />}
+                </button>
+              </li>
+            )
+          })}
         </ol>
 
-        <div className="mt-6 flex flex-wrap gap-2">
-          {remaining > 0 && (
-            <button type="button" onClick={onOpenSettings} className="btn-primary">
-              Continue setup <ArrowRight size={15} />
-            </button>
-          )}
-          {onTest && (
-            <button type="button" onClick={onTest} className="btn-secondary">
-              <FlaskConical size={15} /> Test the agent
-            </button>
-          )}
-        </div>
+        {onTest && (
+          <button type="button" onClick={onTest} className="btn-secondary mt-6">
+            <FlaskConical size={15} /> Test the agent first
+          </button>
+        )}
       </div>
     </section>
   )

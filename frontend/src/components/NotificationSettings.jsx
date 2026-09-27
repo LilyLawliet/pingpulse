@@ -64,7 +64,7 @@ const OUTCOME = {
  * the settings saved — the question a person has is not "did it save" but
  * "will I hear it".
  */
-export default function NotificationSettings() {
+export default function NotificationSettings({ onChanged }) {
   const [state, setState] = useState(null)
   const [recent, setRecent] = useState([])
   // Whether this browser holds a live subscription, which is not the same
@@ -123,6 +123,8 @@ export default function NotificationSettings() {
         email: state.email || '',
       })
       setNote('Saved.')
+      // Setup ticks this step from the server, so it has to be told to look.
+      onChanged?.()
     } catch (err) {
       setError(saidPlainly(err))
     }
@@ -137,6 +139,7 @@ export default function NotificationSettings() {
       await subscribeWithPrompt(state)
       setNote('This device will now be alerted.')
       await load()
+      onChanged?.()
     } catch (err) {
       setError(saidPlainly(err))
     }
@@ -151,6 +154,7 @@ export default function NotificationSettings() {
       await unsubscribeDevice()
       setNote('This device will no longer be alerted.')
       await load()
+      onChanged?.()
     } catch (err) {
       setError(saidPlainly(err))
     }

@@ -26,7 +26,7 @@ const ACCEPT = '.pdf,.docx,.txt,.md'
  * passages, which is right for retrieval and wrong for someone looking at what
  * they sent: they uploaded one document, not twelve.
  */
-export default function KnowledgeSettings() {
+export default function KnowledgeSettings({ onChanged }) {
   const [sources, setSources] = useState([])
   const [readiness, setReadiness] = useState(null)
   const [catalogue, setCatalogue] = useState(null)
@@ -87,6 +87,8 @@ export default function KnowledgeSettings() {
     if (done.length) setNote(`Added ${done.join(', ')}.`)
     setBusy(false)
     await load()
+    // Setup ticks this step from the server, so it has to be told to look.
+    onChanged?.()
   }
 
   const remove = async (source) => {
@@ -98,6 +100,7 @@ export default function KnowledgeSettings() {
       setError(err.message)
     }
     await load()
+    onChanged?.()
   }
 
   return (
@@ -171,6 +174,7 @@ export default function KnowledgeSettings() {
                   }
                   setBusy(false)
                   await load()
+                  onChanged?.()
                 }}
                 className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-2xs font-semibold text-on-accent transition-opacity hover:opacity-90"
               >

@@ -77,7 +77,7 @@ function namedSources(keys, sources) {
 
 const isBlank = (value) => (Array.isArray(value) ? value.length === 0 : !value)
 
-export default function AgentSettings({ onCalendar }) {
+export default function AgentSettings({ onCalendar, onChanged }) {
   const [config, setConfig] = useState(null)
   const [zone, setZone] = useState('UTC')
   const [saving, setSaving] = useState(false)
@@ -298,6 +298,8 @@ export default function AgentSettings({ onCalendar }) {
       // stored copy for the same reason.
       setFromDocument(null)
       setDrafted(null)
+      // Setup ticks this step from the server, so it has to be told to look.
+      onChanged?.()
       setPreview(null)
       // Reloaded rather than assumed: the undo offer has to name the change
       // that was actually recorded, and the server decides what that was.

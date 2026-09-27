@@ -97,36 +97,80 @@ whatever your computer is set to.
 
 ## 5. Setting up, step by step
 
-**Setup** opens a page with eight steps in the order they need doing. Five are
-required and three are optional, and it says which is which — a shop with no
-board customisation works fine; a shop with no WhatsApp connection is not a
-shop that is running.
+**Setup** lists ten steps in three groups, most important first:
+
+- **Required — your agent cannot start without these.** Your business, prices
+  and knowledge, where you are, and connecting WhatsApp. Until all four are
+  done the inbox, board and analytics stay locked, and PingPulse tells you so
+  each time you come in, with the steps still open. **Test agent** opens as
+  soon as your business and prices are in, so you can try it before any
+  customer can reach it.
+- **Recommended — it runs without these, but something is missing.** Alerts,
+  hours and booking, and the calendar.
+- **Optional — fine to leave as they are.** Your board, learning and problems.
+
+WhatsApp is the last required step on purpose: the moment it connects,
+customers start getting answers, so everything the agent needs to answer them
+properly is already in place.
 
 Each step states what it is for and what happens if you skip it. The ticks are
 read from the real system, so a step cannot be marked done just by visiting
 it, and a business you set up on another machine already shows as done here.
 
-### Step 1 — Your business
+If your WhatsApp phone goes offline later, nothing locks. The inbox stays open
+and a red **WhatsApp is offline** warning appears until it reconnects.
 
-![Step one: the name, the trade, the currency and the timezone.](images/guide/03-setup-business.png)
+### Step 1 — Your business *(required)*
+
+![Step one: the name, what you sell and how the agent should sell it.](images/guide/03-setup-business.png)
 
 **Purpose.** Everything the agent says starts here. Without it, it has nothing
 to work from.
 
-**What you give.** Your business name, what you sell, your currency, and your
-timezone — picked from a list, so nobody has to type `America/New_York` from
-memory.
+**What you give.** Your business name, what you sell, your currency, the
+language it replies in, and a few sentences on how it should sell.
 
 **If you skip it.** The agent answers with no idea what you sell.
 
-> **Set the timezone even if nothing else.** It is the one field that quietly
-> breaks other things. Hours cannot be saved without it, so booking never
-> switches on — and a business that never noticed ran for months unable to
-> take a single appointment.
+**Worth knowing.** If you were given an access token with no business attached
+yet, this step is where you create it. Nothing else can be saved until it
+exists.
 
-### Step 2 — Connect WhatsApp
+### Step 2 — Prices and knowledge *(required)*
 
-![Step two: connect the number customers already message.](images/guide/04-setup-whatsapp.png)
+![Step two: upload what you already have.](images/guide/05-setup-knowledge.png)
+
+**Purpose.** The agent will never invent a price, so it can only quote what
+you give it here.
+
+**What you give.** The files you already have — a price list, a brochure, a
+product sheet, a PDF, a spreadsheet, photographs of a printed list. Upload
+several; they add up rather than replace each other. Prices written into
+"What you sell" in step one count too.
+
+**If you skip it.** It has to refuse every question about cost. It will do so
+politely, but that is a demo, not a working agent.
+
+**Worth knowing.** We show what we read back to you before it counts. If a
+document also states your opening hours, we offer to fill them in — as a
+suggestion you confirm, never as a silent change.
+
+### Step 3 — Where you are *(required)*
+
+**Purpose.** The timezone your day is in. Every opening hour, appointment and
+follow-up is read against it.
+
+**What you give.** Your timezone, picked from a list. The computer you are on
+is offered as the answer, so this is usually one click, and the current time
+there is shown so a wrong choice is obvious.
+
+**If you skip it.** Times are read as UTC instead. The agent offers hours you
+are shut and books people at the wrong time. Hours cannot be saved without it
+either, so booking never switches on.
+
+### Step 4 — Connect WhatsApp *(required)*
+
+![Step four: connect the number customers already message.](images/guide/04-setup-whatsapp.png)
 
 **Purpose.** The number your customers message.
 
@@ -139,30 +183,27 @@ running.
 **Worth knowing.** If you scan the QR, keep that phone online. If WhatsApp
 logs the session out, the screen says so and you scan again.
 
-### Step 3 — Prices and knowledge
+### Step 5 — Alerts *(recommended)*
 
-![Step three: upload what you already have.](images/guide/05-setup-knowledge.png)
+![Step five: where you are told when you are needed.](images/guide/07-setup-alerts.png)
 
-**Purpose.** The agent will never invent a price, so it can only quote what
-you give it here.
+**Purpose.** Where you are told when somebody asks for a person, or when the
+agent gets stuck.
 
-**What you give.** The files you already have — a price list, a brochure, a
-product sheet, a PDF, a spreadsheet, photographs of a printed list. Upload
-several; they add up rather than replace each other.
+**What you give.** An email address, notifications on this device, or both.
 
-**If you skip it.** It has to refuse every question about cost. It will do so
-politely, but that is a demo, not a working agent.
+**If you skip it.** Alerts are still raised — and delivered to nobody.
 
-**Worth knowing.** We show what we read back to you before it counts. If a
-document also states your opening hours, we offer to fill them in — as a
-suggestion you confirm, never as a silent change.
+**Worth knowing.** You can also switch on notifications for when the dashboard
+is closed. The panel shows what happened to recent alerts: delivered, still
+trying, failed, or raised with nowhere to go.
 
-### Step 4 — Hours and booking
+### Step 6 — Hours and booking *(recommended)*
 
-![Step four: opening hours per day, and whether booking can run at all.](images/guide/06-setup-hours.png)
+![Step six: opening hours per day, and whether booking can run at all.](images/guide/06-setup-hours.png)
 
-**Purpose.** Your timezone and opening hours. Appointments are only ever
-offered inside them.
+**Purpose.** Your opening hours. Appointments are only ever offered inside
+them.
 
 **What you give.** Opening and closing times per day — because "9 to 5 except
 Saturdays, when we shut at 1" is what shops actually do, and one range cannot
@@ -172,34 +213,27 @@ say it.
 requests to you instead of offering times.
 
 **Worth knowing.** This panel tells you plainly whether your agent can take an
-appointment at all, and what is stopping it — in the picture above, no hours
-and an unset timezone. That message exists because a real client ran its whole
-life unable to book anything and nothing anywhere said so.
+appointment at all, and what is stopping it. That message exists because a real
+client ran its whole life unable to book anything and nothing anywhere said so.
 
-**Appointments on your phone.** Press **Create a calendar link** and subscribe
-to it once from your phone's calendar. Every booking then appears in the
-calendar you already use — no account to connect, nothing to install, and
-nothing on your phone can change a booking by accident, because the feed is
-read-only.
+### Step 7 — Calendar *(recommended)*
 
-### Step 5 — Alerts
+**Purpose.** Every booking, in the calendar you already use.
 
-![Step five: where you are told when you are needed.](images/guide/07-setup-alerts.png)
+**What you give.** Press **Create my calendar link** and subscribe to it once
+from your phone's calendar — iPhone, Google Calendar or Outlook. No account to
+connect and nothing to install.
 
-**Purpose.** Where you are told when somebody asks for a person, or when the
-agent gets stuck.
+**If you skip it.** Appointments are still taken and shown in PingPulse, but
+nothing reaches the calendar you actually check.
 
-**What you give.** An email address, a phone number, or both.
+**Worth knowing.** The feed is read-only, so nothing on your phone can change a
+booking by accident. Anyone with the link can see your appointments; replacing
+it stops every phone already subscribed.
 
-**If you skip it.** Alerts are still raised — and delivered to nobody.
+### Step 8 — Your board *(optional)*
 
-**Worth knowing.** You can also switch on notifications for when the dashboard
-is closed. The panel shows what happened to recent alerts: delivered, still
-trying, failed, or raised with nowhere to go.
-
-### Step 6 — Your board *(optional)*
-
-![Step six: rename the columns to match how you actually work.](images/guide/08-setup-board.png)
+![Step eight: rename the columns to match how you actually work.](images/guide/08-setup-board.png)
 
 **Purpose.** Rename the columns to match how you actually track work.
 
@@ -213,9 +247,9 @@ dashboard follow whatever you call things. Deleting a column with people in it
 is refused, and the message tells you how many are there — the useful question
 is not "are you sure" but "where would those people go".
 
-### Step 7 — Learning *(optional)*
+### Step 9 — Learning *(optional)*
 
-![Step seven: let it pick up your way of writing.](images/guide/09-setup-learning.png)
+![Step nine: let it pick up your way of writing.](images/guide/09-setup-learning.png)
 
 **Purpose.** Let the agent pick up your way of writing from replies you have
 sent yourself.
@@ -231,9 +265,9 @@ drafted, shown to you, and only applied when you press the button — and the
 voice is editable first, because it is your voice and you will want to correct
 it. It never learns from its own replies, only from yours.
 
-### Step 8 — Problems *(optional)*
+### Step 10 — Problems *(optional)*
 
-![Step eight: what has gone wrong lately, in plain words.](images/guide/10-setup-problems.png)
+![Step ten: what has gone wrong lately, in plain words.](images/guide/10-setup-problems.png)
 
 **Purpose.** Anything that has gone wrong, and what it means.
 
@@ -268,7 +302,7 @@ replies are marked as the agent's, and yours are marked as yours.
 
 In the picture above, the customer asked for earbuds and the agent answered
 with two products, two real prices and two real stock counts — every one of
-them out of the price list that was uploaded in step three. It made up
+them out of the price list that was uploaded in step two. It made up
 nothing, because it cannot.
 
 ### The board

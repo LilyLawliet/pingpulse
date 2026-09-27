@@ -117,6 +117,9 @@ export default function OrgSelector({
             onChange={(e) => onSelect(e.target.value)}
             className="w-full cursor-pointer appearance-none truncate rounded-xl border border-edge bg-panel py-2 pl-9 pr-8 text-sm font-medium text-ink transition-colors hover:border-edge-hi focus:border-accent/60 focus:outline-none"
           >
+            {/* A token can arrive with no business yet. An empty box reads as
+                broken; this says what is true and where it gets fixed. */}
+            {organizations.length === 0 && <option value="">No business yet</option>}
             {organizations.map((org) => (
               <option key={org.id} value={org.id}>
                 {org.name}

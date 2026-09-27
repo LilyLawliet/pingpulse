@@ -1,21 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import {
-  Bell,
-  CalendarDays,
-  Check,
-  Columns3,
-  FileText,
-  Globe,
-  GraduationCap,
-  Loader2,
-  MessageSquare,
-  Save,
-  Store,
-  Settings,
-  TriangleAlert,
-} from 'lucide-react'
+import { ArrowRight, Check, Loader2, Lock, PartyPopper, Save, Settings, TriangleAlert } from 'lucide-react'
 import { PageHeader } from './ui.jsx'
 import { api } from '../api.js'
+import { STEPS, TIER_HINT, TIER_LABEL, readSetup, requiredLeft } from '../setup.js'
 import AgentSettings from './AgentSettings.jsx'
 import CalendarSettings from './CalendarSettings.jsx'
 import ErrorLog from './ErrorLog.jsx'
@@ -133,85 +120,11 @@ function sellingExample(currency) {
 const inputClass =
   'w-full rounded-xl border border-edge bg-panel px-3.5 py-2.5 text-sm text-ink placeholder:text-faint focus:border-accent/60 focus:outline-none focus:ring-4 focus:ring-accent/10'
 
-/** The required steps, for anything that only needs to count them. */
-export const REQUIRED_STEPS = [
-  'business',
-  'timezone',
-  'whatsapp',
-  'knowledge',
-  'hours',
-  'calendar',
-  'alerts',
-]
-
-/**
- * Which setup steps are done, read from the real backend.
- *
- * Exported so the sidebar can say how many are left without opening this page.
- */
-export async function readSetup() {
-  const next = {
-    business: false,
-    timezone: false,
-    whatsapp: false,
-    knowledge: false,
-    hours: false,
-    calendar: false,
-    alerts: false,
-  }
-  let org = null
-
-  try {
-    org = await api.activeOrganization()
-    next.business = Boolean((org?.sales_prompt || '').trim().length > 40)
-    // The timezone is a step of its own, and counted. Without one every hour
-    // this business states is read as UTC - so it offers times it is shut and
-    // books people an ocean away from when they meant, rather than failing
-    // where somebody can see it.
-    const zone = (org?.timezone || '').trim()
-    next.timezone = Boolean(zone) && zone !== 'UTC'
-    next.knowledge = Boolean((org?.product_rules || '').trim())
-  } catch {
-    /* not loaded */
-  }
-  try {
-    const status = await api.whatsappStatus()
-    next.whatsapp = Boolean(status?.connected)
-  } catch {
-    /* a failed check is not a finished step */
-  }
-  try {
-    const readiness = await api.knowledgeReadiness()
-    next.knowledge = next.knowledge || Boolean(readiness?.ready || readiness?.documents > 0)
-  } catch {
-    /* not ready */
-  }
-  try {
-    const config = await api.getAgentConfig()
-    next.hours = Object.keys(config?.agent_config?.business_hours || {}).length > 0
-  } catch {
-    /* not ready */
-  }
-  try {
-    // Booking that lands nowhere the owner looks is not finished setup, so
-    // this is read from the server like every other step rather than assumed.
-    const calendar = await api.getCalendarSubscription()
-    next.calendar = Boolean(calendar?.active)
-  } catch {
-    /* not ready */
-  }
-  try {
-    const alerts = await api.notificationSettings()
-    next.alerts = Boolean(alerts?.email || alerts?.devices > 0 || alerts?.subscribed)
-  } catch {
-    /* not ready */
-  }
-  return { next, org }
-}
-
 export default function SettingsPage({ open = true, onSaved, onProgress, initialStep = 'business' }) {
   const [active, setActive] = useState(initialStep)
-  const [ready, setReady] = useState(null)
+  const [setup, setSetup] = useState(null)
+  // Shown once, the moment the last required step is done.
+  const [justFinished, setJustFinished] = useState(false)
   const [form, setForm] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -220,7 +133,8 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
   // Every step's state comes from the backend. A step cannot be completed by
   // looking at it, and one done elsewhere already shows as done.
   const check = useCallback(async () => {
-    const { next, org } = await readSetup()
+    const state = await readSetup()
+    const org = state.org
     if (org) {
       setForm({
         name: org.name || '',
@@ -234,8 +148,9 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
     } else {
       setForm((was) => was || { ...EMPTY_FORM })
     }
-    setReady(next)
-    onProgress?.(next)
+    setSetup(state)
+    onProgress?.(state)
+    return state
   }, [onProgress])
 
   useEffect(() => {
@@ -249,6 +164,14 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
     onChange: (event) => setForm((f) => ({ ...f, [key]: event.target.value })),
   })
 
+  // Re-read after a save, and say so if that save was the last thing standing
+  // between this business and a running agent.
+  const recheck = async () => {
+    const before = requiredLeft(setup).length
+    const after = requiredLeft(await check()).length
+    if (before > 0 && after === 0) setJustFinished(true)
+  }
+
   const saveBusiness = async (event) => {
     event.preventDefault()
     setSaving(true)
@@ -258,13 +181,15 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
       // An empty box means "not answered", not "the empty string" - which the
       // server would reject as an invalid timezone.
       const zone = (form.timezone || '').trim()
-      const saved = await api.updateActiveOrganization({
-        ...form,
-        timezone: zone || undefined,
-      })
+      const body = { ...form, timezone: zone || undefined }
+      // An access token can arrive with no business attached. Then there is
+      // nothing to update yet, so this creates it - and makes it the active one.
+      const saved = setup?.hasOrg
+        ? await api.updateActiveOrganization(body)
+        : await api.createOrganization(body)
       setNote('Saved.')
-      onSaved?.(saved)
-      await check()
+      await onSaved?.(saved)
+      await recheck()
     } catch (err) {
       // The server writes these for a shop owner - "'Miami' is not a timezone.
       // Use an IANA name like America/New_York" is the whole answer, and
@@ -290,7 +215,7 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
       const saved = await api.updateActiveOrganization({ timezone: zone })
       setNote('Saved.')
       onSaved?.(saved)
-      await check()
+      await recheck()
     } catch (err) {
       setError(err?.message || 'That did not save. Check the details and try again.')
     }
@@ -304,93 +229,18 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
     setNote(null)
   }
 
-  const STEPS = [
-    {
-      key: 'business',
-      icon: Store,
-      title: 'Your business',
-      required: true,
-      why: 'Everything the agent says starts here. Without it, it has nothing to work from.',
-      skipped: 'The agent answers with no idea what you sell.',
-    },
-    {
-      key: 'timezone',
-      icon: Globe,
-      title: 'Where you are',
-      required: true,
-      why: 'The timezone your day is in. Every opening hour, appointment and follow-up is read against it.',
-      skipped: 'Times are read as UTC instead. The agent offers hours you are shut and books people at the wrong time.',
-    },
-    {
-      key: 'whatsapp',
-      icon: MessageSquare,
-      title: 'Connect WhatsApp',
-      required: true,
-      why: 'The number your customers message. Scan the QR with the phone that owns it, or use your own Twilio account.',
-      skipped: 'Nothing reaches you and nothing goes out. The agent is not running.',
-    },
-    {
-      key: 'knowledge',
-      icon: FileText,
-      title: 'Prices and knowledge',
-      required: true,
-      why: 'The agent will never invent a price, so it can only quote what you give it here.',
-      skipped: 'It has to refuse every question about cost.',
-    },
-    {
-      key: 'hours',
-      icon: Check,
-      title: 'Hours and booking',
-      required: true,
-      why: 'The days and times you are open. Appointments are only ever offered inside them.',
-      skipped: 'Booking stays switched off, and the agent hands booking requests to you instead.',
-    },
-    {
-      key: 'calendar',
-      icon: CalendarDays,
-      title: 'Calendar',
-      required: true,
-      why: 'A link that puts every booking in the calendar you already use. No account, nothing to sign into.',
-      skipped: 'Appointments are still taken and still shown here — but nothing reaches the calendar you actually check.',
-    },
-    {
-      key: 'alerts',
-      icon: Bell,
-      title: 'Alerts',
-      required: true,
-      why: 'Where you are told when somebody asks for a person, or the agent gets stuck.',
-      skipped: 'Alerts are still raised, and delivered to nobody.',
-    },
-    {
-      key: 'pipeline',
-      icon: Columns3,
-      title: 'Your board',
-      required: false,
-      why: 'Rename the columns to match how you actually track work.',
-      skipped: 'You keep the default columns, which is fine.',
-    },
-    {
-      key: 'learning',
-      icon: GraduationCap,
-      title: 'Learning',
-      required: false,
-      why: 'Let the agent pick up your way of writing from replies you send yourself.',
-      skipped: 'It keeps the tone you described above.',
-    },
-    {
-      key: 'problems',
-      icon: TriangleAlert,
-      title: 'Problems',
-      required: false,
-      why: 'Anything that has gone wrong, and what it means.',
-      skipped: null,
-    },
-  ]
-
-  const current = STEPS.find((s) => s.key === active) || STEPS[0]
-  const outstanding = STEPS.filter((s) => s.required && ready && !ready[s.key])
-  const requiredCount = STEPS.filter((s) => s.required).length
-  const requiredDone = requiredCount - outstanding.length
+  const ready = setup?.done || null
+  const noBusiness = setup !== null && !setup.hasOrg
+  // Until a business exists, every other step has nothing to attach to.
+  const current = noBusiness
+    ? STEPS[0]
+    : STEPS.find((s) => s.key === active) || STEPS[0]
+  const outstanding = requiredLeft(setup)
+  const requiredCount = STEPS.filter((s) => s.tier === 'required').length
+  const requiredDone = setup ? requiredCount - outstanding.length : 0
+  const firstOpen = outstanding[0]
+  // A phone that was connected and has dropped: set up, but not running now.
+  const whatsappDropped = setup?.hasOrg && setup.gate.whatsapp && !setup.done.whatsapp
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -398,15 +248,17 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
         icon={Settings}
         title="Setup"
         subtitle={
-          ready === null
+          setup === null
             ? 'Checking what is done…'
-            : outstanding.length === 0
-              ? 'Everything needed is done. The rest is optional.'
-              : `${outstanding.length} thing${outstanding.length === 1 ? '' : 's'} still needed before this runs properly.`
+            : noBusiness
+              ? 'Start by telling the agent about your business.'
+              : outstanding.length === 0
+                ? 'Your agent is running. Anything below is there to make it better.'
+                : `${outstanding.length} required step${outstanding.length === 1 ? '' : 's'} before your agent can start.`
         }
       >
-        {ready && (
-          <div className="flex items-center gap-3">
+        {setup && (
+          <div className="flex items-center gap-3" title="Required steps done">
             <div className="h-2 w-32 overflow-hidden rounded-full bg-edge">
               <div
                 className="h-full rounded-full bg-accent transition-[width] duration-500"
@@ -414,57 +266,156 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
               />
             </div>
             <span className="text-xs font-semibold tabular-nums text-dim">
-              {requiredDone}/{requiredCount}
+              {requiredDone}/{requiredCount} required
             </span>
           </div>
         )}
       </PageHeader>
 
+      {/* Said at the top of the page, in words, rather than left to be
+          inferred from a count - so nobody wonders why the inbox is locked. */}
+      {setup && (outstanding.length > 0 || justFinished || whatsappDropped) && (
+        <div className="shrink-0 px-4 pb-4 sm:px-6 lg:px-8">
+          {justFinished ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-accent/30 bg-accent/10 px-4 py-3">
+              <PartyPopper size={18} className="shrink-0 text-accent" />
+              <p className="min-w-0 flex-1 text-sm text-ink">
+                <span className="font-semibold">Your agent is running.</span>{' '}
+                <span className="text-dim">
+                  The inbox, board and analytics are open. The recommended steps are still
+                  worth doing.
+                </span>
+              </p>
+            </div>
+          ) : outstanding.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-warn/30 bg-warn/10 px-4 py-3">
+              <Lock size={16} className="shrink-0 text-warn" />
+              <p className="min-w-0 flex-1 text-sm text-ink">
+                <span className="font-semibold">Your agent is not running yet.</span>{' '}
+                <span className="text-dim">
+                  {noBusiness
+                    ? 'Fill in your business below to begin. '
+                    : `Still needed: ${outstanding.map((step) => step.title).join(', ')}. `}
+                  The rest of PingPulse opens once they are done.
+                </span>
+              </p>
+              {!noBusiness && firstOpen && firstOpen.key !== current.key && (
+                <button
+                  type="button"
+                  onClick={() => pick(firstOpen.key)}
+                  className="btn-secondary shrink-0 px-3 py-1.5 text-xs"
+                >
+                  Go to {firstOpen.title} <ArrowRight size={13} />
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-crit/30 bg-crit/10 px-4 py-3">
+              <TriangleAlert size={16} className="shrink-0 text-crit" />
+              <p className="min-w-0 flex-1 text-sm text-ink">
+                <span className="font-semibold">WhatsApp is not connected right now.</span>{' '}
+                <span className="text-dim">
+                  Nothing is being answered until it reconnects.
+                </span>
+              </p>
+              {current.key !== 'whatsapp' && (
+                <button
+                  type="button"
+                  onClick={() => pick('whatsapp')}
+                  className="btn-secondary shrink-0 px-3 py-1.5 text-xs"
+                >
+                  Reconnect <ArrowRight size={13} />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row lg:gap-6 lg:px-8 lg:pb-6">
-        {/* The steps. A row on a phone, a column on a desktop — the order is
-            the same either way, because the order is the instruction. */}
-        <nav className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-edge px-4 pb-3 sm:px-6 lg:w-[270px] lg:flex-col lg:self-start lg:overflow-visible lg:rounded-2xl lg:border lg:bg-panel lg:p-2 lg:shadow-card">
-          {STEPS.map((step, index) => {
-            const done = ready?.[step.key]
-            const selected = step.key === active
-            return (
-              <button
-                key={step.key}
-                onClick={() => pick(step.key)}
-                className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors lg:w-full ${
-                  selected
-                    ? 'bg-accent/10 text-ink ring-1 ring-inset ring-accent/25'
-                    : 'text-dim hover:bg-panel-2 hover:text-ink'
-                }`}
-              >
-                <span
-                  className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-semibold ${
-                    done
-                      ? 'bg-ok/15 text-ok'
-                      : step.required
-                        ? 'bg-warn/15 text-warn'
-                        : 'bg-panel-2 text-faint'
+        {/* The steps, grouped by how much they matter. A row on a phone, a
+            column on a desktop - the order is the same either way, because
+            the order is the instruction. */}
+        <nav className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-edge px-4 pb-3 sm:px-6 lg:w-[290px] lg:flex-col lg:self-start lg:overflow-visible lg:rounded-2xl lg:border lg:bg-panel lg:p-2 lg:shadow-card">
+          {['required', 'recommended', 'optional'].map((tier) => (
+            <div key={tier} className="flex shrink-0 gap-1.5 lg:block lg:space-y-0.5">
+              <div className="hidden px-3 pb-1 pt-3 first:pt-1 lg:block">
+                <p
+                  className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${
+                    tier === 'required' ? 'text-warn' : 'text-faint'
                   }`}
                 >
-                  {done ? <Check size={11} /> : index + 1}
-                </span>
-                <span className="min-w-0 flex-1 whitespace-nowrap text-sm font-medium lg:whitespace-normal">
-                  {step.title}
-                </span>
-                {!step.required && (
-                  <span className="hidden rounded-full bg-panel-2 px-2 py-0.5 text-[11px] text-faint lg:inline">optional</span>
-                )}
-              </button>
-            )
-          })}
+                  {TIER_LABEL[tier]}
+                </p>
+                <p className="text-2xs text-faint">{TIER_HINT[tier]}</p>
+              </div>
+              {STEPS.filter((step) => step.tier === tier).map((step) => {
+                const index = STEPS.indexOf(step)
+                const done = ready?.[step.key]
+                const dropped = step.key === 'whatsapp' && whatsappDropped
+                const selected = step.key === current.key
+                // With no business yet there is nothing for the other steps
+                // to be saved against.
+                const locked = noBusiness && step.key !== 'business'
+                return (
+                  <button
+                    key={step.key}
+                    type="button"
+                    disabled={locked}
+                    onClick={() => pick(step.key)}
+                    title={locked ? 'Save your business first' : undefined}
+                    className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 lg:w-full ${
+                      selected
+                        ? 'bg-accent/10 text-ink ring-1 ring-inset ring-accent/25'
+                        : 'text-dim hover:bg-panel-2 hover:text-ink disabled:hover:bg-transparent'
+                    }`}
+                  >
+                    <span
+                      className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-semibold ${
+                        dropped
+                          ? 'bg-crit/15 text-crit'
+                          : done
+                            ? 'bg-ok/15 text-ok'
+                            : step.tier === 'required'
+                              ? 'bg-warn/15 text-warn'
+                              : 'bg-panel-2 text-faint'
+                      }`}
+                    >
+                      {dropped ? '!' : done ? <Check size={11} /> : index + 1}
+                    </span>
+                    <span className="min-w-0 flex-1 whitespace-nowrap text-sm font-medium lg:whitespace-normal">
+                      {step.title}
+                      {step.tier === 'required' && !done && !dropped && (
+                        <span className="ml-1 text-warn lg:hidden" aria-label="required">
+                          *
+                        </span>
+                      )}
+                    </span>
+                    {locked && <Lock size={12} className="hidden shrink-0 text-faint lg:block" />}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:rounded-2xl lg:border lg:border-edge lg:bg-panel lg:px-8 lg:py-7 lg:shadow-card">
           <div className="mx-auto max-w-2xl space-y-6">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <current.icon size={18} className="shrink-0 text-accent" />
-                <h3 className="text-base font-semibold text-ink">{current.title}</h3>
+                <h3 className="text-base font-semibold text-ink">
+                  {noBusiness ? 'Create your business' : current.title}
+                </h3>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    current.tier === 'required'
+                      ? 'bg-warn/10 text-warn'
+                      : 'bg-panel-2 text-faint'
+                  }`}
+                >
+                  {TIER_LABEL[current.tier]}
+                </span>
                 {ready?.[current.key] && (
                   <span className="flex items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[11px] font-semibold text-ok">
                     <Check size={10} /> done
@@ -483,7 +434,7 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
               )}
             </div>
 
-            {active === 'business' &&
+            {current.key === 'business' &&
               (form === null ? (
                 <Loader2 size={16} className="animate-spin text-faint" />
               ) : (
@@ -561,12 +512,13 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
                     disabled={saving}
                     className="btn-primary"
                   >
-                    <Save size={14} /> {saving ? 'Saving…' : 'Save'}
+                    <Save size={14} />{' '}
+                    {saving ? 'Saving…' : noBusiness ? 'Create my business' : 'Save'}
                   </button>
                 </form>
               ))}
 
-            {active === 'timezone' &&
+            {current.key === 'timezone' &&
               (form === null ? (
                 <Loader2 size={16} className="animate-spin text-faint" />
               ) : (
@@ -624,16 +576,20 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
                 </form>
               ))}
 
-            {active === 'whatsapp' && <WhatsAppSettings onChanged={check} />}
-            {active === 'knowledge' && <KnowledgeSettings />}
-            {active === 'hours' && <AgentSettings onCalendar={() => pick('calendar')} />}
-            {active === 'calendar' && <CalendarSettings onChanged={check} />}
-            {active === 'alerts' && <NotificationSettings />}
-            {active === 'pipeline' && <PipelineEditor />}
-            {active === 'learning' && <LearningSettings />}
-            {active === 'problems' && <ErrorLog />}
+            {current.key === 'whatsapp' && <WhatsAppSettings onChanged={recheck} />}
+            {current.key === 'knowledge' && <KnowledgeSettings onChanged={recheck} />}
+            {current.key === 'hours' && (
+              <AgentSettings onCalendar={() => pick('calendar')} onChanged={recheck} />
+            )}
+            {current.key === 'calendar' && <CalendarSettings onChanged={recheck} />}
+            {current.key === 'alerts' && <NotificationSettings onChanged={recheck} />}
+            {current.key === 'pipeline' && <PipelineEditor />}
+            {current.key === 'learning' && <LearningSettings />}
+            {current.key === 'problems' && <ErrorLog />}
 
-            <Next steps={STEPS} active={active} onPick={pick} />
+            {!noBusiness && (
+              <Next steps={STEPS} active={current.key} ready={ready} onPick={pick} />
+            )}
           </div>
         </div>
       </div>
@@ -651,20 +607,32 @@ const EMPTY_FORM = {
   default_language: 'en',
 }
 
-/** Somewhere to go next, so the order is something you can follow rather than
- *  something you have to remember. */
-function Next({ steps, active, onPick }) {
+/**
+ * Somewhere to go next, so the order is something you can follow rather than
+ * something you have to remember.
+ *
+ * While required steps are open, "next" is the next one of those, not the
+ * next row down - otherwise it walks somebody into the recommended steps with
+ * the agent still unable to start.
+ */
+function Next({ steps, active, ready, onPick }) {
   const index = steps.findIndex((s) => s.key === active)
-  const next = steps[index + 1]
+  const openRequired = steps.filter((s) => s.tier === 'required' && !ready?.[s.key] && s.key !== active)
+  const next =
+    openRequired.find((s) => steps.indexOf(s) > index) || openRequired[0] || steps[index + 1]
   if (!next) return null
   return (
     <button
+      type="button"
       onClick={() => onPick(next.key)}
       className="flex w-full items-center justify-between rounded-xl border border-edge px-4 py-3 text-left text-sm text-dim transition-colors hover:border-accent/40 hover:bg-accent/5 hover:text-ink"
     >
       <span>
         Next: <span className="font-semibold">{next.title}</span>
-        {!next.required && <span className="text-faint"> (optional)</span>}
+        <span className={next.tier === 'required' ? 'text-warn' : 'text-faint'}>
+          {' '}
+          ({TIER_LABEL[next.tier].toLowerCase()})
+        </span>
       </span>
       <span aria-hidden>→</span>
     </button>

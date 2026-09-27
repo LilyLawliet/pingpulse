@@ -29,8 +29,11 @@ export default function ConnectionStatus({ compact = false, placement = 'down' }
   const load = useCallback(async () => {
     try {
       setStatus(await api.whatsappStatus())
-    } catch {
-      setStatus(null)
+    } catch (err) {
+      // A spinner that never stops reads as "still checking" forever. The
+      // server's own words - "no active organization" and the like - are the
+      // honest answer, and the next poll replaces them.
+      setStatus({ connected: false, reason: err?.message || 'Could not check the connection.' })
     }
   }, [])
 

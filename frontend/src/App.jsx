@@ -7,6 +7,7 @@ import {
   Columns3,
   FlaskConical,
   Inbox,
+  Lock,
   LogOut,
   Menu,
   MessagesSquare,
@@ -27,7 +28,9 @@ import ConversationList from './components/ConversationList.jsx'
 import ConversationThread from './components/ConversationThread.jsx'
 import MetricStrip, { MetricWindow } from './components/MetricStrip.jsx'
 import OrgSelector from './components/OrgSelector.jsx'
-import SettingsPage, { REQUIRED_STEPS, readSetup } from './components/SettingsPage.jsx'
+import SettingsPage from './components/SettingsPage.jsx'
+import { LockedPage, SetupWelcome } from './components/SetupGate.jsx'
+import { missingFor, readSetup, recommendedLeft, requiredLeft } from './setup.js'
 import PulseLine from './components/PulseLine.jsx'
 import BrandMark from './components/BrandMark.jsx'
 import WhatsNew, { hasUnseenUpgrades } from './components/WhatsNew.jsx'
@@ -99,8 +102,28 @@ function ThemeSwitch() {
  * are rows now, each one saying what is wrong and taking you to the fix, and
  * the block is absent entirely when nothing is.
  */
-function Attention({ waiting, alertsReach, alertsLost, onProspects, onAlerts }) {
+function Attention({
+  waiting,
+  alertsReach,
+  alertsLost,
+  whatsappDropped,
+  onProspects,
+  onAlerts,
+  onWhatsApp,
+}) {
   const items = []
+  // First, because it is the worst: set up and working before, and now
+  // nothing is being answered at all.
+  if (whatsappDropped) {
+    items.push({
+      key: 'whatsapp',
+      icon: CircleAlert,
+      tone: 'text-crit bg-crit/10',
+      title: 'WhatsApp is offline',
+      body: 'Nobody is being answered. Reconnect it.',
+      onClick: onWhatsApp,
+    })
+  }
   if (alertsLost > 0) {
     items.push({
       key: 'lost',
@@ -162,6 +185,8 @@ function Sidebar({
   view,
   onView,
   setupLeft,
+  suggestedLeft,
+  locked,
   connected,
   beat,
   unseen,
@@ -170,6 +195,7 @@ function Sidebar({
   org,
   attention,
   onClose,
+  statusKey,
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto p-3">
@@ -187,26 +213,39 @@ function Sidebar({
       <nav className="space-y-0.5" aria-label="Main">
         {VIEWS.map((item) => {
           const current = view === item.id
+          const closed = locked(item.id)
           return (
             <button
               key={item.id}
               type="button"
               onClick={() => onView(item.id)}
               aria-current={current ? 'page' : undefined}
+              title={closed ? 'Opens once the required setup steps are done' : undefined}
               className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
                 current
                   ? 'bg-accent/10 text-ink'
-                  : 'text-dim hover:bg-panel-2 hover:text-ink'
+                  : closed
+                    ? 'text-faint hover:bg-panel-2'
+                    : 'text-dim hover:bg-panel-2 hover:text-ink'
               }`}
             >
               <item.icon size={18} className={current ? 'text-accent' : 'text-faint'} />
               <span className="flex-1 text-left">{item.label}</span>
+              {closed && <Lock size={13} className="shrink-0 text-faint" aria-label="locked" />}
               {item.id === 'setup' && setupLeft > 0 && (
                 <span
                   className="rounded-full bg-warn/15 px-2 py-0.5 text-[11px] font-semibold text-warn"
-                  title={`${setupLeft} step${setupLeft === 1 ? '' : 's'} left`}
+                  title={`${setupLeft} required step${setupLeft === 1 ? '' : 's'} left`}
                 >
-                  {setupLeft} left
+                  {setupLeft} required
+                </span>
+              )}
+              {item.id === 'setup' && setupLeft === 0 && suggestedLeft > 0 && (
+                <span
+                  className="rounded-full bg-panel-2 px-2 py-0.5 text-[11px] font-semibold text-dim"
+                  title={`${suggestedLeft} recommended step${suggestedLeft === 1 ? '' : 's'} left`}
+                >
+                  {suggestedLeft} suggested
                 </span>
               )}
             </button>
@@ -231,7 +270,7 @@ function Sidebar({
               <PulseLine beat={beat} width={84} height={22} />
             </span>
           </div>
-          <ConnectionStatus placement="up" />
+          <ConnectionStatus placement="up" key={statusKey} />
         </div>
 
         <ThemeSwitch />
@@ -292,7 +331,14 @@ function Dashboard({ onSignedOut }) {
   // Setup remounts on this, so "open alert settings" lands on that step even
   // when Setup is already the page on screen.
   const [setupStep, setSetupStep] = useState({ key: 'business', n: 0 })
-  const [setupLeft, setSetupLeft] = useState(0)
+  // What the server says about setup. Null until the first answer, so
+  // nothing locks or welcomes on a guess while it is still loading.
+  const [setup, setSetup] = useState(null)
+  const [orgsLoaded, setOrgsLoaded] = useState(false)
+  // The welcome is shown on every visit until the agent can run. Once a
+  // visit has shown it, it stays closed for the rest of that visit.
+  const [welcomed, setWelcomed] = useState(false)
+  const [showWelcome, setShowWelcome] = useState(false)
   /**
    * Which pane a phone is showing in the inbox: the list, or one
    * conversation. From `lg` up both are on screen and this is ignored.
@@ -326,6 +372,7 @@ function Dashboard({ onSignedOut }) {
       if (err.status === 401) onSignedOut()
       setOrganizations([])
     }
+    setOrgsLoaded(true)
   }, [onSignedOut])
 
   const loadContacts = useCallback(async () => {
@@ -416,16 +463,32 @@ function Dashboard({ onSignedOut }) {
     countWaiting()
   }, [countWaiting, selectedOrg])
 
-  const onSetupProgress = useCallback((ready) => {
-    setSetupLeft(REQUIRED_STEPS.filter((key) => !ready[key]).length)
-  }, [])
+  const onSetupProgress = useCallback((state) => setSetup(state), [])
 
+  // Read once the business list is known - including when it is empty, which
+  // is a token issued with no business yet and the first thing to set up.
   useEffect(() => {
-    if (!selectedOrg) return
+    if (!orgsLoaded) return
     readSetup()
-      .then(({ next }) => onSetupProgress(next))
+      .then(onSetupProgress)
       .catch(() => {})
-  }, [selectedOrg, onSetupProgress])
+  }, [orgsLoaded, selectedOrg, onSetupProgress])
+
+  const setupLeft = requiredLeft(setup)
+  const suggestedLeft = recommendedLeft(setup)
+  const locked = useCallback((id) => missingFor(id, setup).length > 0, [setup])
+
+  // Coming in to a business that cannot run yet: say so, and start them on
+  // Setup at the first thing missing rather than on a locked inbox.
+  useEffect(() => {
+    if (!setup || welcomed) return
+    setWelcomed(true)
+    const left = requiredLeft(setup)
+    if (left.length === 0) return
+    setShowWelcome(true)
+    setSetupStep((was) => ({ key: left[0].key, n: was.n + 1 }))
+    setView('setup')
+  }, [setup, welcomed])
 
   const go = useCallback((next) => {
     setView(next)
@@ -443,14 +506,15 @@ function Dashboard({ onSignedOut }) {
   useEffect(() => {
     const onKey = (event) => {
       if (event.key !== 'Escape') return
-      if (showProspects) setShowProspects(false)
+      if (showWelcome) setShowWelcome(false)
+      else if (showProspects) setShowProspects(false)
       else if (showUpgrades) setShowUpgrades(false)
       else if (showDrawer) setShowDrawer(false)
       else if (menuOpen) setMenuOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [showProspects, showUpgrades, showDrawer, menuOpen])
+  }, [showWelcome, showProspects, showUpgrades, showDrawer, menuOpen])
 
   const openConversation = useCallback((id) => {
     setSelectedContact(id)
@@ -624,14 +688,24 @@ function Dashboard({ onSignedOut }) {
     onSignedOut()
   }
 
+  // Remounts the connection light when the business or its WhatsApp step
+  // changes, so it never lags a minute behind what Setup just said.
+  const statusKey = `${selectedOrg || 'none'}-${setup?.done?.whatsapp ? 1 : 0}`
+  const whatsappDropped = Boolean(setup?.hasOrg && setup.gate.whatsapp && !setup.done.whatsapp)
   const attentionCount =
-    (waiting > 0 ? 1 : 0) + (alertsReach === false ? 1 : 0) + (alertsLost > 0 ? 1 : 0)
+    (waiting > 0 ? 1 : 0) +
+    (alertsReach === false ? 1 : 0) +
+    (alertsLost > 0 ? 1 : 0) +
+    (whatsappDropped ? 1 : 0)
 
   const sidebar = (onClose) => (
     <Sidebar
       view={view}
       onView={go}
-      setupLeft={setupLeft}
+      setupLeft={setupLeft.length}
+      suggestedLeft={suggestedLeft.length}
+      locked={locked}
+      statusKey={statusKey}
       connected={connected}
       beat={events.length}
       unseen={unseen}
@@ -662,6 +736,8 @@ function Dashboard({ onSignedOut }) {
           waiting={waiting}
           alertsReach={alertsReach}
           alertsLost={alertsLost}
+          whatsappDropped={whatsappDropped}
+          onWhatsApp={() => openSetup('whatsapp')}
           onProspects={() => {
             setShowProspects(true)
             setMenuOpen(false)
@@ -725,11 +801,20 @@ function Dashboard({ onSignedOut }) {
             className={`h-2 w-2 shrink-0 rounded-full ${connected ? 'animate-breathe bg-accent' : 'bg-warn'}`}
             title={connected ? 'Live' : 'Reconnecting'}
           />
-          <ConnectionStatus compact />
+          <ConnectionStatus compact key={statusKey} />
         </header>
 
         <main className="min-h-0 flex-1">
           <PageBoundary key={view}>
+          {missingFor(view, setup).length > 0 ? (
+            <LockedPage
+              title={currentView.label}
+              missing={missingFor(view, setup)}
+              setup={setup}
+              onStart={() => openSetup(missingFor(view, setup)[0].key)}
+            />
+          ) : (
+          <>
           {view === 'inbox' && (
             <div className="flex h-full min-h-0 flex-col">
               <div
@@ -764,7 +849,9 @@ function Dashboard({ onSignedOut }) {
                 />
                 {emptyInbox ? (
                   <SetupChecklist
-                    onOpenSettings={() => openSetup()}
+                    setup={setup}
+                    offline={whatsappDropped}
+                    onOpenStep={(key) => openSetup(key)}
                     onTest={() => go('test')}
                   />
                 ) : (
@@ -803,9 +890,17 @@ function Dashboard({ onSignedOut }) {
             <SettingsPage
               key={setupStep.n}
               initialStep={setupStep.key}
-              onSaved={loadOrganizations}
+              onSaved={async () => {
+                // A business created from Setup becomes the active one, and
+                // everything shown for the old "no business" has to be re-read.
+                await loadOrganizations()
+                await loadContacts()
+                await loadStats()
+              }}
               onProgress={onSetupProgress}
             />
+          )}
+          </>
           )}
           </PageBoundary>
         </main>
@@ -828,8 +923,11 @@ function Dashboard({ onSignedOut }) {
                 }`}
               >
                 <item.icon size={20} />
-                {item.short}
-                {item.id === 'setup' && setupLeft > 0 && (
+                <span className="flex items-center gap-0.5">
+                  {locked(item.id) && <Lock size={9} aria-label="locked" />}
+                  {item.short}
+                </span>
+                {item.id === 'setup' && setupLeft.length > 0 && (
                   <span className="absolute right-[calc(50%-16px)] top-1.5 h-2 w-2 rounded-full bg-warn ring-2 ring-panel" />
                 )}
               </button>
@@ -838,6 +936,17 @@ function Dashboard({ onSignedOut }) {
         </nav>
       </div>
 
+      {showWelcome && (
+        <SetupWelcome
+          setup={setup}
+          left={setupLeft}
+          onClose={() => setShowWelcome(false)}
+          onStart={() => {
+            setShowWelcome(false)
+            if (setupLeft[0]) openSetup(setupLeft[0].key)
+          }}
+        />
+      )}
       {showUpgrades && <WhatsNew onClose={() => setShowUpgrades(false)} />}
       {showDrawer && activeContact && (
         <LeadProfileDrawer
