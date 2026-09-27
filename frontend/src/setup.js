@@ -148,6 +148,26 @@ export const RECOMMENDED_STEPS = STEPS.filter((s) => s.tier === 'recommended').m
 const RECOMMENDED_KEYS = ['alerts', 'hours', 'calendar']
 
 /**
+ * The answers from /knowledge/readiness that mean the agent has something to
+ * quote from right now.
+ *
+ * The step used to tick on `product_rules` being anything at all, so a
+ * seventeen-character line and no files read as done - while the panel
+ * underneath it, reading the same server, said "add what you sell, or upload
+ * a price list, so the agent has something to quote". Two answers to one
+ * question, and the wrong one was the one that counted.
+ *
+ * Named rather than "anything but thin": the server decides this, and a
+ * status added later should have to be listed here before it ticks a required
+ * step. `catalogue` is deliberately absent - it means a WhatsApp catalogue is
+ * readable and waiting to be imported, which the agent cannot quote from yet.
+ *
+ * Because it is the server's answer, removing the last document unticks the
+ * step by itself.
+ */
+const QUOTABLE = new Set(['ready', 'described'])
+
+/**
  * Whether WhatsApp is connected, from the channel list.
  *
  * The same rule /whatsapp/status applies - the active channel, a live paired
@@ -193,8 +213,7 @@ export async function readSetup(onRequired) {
   let org = null
   let hasOrg = true
   let error = false
-  let rules = false
-  let documents = false
+  let knowledge = false
   let whatsapp = { connected: false, ever: false }
   const rest = { alerts: false, hours: false, calendar: false }
 
@@ -208,17 +227,12 @@ export async function readSetup(onRequired) {
   const required = [
     api.activeOrganization().then((found) => {
       org = found
-      rules = Boolean((found?.product_rules || '').trim())
     }, failed),
     api.listChannels().then((channels) => {
       whatsapp = whatsappFrom(channels)
     }, failed),
     api.knowledgeReadiness().then((readiness) => {
-      // The endpoint answers with a status and a count of indexed passages.
-      // This used to read `ready` and `documents > 0`, neither of which it
-      // returns - so an uploaded price list never ticked this step, and only
-      // typing into "What you sell" did.
-      documents = readiness?.status === 'ready' || (readiness?.documents?.passages || 0) > 0
+      knowledge = QUOTABLE.has(readiness?.status)
     }, failed),
   ]
   // One that fails is a step not yet done, never a reason to hold the rest up.
@@ -240,7 +254,7 @@ export async function readSetup(onRequired) {
       // The server fills in "You are a helpful sales agent." for a business
       // that never wrote its own, so a line that short is not an answer.
       business: Boolean((org?.sales_prompt || '').trim().length > 40),
-      knowledge: rules || documents,
+      knowledge,
       // Created businesses start on UTC. Nobody chose that, so it does not count.
       timezone: Boolean(zone) && zone !== 'UTC',
       whatsapp: whatsapp.connected,

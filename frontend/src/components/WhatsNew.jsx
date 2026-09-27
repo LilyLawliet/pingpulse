@@ -12,6 +12,23 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.4.9',
+    date: '28 September 2026',
+    items: [
+      {
+        title: 'A step is only ticked when it is actually done',
+        body:
+          'Prices and knowledge ticked itself the moment "What you sell" had anything in it '
+          + 'at all — a single line and no price list counted as finished, while the panel '
+          + 'underneath it said, correctly, that the agent had nothing to quote from. Two '
+          + 'answers to one question, and the wrong one was the one that counted. The tick '
+          + 'now comes from the same judgement the panel shows, so if you remove the last '
+          + 'document the step goes back to not done — and if it is a required step, it '
+          + 'says plainly that your agent will not start until it is finished.',
+      },
+    ],
+  },
+  {
     version: '1.4.8',
     date: '28 September 2026',
     items: [

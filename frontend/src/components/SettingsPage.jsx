@@ -508,10 +508,24 @@ export default function SettingsPage({
               </div>
               <p className="mt-1.5 text-sm leading-relaxed text-dim">{current.why}</p>
               {current.skipped && !ready?.[current.key] && (
-                <p className="mt-3 flex items-start gap-2 rounded-xl bg-warn/10 px-3.5 py-2.5 text-xs leading-relaxed text-warn">
-                  <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+                <p
+                  className={`mt-3 flex items-start gap-2 rounded-xl px-3.5 py-2.5 text-xs leading-relaxed ${
+                    current.tier === 'required'
+                      ? 'bg-crit/10 text-crit'
+                      : 'bg-warn/10 text-warn'
+                  }`}
+                >
+                  {current.tier === 'required' ? (
+                    <Lock size={12} className="mt-0.5 shrink-0" />
+                  ) : (
+                    <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+                  )}
                   <span>
-                    <strong className="font-semibold">If you skip this:</strong>{' '}
+                    <strong className="font-semibold">
+                      {current.tier === 'required'
+                        ? 'Your agent will not start until this is done.'
+                        : 'If you skip this:'}
+                    </strong>{' '}
                     {current.skipped}
                   </span>
                 </p>
