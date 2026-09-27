@@ -96,6 +96,22 @@ const opened = new Set()
 const attempts = new Map()
 const MAX_PAIRING_ATTEMPTS = 5
 
+// Pairings that have exhausted their attempts and must not start themselves
+// again. Only a person asking - POST /pair - clears one.
+//
+// Without this a dead pairing was immortal. Giving up deleted its attempt
+// count, so the next thing to touch the session got a fresh five tries, and
+// the websocket watcher called startSession on every connect - so a browser
+// tab left open on the pairing screen restarted a doomed pairing every few
+// minutes, for days. Two of them ran from the 25th to the 27th of September.
+//
+// That is not merely wasted work. WhatsApp answered 408 and closed every
+// attempt before offering a code, for every session on this host, including
+// new ones - and the moment the abandoned pairings were stopped, the very
+// next attempt produced a QR in twenty seconds. Backing off is the only lever
+// there is here, so a pairing that has given up has to actually stop.
+const gaveUp = new Set()
+
 /** Live sessions, keyed by channel id. */
 const sessions = new Map()
 /**
@@ -247,6 +263,15 @@ function reportStatus(sessionId, status, extra = {}) {
 async function startSession(sessionId) {
   if (sessions.has(sessionId)) return sessions.get(sessionId)
 
+  // A pairing that has given up does not restart itself. Everything that
+  // reaches this function other than POST /pair is automatic - a websocket
+  // reconnecting, a send arriving - and none of those represent somebody
+  // waiting at the screen with a phone in their hand.
+  if (gaveUp.has(sessionId)) {
+    log.info({ sessionId }, 'not restarting a pairing that gave up — ask again to retry')
+    return null
+  }
+
   const folder = path.join(SESSIONS_DIR, sessionId)
   const { state, saveCreds } = await useMultiFileAuthState(folder)
 
@@ -377,7 +402,9 @@ async function startSession(sessionId) {
       attempts.set(sessionId, tries)
 
       if (tries >= MAX_PAIRING_ATTEMPTS) {
-        attempts.delete(sessionId)
+        // Deliberately not cleared here. Resetting the count on the way out
+        // is what let the next caller start the whole doomed cycle again.
+        gaveUp.add(sessionId)
         log.error(
           { sessionId, status, tries },
           'giving up on this pairing — WhatsApp closed every attempt before offering a code',
@@ -492,6 +519,9 @@ app.post('/pair', async (request, response) => {
     // Otherwise a pairing that gave up earlier would refuse on the first
     // attempt of every later try, and clicking again would do nothing.
     attempts.delete(sessionId)
+    // A person is at the screen asking, which is the only thing that earns a
+    // dead pairing another go.
+    gaveUp.delete(sessionId)
     await startSession(sessionId)
     response.json({ ok: true })
   } catch (error) {
@@ -722,9 +752,15 @@ wss.on('connection', (socket, request) => {
     }),
   )
 
-  startSession(sessionId).catch((error) =>
-    log.error({ error: error.message }, 'pairing failed'),
-  )
+  // Watching is not asking. A tab left open on the pairing screen reconnects
+  // its websocket every few minutes, and starting a pairing on each of those
+  // is what kept two abandoned sessions hammering WhatsApp for two days. The
+  // client asks for a pairing through POST /pair; this only watches one.
+  if (!sessions.has(sessionId) && !gaveUp.has(sessionId)) {
+    startSession(sessionId).catch((error) =>
+      log.error({ error: error.message }, 'pairing failed'),
+    )
+  }
 
   socket.on('close', () => {
     watchers.get(sessionId)?.delete(socket)

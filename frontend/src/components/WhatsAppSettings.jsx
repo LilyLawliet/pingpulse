@@ -31,6 +31,14 @@ export default function WhatsAppSettings({ onChanged }) {
   const [error, setError] = useState(null)
   const [copied, setCopied] = useState(false)
   const [pairing, setPairing] = useState(null) // { channelId, status, qr }
+  // Whether the other way of connecting is on screen.
+  //
+  // Somebody scanning a QR is doing one thing, and the Twilio chooser, the
+  // number field and two credential boxes sat underneath it the whole time -
+  // none of which they need, all of which they have to read past to find out
+  // whether the code has arrived yet. A business runs on one method at a
+  // time, so the second one is a door, not a panel.
+  const [showOtherWay, setShowOtherWay] = useState(false)
 
   // A business runs on one WhatsApp method, so there is at most one channel.
   const connected = channels?.[0] || null
@@ -342,8 +350,37 @@ export default function WhatsAppSettings({ onChanged }) {
       )}
 
       {/* -------------------------- strategy ------------------------------- */}
-      <div className="space-y-3 rounded-lg border border-edge bg-bg/50 p-3.5">
-        <span className="eyebrow block">Connection strategy</span>
+      {/* Nothing set up yet means they have to choose, so it opens itself.
+          Once something is connected - or a scan is in progress - this is the
+          way to the method they did not pick, and stays shut until asked. */}
+      {!showOtherWay && (channels?.length > 0 || pairing) && (
+        <button
+          type="button"
+          onClick={() => setShowOtherWay(true)}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-edge bg-bg/50 px-3 py-2.5 text-2xs text-dim transition-colors hover:border-edge-hi hover:text-ink"
+        >
+          <Cloud size={12} className="text-faint" />
+          Connect a different way
+        </button>
+      )}
+
+      <div
+        className={`space-y-3 rounded-lg border border-edge bg-bg/50 p-3.5 ${
+          showOtherWay || !(channels?.length > 0 || pairing) ? '' : 'hidden'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="eyebrow block">Connection strategy</span>
+          {showOtherWay && (
+            <button
+              type="button"
+              onClick={() => setShowOtherWay(false)}
+              className="text-2xs text-faint transition-colors hover:text-ink"
+            >
+              Hide
+            </button>
+          )}
+        </div>
         {/* One method at a time, enforced by the API. Saying so here means the
             existing connection disappearing is expected rather than alarming. */}
         {connected ? (
@@ -387,7 +424,7 @@ export default function WhatsAppSettings({ onChanged }) {
               className={`rounded-lg border p-3 text-left transition-colors ${
                 provider === id
                   ? 'border-accent/60 bg-accent/8'
-                  : 'border-edge hover:border-edge-strong'
+                  : 'border-edge hover:border-edge-hi'
               }`}
             >
               <Icon size={15} className={provider === id ? 'text-accent' : 'text-faint'} />
