@@ -81,14 +81,17 @@ Three areas, and they do not move:
   the choice. A dash means *no answer yet*, not zero — nought out of nought
   leads is not a nought per cent conversion rate, it is a question that has
   not been asked enough times.
-- **On the left** — every conversation. Search by name, number, company or
-  notes; filter by stage, unread, or the ones you have taken over.
-- **On the right** — the pipeline, showing where everybody stands at a glance.
+- **In the middle** — every conversation. Search by name, number, company or
+  notes; filter by stage, unread, or the ones you have taken over. Pick one
+  and it opens beside the list.
+- **Down the left** — **Inbox**, **Board**, **Analytics**, **Test agent** and
+  **Setup**. Anything that needs you appears underneath them under *Needs
+  attention*, and **Setup** carries a count of what is still outstanding.
 
-The buttons along the top open everything else: **Setup**, **Board**,
-**Analytics**, **Try it** and **What's new**. If you run more than one
-business, the selector at the top left switches between them, and everything
-on the screen follows.
+The business selector sits at the top of that sidebar; if you run more than
+one, switching it moves everything on the screen with it. At the bottom are
+your connection light, **What's new**, and a switch for light, dark or
+whatever your computer is set to.
 
 ---
 
@@ -291,7 +294,7 @@ Only leads somebody has put a number against are counted in the money, and the
 screen says how many that is — so a total is never quietly built out of
 guesses.
 
-### Try it
+### Test agent
 
 ![The sandbox: the real agent, with nothing sent.](images/guide/14-try-it.png)
 
@@ -299,7 +302,7 @@ Type any message and see what the agent would say. It runs the same knowledge,
 the same rules and the same prompt as the live one — with the sending removed.
 Nothing reaches a customer, and no fake lead appears on your board.
 
-Use it after you upload a price list, after you change your hours, or whenever
+It is called **Test agent** in the sidebar. Use it after you upload a price list, after you change your hours, or whenever
 you want to know what it will say before it says it to somebody who matters.
 
 If your message is one the agent would hand to a human, the sandbox shows you
@@ -395,7 +398,7 @@ rather than only here.
    been logged out, nothing arrives and nothing sends.
 3. Check **Setup → Alerts**. If alerts have nowhere to go, you will not have
    been told.
-4. Use **Try it** to reproduce it safely before changing anything.
+4. Use **Test agent** to reproduce it safely before changing anything.
 
 If it is still wrong, send us what **Problems** shows — including the folded
 technical detail — and the time it happened.

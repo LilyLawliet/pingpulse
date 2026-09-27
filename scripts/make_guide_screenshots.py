@@ -33,8 +33,12 @@ VIEWPORT = {"width": 1680, "height": 1050}
 # answering 403 around the ninth.
 DEVICE_ID = "guide-screenshots-fixed-device"
 
+# 'dark', 'light', or '' to leave it on the system setting. The redesign ships
+# both, and a screenshot of only one of them says nothing about the other.
+THEME = os.environ.get("GUIDE_THEME", "")
 
-async def settle(page, ms: int = 900) -> None:
+
+async def settle(page, ms: int = 2200) -> None:
     """Let the network go quiet and animations finish before shooting."""
     try:
         await page.wait_for_load_state("networkidle", timeout=8000)
@@ -118,6 +122,9 @@ async def main() -> int:
         print("usage: python scripts/make_guide_screenshots.py <access-token>")
         return 2
 
+    global OUT_DIR
+    if THEME:
+        OUT_DIR = OUT_DIR.parent / f"{OUT_DIR.name}-{THEME}"
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     taken: list[str] = []
 
@@ -132,7 +139,10 @@ async def main() -> int:
         )
         # Set before the app's first script runs, so it never mints its own.
         await context.add_init_script(
-            f"try {{ localStorage.setItem('pingpulse.device', '{DEVICE_ID}'); }} catch (e) {{}}"
+            "try {"
+            f" localStorage.setItem('pingpulse.device', '{DEVICE_ID}');"
+            + (f" localStorage.setItem('pingpulse.theme', '{THEME}');" if THEME else "")
+            + " } catch (e) {}"
         )
         page = await context.new_page()
 
@@ -144,7 +154,7 @@ async def main() -> int:
             taken.append("01-sign-in")
             await page.fill("input[placeholder^='pp_live']", token)
             await page.keyboard.press("Enter")
-            await settle(page, 2500)
+            await settle(page, 9000)
 
         print("workspace")
         for name in ("02-workspace",):
@@ -175,10 +185,13 @@ async def main() -> int:
             await dismiss(page)
 
         print("a real conversation")
+        # Back to the inbox first. Setup is a sidebar view in the redesign
+        # rather than a modal, so there is nothing for Escape to close and the
+        # conversation rows are simply not on screen until we navigate.
+        await click_text(page, "Inbox")
+        await settle(page, 2500)
         try:
-            row = page.locator("button, li, div[role='button']").filter(
-                has_text="Maryam"
-            )
+            row = page.get_by_role("button", name=re.compile("Maryam|Daniel"))
             if await row.count():
                 await row.first.click(timeout=4000)
                 await settle(page, 1500)
@@ -191,8 +204,12 @@ async def main() -> int:
         for label, name in [
             ("Board", "12-board"),
             ("Analytics", "13-analytics"),
-            ("Try it", "14-try-it"),
-            ("What's new", "15-whats-new"),
+            # Named "Try it" before the redesign moved navigation into the
+            # sidebar; both are tried so this keeps working either way.
+            ("Test agent", "14-try-it"),
+            # The label uses a typographic apostrophe, so a straight one in
+            # the source here matches nothing and the screen goes uncaptured.
+            ("What’s new", "15-whats-new"),
         ]:
             if await click_text(page, label):
                 await settle(page, 1800)

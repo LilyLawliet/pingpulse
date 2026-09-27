@@ -1,11 +1,11 @@
 {
-  "version": "1.4.5",
-  "notes": "Connecting WhatsApp no longer buries the QR code under the Twilio form, and a pairing that has given up stops retrying instead of quietly blocking every later attempt.",
-  "pub_date": "2026-09-27T15:29:48+00:00",
+  "version": "1.4.6",
+  "notes": "A redesigned dashboard: navigation moves to a sidebar, everything that needs you is gathered under Needs attention, and the whole thing comes in light as well as dark.",
+  "pub_date": "2026-09-27T17:25:46+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjJTT2JFaDhLUHJmTDBiZzRHZDdsWklLZjc4Q2IzbldqM3ZZTnN2UTE0S0JKcDltY2d1K3Y3VXUvbzdPaTU4d0VRdG51Vi8rWElmK0JLM2pRK0JUd3dBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTIyOTg0CWZpbGU6UGluZ1B1bHNlXzEuNC41X3g2NC1zZXR1cC5leGUKc3hTbDJYSUZBY0Y5UTZUM2xsbW1aKy9wWWtNbUJxYjgvS1ludE14aGptQmpEOEswRk5wZGpiM2syS0RNYTFJRHBDQXZScithS2FKSlQ0VnBWaXRtQVE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.5_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMnpGZlJoZmFrMFhkL1FGWU5kbGQ2UXkwS1Vwb0dxWUlXQUtnem5kQUNMWVZBdW9SYXZHV2FzNTJIak4vQUJOaG9xTDlKZGhPZTM2YVA1NG9JSHRLZ1FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTI5OTQ1CWZpbGU6UGluZ1B1bHNlXzEuNC42X3g2NC1zZXR1cC5leGUKMjM5NEszcEtBeFkvc0J5UXdWSlFjckdwOEN3S2dDMWlmTFJlZlBzN2hZL0xyMDlhNm5lTExXeDk4cUd3M1kwS3FxRVQyL24zY2JJNklaQk5weStMQkE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.6_x64-setup.exe"
     }
   }
 }
