@@ -50,6 +50,7 @@ import AgentSandbox from './components/AgentSandbox.jsx'
 import Analytics from './components/Analytics.jsx'
 import KanbanBoard from './components/KanbanBoard.jsx'
 import { PageBoundary } from './components/ui.jsx'
+import Profile, { ProfileButton } from './components/Profile.jsx'
 
 /**
  * The places you can go. One list drives the sidebar on a desktop and the tab
@@ -204,6 +205,7 @@ function Sidebar({
   attention,
   onClose,
   statusKey,
+  profile,
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto p-3">
@@ -280,6 +282,8 @@ function Sidebar({
           </div>
           <ConnectionStatus placement="up" key={statusKey} />
         </div>
+
+        {profile}
 
         <ThemeSwitch />
 
@@ -373,6 +377,10 @@ function Dashboard({ onSignedOut }) {
   // visit has shown it, it stays closed for the rest of that visit.
   const [welcomed, setWelcomed] = useState(false)
   const [showWelcome, setShowWelcome] = useState(false)
+  // Who the token was issued to. The dashboard never asked before, so the
+  // only place a client could see their own name was the email with the token.
+  const [session, setSession] = useState(null)
+  const [showProfile, setShowProfile] = useState(false)
   /**
    * Which pane a phone is showing in the inbox: the list, or one
    * conversation. From `lg` up both are on screen and this is ignored.
@@ -523,6 +531,13 @@ function Dashboard({ onSignedOut }) {
     checkSetup()
   }, [checkSetup])
 
+  useEffect(() => {
+    api
+      .session()
+      .then(setSession)
+      .catch(() => {})
+  }, [])
+
   // Asked again when the business changes. The first time selectedOrg is set
   // is the list arriving for the business already being checked, so that one
   // is skipped rather than asked twice.
@@ -582,7 +597,8 @@ function Dashboard({ onSignedOut }) {
   useEffect(() => {
     const onKey = (event) => {
       if (event.key !== 'Escape') return
-      if (showWelcome) setShowWelcome(false)
+      if (showProfile) setShowProfile(false)
+      else if (showWelcome) setShowWelcome(false)
       else if (showProspects) setShowProspects(false)
       else if (showUpgrades) setShowUpgrades(false)
       else if (showDrawer) setShowDrawer(false)
@@ -590,7 +606,7 @@ function Dashboard({ onSignedOut }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [showWelcome, showProspects, showUpgrades, showDrawer, menuOpen])
+  }, [showProfile, showWelcome, showProspects, showUpgrades, showDrawer, menuOpen])
 
   const openConversation = useCallback((id) => {
     setSelectedContact(id)
@@ -786,6 +802,15 @@ function Dashboard({ onSignedOut }) {
       suggestedLeft={suggestedLeft.length}
       locked={locked}
       statusKey={statusKey}
+      profile={
+        <ProfileButton
+          session={session}
+          onOpen={() => {
+            setShowProfile(true)
+            setMenuOpen(false)
+          }}
+        />
+      }
       connected={connected}
       beat={events.length}
       unseen={unseen}
@@ -892,7 +917,11 @@ function Dashboard({ onSignedOut }) {
               shows conversations to somebody who is meant to be finishing
               setup - and remembering the last answer to skip the wait would
               do the same on the visit after it stopped being true. */}
-          {!setupKnown(setup) && view !== 'setup' ? (
+          {/* The same holds for the moment between the answer arriving and
+              the welcome taking over: a locked page drawn for one render and
+              then replaced is still a flash. */}
+          {(!setupKnown(setup) || (!welcomed && requiredLeft(setup).length > 0)) &&
+          view !== 'setup' ? (
             <CheckingSetup failed={Boolean(setup?.error)} onRetry={checkSetup} />
           ) : missingFor(view, setup).length > 0 ? (
             <LockedPage
@@ -1034,6 +1063,15 @@ function Dashboard({ onSignedOut }) {
             setShowWelcome(false)
             if (setupLeft[0]) openSetup(setupLeft[0].key)
           }}
+        />
+      )}
+      {showProfile && (
+        <Profile
+          session={session}
+          // The one the server accepted at sign-in, which is what is stored.
+          token={session?.token || auth.token}
+          onClose={() => setShowProfile(false)}
+          onSignOut={signOut}
         />
       )}
       {showUpgrades && <WhatsNew onClose={() => setShowUpgrades(false)} />}

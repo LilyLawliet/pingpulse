@@ -142,7 +142,7 @@ async def _adopt_document_facts(db, organization_id, text: str, source: str) -> 
     zone = (getattr(organization, "timezone", None) or "").strip()
     if facts.get("business_hours") and (not zone or zone == "UTC"):
         waiting = (
-            "Set your timezone in Your business first — without one these hours "
+            "Set your timezone in Where you are first — without one these hours "
             "would be read as UTC. Then open Hours and booking to save them."
         )
     else:

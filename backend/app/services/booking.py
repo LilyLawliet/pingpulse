@@ -1307,7 +1307,7 @@ def readiness(organization) -> dict:
                     "Hours cannot be saved until it is set, and every time "
                     "offered is read against it."
                 ),
-                "fix": "Pick it in Your business.",
+                "fix": "Pick it in Where you are.",
             }
         )
 

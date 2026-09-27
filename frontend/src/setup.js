@@ -73,6 +73,16 @@ export const STEPS = [
     skipped: 'Nothing reaches you and nothing goes out. The agent is not running.',
   },
   {
+    key: 'hours',
+    tier: 'recommended',
+    icon: Clock,
+    title: 'Hours and booking',
+    short: 'When you are open, so it can book appointments',
+    why: 'The days and times you are open. This is what lets the agent book: appointments are only ever offered inside these hours.',
+    skipped:
+      'The agent cannot book anything. Every booking request is handed to a team member to arrange instead.',
+  },
+  {
     key: 'alerts',
     tier: 'recommended',
     icon: Bell,
@@ -80,15 +90,6 @@ export const STEPS = [
     short: 'Where you hear about hand-offs and problems',
     why: 'Where you are told when somebody asks for a person, or the agent gets stuck.',
     skipped: 'Alerts are still raised, and delivered to nobody.',
-  },
-  {
-    key: 'hours',
-    tier: 'recommended',
-    icon: Clock,
-    title: 'Hours and booking',
-    short: 'When you are open, so it can book appointments',
-    why: 'The days and times you are open. Appointments are only ever offered inside them.',
-    skipped: 'Booking stays switched off, and the agent hands booking requests to you instead.',
   },
   {
     key: 'calendar',
@@ -213,7 +214,11 @@ export async function readSetup(onRequired) {
       whatsapp = whatsappFrom(channels)
     }, failed),
     api.knowledgeReadiness().then((readiness) => {
-      documents = Boolean(readiness?.ready || readiness?.documents > 0)
+      // The endpoint answers with a status and a count of indexed passages.
+      // This used to read `ready` and `documents > 0`, neither of which it
+      // returns - so an uploaded price list never ticked this step, and only
+      // typing into "What you sell" did.
+      documents = readiness?.status === 'ready' || (readiness?.documents?.passages || 0) > 0
     }, failed),
   ]
   // One that fails is a step not yet done, never a reason to hold the rest up.

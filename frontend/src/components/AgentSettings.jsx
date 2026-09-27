@@ -77,7 +77,18 @@ function namedSources(keys, sources) {
 
 const isBlank = (value) => (Array.isArray(value) ? value.length === 0 : !value)
 
-export default function AgentSettings({ onCalendar, onChanged }) {
+/** "Where you are", as a way to get there when Setup hands one over. */
+function ZoneLink({ onTimezone, strong = false }) {
+  const label = <span className={strong ? 'font-semibold' : 'text-dim'}>Where you are</span>
+  if (!onTimezone) return label
+  return (
+    <button type="button" onClick={onTimezone} className="underline underline-offset-2 hover:opacity-80">
+      {label}
+    </button>
+  )
+}
+
+export default function AgentSettings({ onCalendar, onChanged, onTimezone }) {
   const [config, setConfig] = useState(null)
   const [zone, setZone] = useState('UTC')
   const [saving, setSaving] = useState(false)
@@ -342,15 +353,15 @@ export default function AgentSettings({ onCalendar, onChanged }) {
       )}
 
       {/*
-        Shown, not edited. The timezone is asked for in Your business, which
-        comes first - it used to be asked for here, after the document upload
-        that needs it, so it was reliably unset at the one moment it mattered.
+        Shown, not edited. The timezone is its own required step, Where you
+        are - it used to be asked for here, after the document upload that
+        needs it, so it was reliably unset at the one moment it mattered.
         Keeping an editor in both places is how one of them goes stale.
       */}
       {zone && zone !== 'UTC' ? (
         <p className="text-2xs text-faint">
           Times below are read in <span className="text-dim">{zone}</span>. Change it
-          in <span className="text-dim">Your business</span>.
+          in <ZoneLink onTimezone={onTimezone} />.
         </p>
       ) : (
         <p className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2 text-2xs text-warn">
@@ -359,7 +370,7 @@ export default function AgentSettings({ onCalendar, onChanged }) {
             Your timezone is not set, so these hours cannot be saved yet — without one
             they would be read as UTC, which is how somebody gets offered an
             appointment in the middle of the night. Set it in{' '}
-            <span className="font-semibold">Your business</span>.
+            <ZoneLink onTimezone={onTimezone} strong />.
           </span>
         </p>
       )}

@@ -161,6 +161,7 @@ export default function SettingsPage({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)
+  const [preparing, setPreparing] = useState(false)
 
   // Every step's state comes from the backend. A step cannot be completed by
   // looking at it, and one done elsewhere already shows as done.
@@ -206,8 +207,6 @@ export default function SettingsPage({
   useEffect(() => {
     if (open) check()
   }, [open, check])
-
-  if (!open) return null
 
   const field = (key) => ({
     value: form?.[key] ?? '',
@@ -272,6 +271,47 @@ export default function SettingsPage({
     setSaving(false)
   }
 
+  /**
+   * Make the business record exist, named after whoever the token was issued to.
+   *
+   * Every step saves against a business, and an access token can arrive
+   * without one. Asking people to fill in the business form first just to
+   * unlock the rest made the order a rule when it is not one: a price list
+   * can go up before the description is written. So opening any other step
+   * creates the record with the token's name, which the business step can
+   * rename. It stays unticked until that step is actually filled in.
+   */
+  const creating = useRef(null)
+  const ensureBusiness = useCallback(() => {
+    if (creating.current) return creating.current
+    creating.current = (async () => {
+      setPreparing(true)
+      setError(null)
+      try {
+        let name = ''
+        try {
+          name = ((await api.session())?.client_name || '').trim()
+        } catch {
+          /* fall back to a neutral name the business step can change */
+        }
+        await api.createOrganization({ name: name || 'My business' })
+        await onSaved?.()
+        await check({ refill: true })
+      } catch (err) {
+        setError(err?.message || 'Could not set up your business. Try again.')
+        creating.current = null
+      }
+      setPreparing(false)
+    })()
+    return creating.current
+  }, [check, onSaved])
+
+  const needsBusiness =
+    setup !== null && !setup.hasOrg && (STEPS.find((s) => s.key === active) || STEPS[0]).key !== 'business'
+  useEffect(() => {
+    if (needsBusiness) ensureBusiness()
+  }, [needsBusiness, ensureBusiness])
+
   /** Move to a step, without carrying the last one's message along. */
   const pick = (key) => {
     setActive(key)
@@ -281,10 +321,12 @@ export default function SettingsPage({
 
   const ready = setup?.done || null
   const noBusiness = setup !== null && !setup.hasOrg
-  // Until a business exists, every other step has nothing to attach to.
-  const current = noBusiness
-    ? STEPS[0]
-    : STEPS.find((s) => s.key === active) || STEPS[0]
+  // Every step is open, in any order. They are independent of each other; the
+  // only thing they share is the business record they are saved against.
+  const current = STEPS.find((s) => s.key === active) || STEPS[0]
+  // Opening another step before that record exists creates it (see below), so
+  // until it does there is nothing for that step's panel to load or save.
+  const waitingForBusiness = noBusiness && current.key !== 'business'
   const outstanding = requiredLeft(setup)
   const requiredCount = STEPS.filter((s) => s.tier === 'required').length
   const requiredDone = setup ? requiredCount - outstanding.length : 0
@@ -343,13 +385,11 @@ export default function SettingsPage({
               <p className="min-w-0 flex-1 text-sm text-ink">
                 <span className="font-semibold">Your agent is not running yet.</span>{' '}
                 <span className="text-dim">
-                  {noBusiness
-                    ? 'Fill in your business below to begin. '
-                    : `Still needed: ${outstanding.map((step) => step.title).join(', ')}. `}
-                  The rest of PingPulse opens once they are done.
+                  Still needed: {outstanding.map((step) => step.title).join(', ')}. Do them in
+                  any order - the rest of PingPulse opens once they are done.
                 </span>
               </p>
-              {!noBusiness && firstOpen && firstOpen.key !== current.key && (
+              {firstOpen && firstOpen.key !== current.key && (
                 <button
                   type="button"
                   onClick={() => pick(firstOpen.key)}
@@ -404,20 +444,15 @@ export default function SettingsPage({
                 const done = ready?.[step.key]
                 const dropped = step.key === 'whatsapp' && whatsappDropped
                 const selected = step.key === current.key
-                // With no business yet there is nothing for the other steps
-                // to be saved against.
-                const locked = noBusiness && step.key !== 'business'
                 return (
                   <button
                     key={step.key}
                     type="button"
-                    disabled={locked}
                     onClick={() => pick(step.key)}
-                    title={locked ? 'Save your business first' : undefined}
-                    className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 lg:w-full ${
+                    className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors lg:w-full ${
                       selected
                         ? 'bg-accent/10 text-ink ring-1 ring-inset ring-accent/25'
-                        : 'text-dim hover:bg-panel-2 hover:text-ink disabled:hover:bg-transparent'
+                        : 'text-dim hover:bg-panel-2 hover:text-ink'
                     }`}
                   >
                     <span
@@ -441,7 +476,6 @@ export default function SettingsPage({
                         </span>
                       )}
                     </span>
-                    {locked && <Lock size={12} className="hidden shrink-0 text-faint lg:block" />}
                   </button>
                 )
               })}
@@ -455,7 +489,7 @@ export default function SettingsPage({
               <div className="flex flex-wrap items-center gap-2">
                 <current.icon size={18} className="shrink-0 text-accent" />
                 <h3 className="text-base font-semibold text-ink">
-                  {noBusiness ? 'Create your business' : current.title}
+                  {noBusiness && current.key === 'business' ? 'Create your business' : current.title}
                 </h3>
                 <span
                   className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
@@ -626,20 +660,39 @@ export default function SettingsPage({
                 </form>
               ))}
 
-            {current.key === 'whatsapp' && <WhatsAppSettings onChanged={recheck} />}
-            {current.key === 'knowledge' && <KnowledgeSettings onChanged={recheck} />}
-            {current.key === 'hours' && (
-              <AgentSettings onCalendar={() => pick('calendar')} onChanged={recheck} />
+            {waitingForBusiness ? (
+              error && !preparing ? (
+                <div className="space-y-3">
+                  <p className="rounded-lg bg-crit/10 px-3 py-2 text-2xs text-crit">{error}</p>
+                  <button type="button" onClick={ensureBusiness} className="btn-secondary">
+                    Try again
+                  </button>
+                </div>
+              ) : (
+                <p className="flex items-center gap-2 text-sm text-dim">
+                  <Loader2 size={15} className="animate-spin" /> Setting up your business…
+                </p>
+              )
+            ) : (
+              <>
+              {current.key === 'whatsapp' && <WhatsAppSettings onChanged={recheck} />}
+              {current.key === 'knowledge' && <KnowledgeSettings onChanged={recheck} />}
+              {current.key === 'hours' && (
+                <AgentSettings
+                    onCalendar={() => pick('calendar')}
+                    onTimezone={() => pick('timezone')}
+                    onChanged={recheck}
+                  />
+              )}
+              {current.key === 'calendar' && <CalendarSettings onChanged={recheck} />}
+              {current.key === 'alerts' && <NotificationSettings onChanged={recheck} />}
+              {current.key === 'pipeline' && <PipelineEditor />}
+              {current.key === 'learning' && <LearningSettings />}
+              {current.key === 'problems' && <ErrorLog />}
+              </>
             )}
-            {current.key === 'calendar' && <CalendarSettings onChanged={recheck} />}
-            {current.key === 'alerts' && <NotificationSettings onChanged={recheck} />}
-            {current.key === 'pipeline' && <PipelineEditor />}
-            {current.key === 'learning' && <LearningSettings />}
-            {current.key === 'problems' && <ErrorLog />}
 
-            {!noBusiness && (
-              <Next steps={STEPS} active={current.key} ready={ready} onPick={pick} />
-            )}
+            <Next steps={STEPS} active={current.key} ready={ready} onPick={pick} />
           </div>
         </div>
       </div>

@@ -90,8 +90,14 @@ Three areas, and they do not move:
 
 The business selector sits at the top of that sidebar; if you run more than
 one, switching it moves everything on the screen with it. At the bottom are
-your connection light, **What's new**, and a switch for light, dark or
-whatever your computer is set to.
+your connection light, your name, **What's new**, and a switch for light, dark
+or whatever your computer is set to.
+
+Click your name to open your **profile**: the name your access token was issued
+to, the token itself — hidden until you press the eye, with a button to copy it
+— and the date it is valid until. It is there for the day you sign in on
+another computer. Keep it private: anyone who has it can open your dashboard,
+and each computer uses one of your licence's seats.
 
 ---
 
@@ -105,13 +111,17 @@ whatever your computer is set to.
   each time you come in, with the steps still open. **Test agent** opens as
   soon as your business and prices are in, so you can try it before any
   customer can reach it.
-- **Recommended — it runs without these, but something is missing.** Alerts,
-  hours and booking, and the calendar.
+- **Recommended — it runs without these, but something is missing.** Hours
+  and booking, alerts, and the calendar. Without hours the agent cannot book
+  anything: every booking request is handed to a team member instead.
 - **Optional — fine to leave as they are.** Your board, learning and problems.
 
-WhatsApp is the last required step on purpose: the moment it connects,
-customers start getting answers, so everything the agent needs to answer them
-properly is already in place.
+The steps can be done in any order. Start with whichever you have to hand —
+uploading a price list before writing the description is fine. If your access
+token came without a business attached, opening any step creates it, named
+after you, and **Your business** is where you rename it. WhatsApp is listed
+last among the required steps on purpose: the moment it connects, customers
+start getting answers, so it is best connected once the rest is in place.
 
 Each step states what it is for and what happens if you skip it. The ticks are
 read from the real system, so a step cannot be marked done just by visiting
@@ -132,9 +142,9 @@ language it replies in, and a few sentences on how it should sell.
 
 **If you skip it.** The agent answers with no idea what you sell.
 
-**Worth knowing.** If you were given an access token with no business attached
-yet, this step is where you create it. Nothing else can be saved until it
-exists.
+**Worth knowing.** "What you sell" is the short summary the agent reads with
+every reply. The full detail — the price list, the brochure — goes in **Prices
+and knowledge**, which it searches for each question.
 
 ### Step 2 — Prices and knowledge *(required)*
 
@@ -183,9 +193,27 @@ running.
 **Worth knowing.** If you scan the QR, keep that phone online. If WhatsApp
 logs the session out, the screen says so and you scan again.
 
-### Step 5 — Alerts *(recommended)*
+### Step 5 — Hours and booking *(recommended)*
 
-![Step five: where you are told when you are needed.](images/guide/07-setup-alerts.png)
+![Step five: opening hours per day, and whether booking can run at all.](images/guide/06-setup-hours.png)
+
+**Purpose.** Your opening hours. Appointments are only ever offered inside
+them.
+
+**What you give.** Opening and closing times per day — because "9 to 5 except
+Saturdays, when we shut at 1" is what shops actually do, and one range cannot
+say it.
+
+**If you skip it.** The agent cannot book anything. Every booking request is
+handed to a team member to arrange instead of being offered a time.
+
+**Worth knowing.** This panel tells you plainly whether your agent can take an
+appointment at all, and what is stopping it. That message exists because a real
+client ran its whole life unable to book anything and nothing anywhere said so.
+
+### Step 6 — Alerts *(recommended)*
+
+![Step six: where you are told when you are needed.](images/guide/07-setup-alerts.png)
 
 **Purpose.** Where you are told when somebody asks for a person, or when the
 agent gets stuck.
@@ -197,24 +225,6 @@ agent gets stuck.
 **Worth knowing.** You can also switch on notifications for when the dashboard
 is closed. The panel shows what happened to recent alerts: delivered, still
 trying, failed, or raised with nowhere to go.
-
-### Step 6 — Hours and booking *(recommended)*
-
-![Step six: opening hours per day, and whether booking can run at all.](images/guide/06-setup-hours.png)
-
-**Purpose.** Your opening hours. Appointments are only ever offered inside
-them.
-
-**What you give.** Opening and closing times per day — because "9 to 5 except
-Saturdays, when we shut at 1" is what shops actually do, and one range cannot
-say it.
-
-**If you skip it.** Booking stays switched off, and the agent hands booking
-requests to you instead of offering times.
-
-**Worth knowing.** This panel tells you plainly whether your agent can take an
-appointment at all, and what is stopping it. That message exists because a real
-client ran its whole life unable to book anything and nothing anywhere said so.
 
 ### Step 7 — Calendar *(recommended)*
 
