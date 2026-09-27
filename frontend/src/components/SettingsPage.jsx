@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Bell,
+  CalendarDays,
   Check,
   Columns3,
   FileText,
+  Globe,
   GraduationCap,
   Loader2,
   MessageSquare,
@@ -15,6 +17,7 @@ import {
 import { PageHeader } from './ui.jsx'
 import { api } from '../api.js'
 import AgentSettings from './AgentSettings.jsx'
+import CalendarSettings from './CalendarSettings.jsx'
 import ErrorLog from './ErrorLog.jsx'
 import KnowledgeSettings from './KnowledgeSettings.jsx'
 import LearningSettings from './LearningSettings.jsx'
@@ -80,6 +83,20 @@ const detectedZone = (() => {
   }
 })()
 
+/** What the clock says in a zone, so a wrong guess is visible before it books
+ *  somebody at four in the morning. */
+function localTime(zone) {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: zone,
+    }).format(new Date())
+  } catch {
+    return '—'
+  }
+}
+
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'PKR', 'AED', 'SAR', 'INR', 'TRY', 'NGN', 'ZAR']
 const LANGUAGES = [
   ['en', 'English'],
@@ -117,7 +134,15 @@ const inputClass =
   'w-full rounded-xl border border-edge bg-panel px-3.5 py-2.5 text-sm text-ink placeholder:text-faint focus:border-accent/60 focus:outline-none focus:ring-4 focus:ring-accent/10'
 
 /** The required steps, for anything that only needs to count them. */
-export const REQUIRED_STEPS = ['business', 'whatsapp', 'knowledge', 'hours', 'alerts']
+export const REQUIRED_STEPS = [
+  'business',
+  'timezone',
+  'whatsapp',
+  'knowledge',
+  'hours',
+  'calendar',
+  'alerts',
+]
 
 /**
  * Which setup steps are done, read from the real backend.
@@ -127,23 +152,24 @@ export const REQUIRED_STEPS = ['business', 'whatsapp', 'knowledge', 'hours', 'al
 export async function readSetup() {
   const next = {
     business: false,
+    timezone: false,
     whatsapp: false,
     knowledge: false,
     hours: false,
+    calendar: false,
     alerts: false,
   }
   let org = null
 
   try {
     org = await api.activeOrganization()
-    // The timezone counts. Without one every hour this business states is
-    // read as UTC, so a step calling itself done without it would be
-    // reporting a setup that cannot book anybody correctly.
+    next.business = Boolean((org?.sales_prompt || '').trim().length > 40)
+    // The timezone is a step of its own, and counted. Without one every hour
+    // this business states is read as UTC - so it offers times it is shut and
+    // books people an ocean away from when they meant, rather than failing
+    // where somebody can see it.
     const zone = (org?.timezone || '').trim()
-    next.business =
-      Boolean((org?.sales_prompt || '').trim().length > 40) &&
-      Boolean(zone) &&
-      zone !== 'UTC'
+    next.timezone = Boolean(zone) && zone !== 'UTC'
     next.knowledge = Boolean((org?.product_rules || '').trim())
   } catch {
     /* not loaded */
@@ -163,6 +189,14 @@ export async function readSetup() {
   try {
     const config = await api.getAgentConfig()
     next.hours = Object.keys(config?.agent_config?.business_hours || {}).length > 0
+  } catch {
+    /* not ready */
+  }
+  try {
+    // Booking that lands nowhere the owner looks is not finished setup, so
+    // this is read from the server like every other step rather than assumed.
+    const calendar = await api.getCalendarSubscription()
+    next.calendar = Boolean(calendar?.active)
   } catch {
     /* not ready */
   }
@@ -240,6 +274,36 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
     setSaving(false)
   }
 
+  const saveTimezone = async (event) => {
+    event.preventDefault()
+    const zone = (form.timezone || '').trim()
+    setNote(null)
+    if (!zone) {
+      setError('Choose your timezone first.')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      // Only the zone. Sending the whole form from here would write back a
+      // business description this step never showed anybody.
+      const saved = await api.updateActiveOrganization({ timezone: zone })
+      setNote('Saved.')
+      onSaved?.(saved)
+      await check()
+    } catch (err) {
+      setError(err?.message || 'That did not save. Check the details and try again.')
+    }
+    setSaving(false)
+  }
+
+  /** Move to a step, without carrying the last one's message along. */
+  const pick = (key) => {
+    setActive(key)
+    setError(null)
+    setNote(null)
+  }
+
   const STEPS = [
     {
       key: 'business',
@@ -248,6 +312,14 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
       required: true,
       why: 'Everything the agent says starts here. Without it, it has nothing to work from.',
       skipped: 'The agent answers with no idea what you sell.',
+    },
+    {
+      key: 'timezone',
+      icon: Globe,
+      title: 'Where you are',
+      required: true,
+      why: 'The timezone your day is in. Every opening hour, appointment and follow-up is read against it.',
+      skipped: 'Times are read as UTC instead. The agent offers hours you are shut and books people at the wrong time.',
     },
     {
       key: 'whatsapp',
@@ -270,8 +342,16 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
       icon: Check,
       title: 'Hours and booking',
       required: true,
-      why: 'Your timezone and opening hours. Appointments are only ever offered inside them.',
+      why: 'The days and times you are open. Appointments are only ever offered inside them.',
       skipped: 'Booking stays switched off, and the agent hands booking requests to you instead.',
+    },
+    {
+      key: 'calendar',
+      icon: CalendarDays,
+      title: 'Calendar',
+      required: true,
+      why: 'A link that puts every booking in the calendar you already use. No account, nothing to sign into.',
+      skipped: 'Appointments are still taken and still shown here — but nothing reaches the calendar you actually check.',
     },
     {
       key: 'alerts',
@@ -350,7 +430,7 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
             return (
               <button
                 key={step.key}
-                onClick={() => setActive(step.key)}
+                onClick={() => pick(step.key)}
                 className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors lg:w-full ${
                   selected
                     ? 'bg-accent/10 text-ink ring-1 ring-inset ring-accent/25'
@@ -465,43 +545,6 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
                     </label>
                   </div>
 
-                  {/*
-                    Asked for here, first, rather than at the booking step.
-                    It used to sit after the document upload that needs it, so
-                    it was reliably unset at the one moment it mattered: hours
-                    read out of a handbook could not be saved, and the reason
-                    appeared in a message that vanished on the next click.
-                  */}
-                  <label className="block">
-                    <span className="eyebrow mb-1.5 block">Where you are</span>
-                    <select {...field('timezone')} className={inputClass}>
-                      <option value="">Choose your timezone…</option>
-                      {ZONES.map((zone) => (
-                        <option key={zone} value={zone}>
-                          {zone === detectedZone ? `${zone} — this computer` : zone}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="mt-1 block text-2xs text-faint">
-                      Every opening time and appointment is read against this.
-                      {detectedZone && form.timezone !== detectedZone && (
-                        <>
-                          {' '}This computer is set to{' '}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setForm((f) => ({ ...f, timezone: detectedZone }))
-                            }
-                            className="font-semibold text-accent underline-offset-2 hover:underline"
-                          >
-                            {detectedZone}
-                          </button>
-                          .
-                        </>
-                      )}
-                    </span>
-                  </label>
-
                   <label className="block">
                     <span className="mb-1.5 block text-sm font-medium text-ink">How it should sell</span>
                     <textarea
@@ -523,15 +566,74 @@ export default function SettingsPage({ open = true, onSaved, onProgress, initial
                 </form>
               ))}
 
+            {active === 'timezone' &&
+              (form === null ? (
+                <Loader2 size={16} className="animate-spin text-faint" />
+              ) : (
+                <form onSubmit={saveTimezone} className="space-y-4">
+                  {error && (
+                    <p className="rounded-lg bg-crit/10 px-3 py-2 text-2xs text-crit">{error}</p>
+                  )}
+                  {note && (
+                    <p className="rounded-lg bg-ok/10 px-3 py-2 text-2xs text-ok">{note}</p>
+                  )}
+
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-medium text-ink">Your timezone</span>
+                    <select {...field('timezone')} className={inputClass}>
+                      <option value="">Choose your timezone…</option>
+                      {ZONES.map((zone) => (
+                        <option key={zone} value={zone}>
+                          {zone === detectedZone ? `${zone} — this computer` : zone}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="mt-1.5 block text-2xs leading-relaxed text-faint">
+                      Picked from the list your browser already has, so nobody
+                      has to remember how an IANA name is spelt.
+                    </span>
+                  </label>
+
+                  {/* The one click that is the point: this machine is nearly
+                      always right, and typing is what people got wrong. */}
+                  {detectedZone && form.timezone !== detectedZone && (
+                    <button
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, timezone: detectedZone }))}
+                      className="flex w-full items-center justify-between rounded-xl border border-edge px-4 py-3 text-left text-sm text-dim transition-colors hover:border-accent/40 hover:bg-accent/5 hover:text-ink"
+                    >
+                      <span>
+                        This computer is set to{' '}
+                        <span className="font-semibold text-ink">{detectedZone}</span>
+                      </span>
+                      <span className="text-xs font-semibold text-accent">Use it</span>
+                    </button>
+                  )}
+
+                  {form.timezone && (
+                    <p className="rounded-xl bg-panel-2/60 px-3.5 py-2.5 text-2xs leading-relaxed text-dim">
+                      It is{' '}
+                      <span className="font-semibold text-ink">{localTime(form.timezone)}</span>{' '}
+                      there now. If that is not your clock, the zone is wrong.
+                    </p>
+                  )}
+
+                  <button type="submit" disabled={saving} className="btn-primary">
+                    <Save size={14} /> {saving ? 'Saving…' : 'Save'}
+                  </button>
+                </form>
+              ))}
+
             {active === 'whatsapp' && <WhatsAppSettings onChanged={check} />}
             {active === 'knowledge' && <KnowledgeSettings />}
-            {active === 'hours' && <AgentSettings />}
+            {active === 'hours' && <AgentSettings onCalendar={() => pick('calendar')} />}
+            {active === 'calendar' && <CalendarSettings onChanged={check} />}
             {active === 'alerts' && <NotificationSettings />}
             {active === 'pipeline' && <PipelineEditor />}
             {active === 'learning' && <LearningSettings />}
             {active === 'problems' && <ErrorLog />}
 
-            <Next steps={STEPS} active={active} onPick={setActive} />
+            <Next steps={STEPS} active={active} onPick={pick} />
           </div>
         </div>
       </div>

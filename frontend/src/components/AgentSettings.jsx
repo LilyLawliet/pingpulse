@@ -3,7 +3,6 @@ import {
   CalendarDays,
   Check,
   Clock,
-  Copy,
   Eye,
   FileText,
   Lightbulb,
@@ -78,7 +77,7 @@ function namedSources(keys, sources) {
 
 const isBlank = (value) => (Array.isArray(value) ? value.length === 0 : !value)
 
-export default function AgentSettings() {
+export default function AgentSettings({ onCalendar }) {
   const [config, setConfig] = useState(null)
   const [zone, setZone] = useState('UTC')
   const [saving, setSaving] = useState(false)
@@ -486,7 +485,24 @@ export default function AgentSettings() {
         </p>
       </div>
 
-      <CalendarSubscription />
+      {/* The calendar link lived here, under the services list, three
+          screens below anything this page is opened to do - so a shop could
+          take bookings and have nowhere to see them. It is a counted setup
+          step of its own now, and this points at it rather than repeating
+          the control in two places with two pieces of state. */}
+      <button
+        type="button"
+        onClick={onCalendar}
+        disabled={!onCalendar}
+        className="flex w-full items-start gap-2.5 rounded-lg border border-edge px-3 py-2.5 text-left transition-colors hover:border-accent/50 disabled:cursor-default disabled:hover:border-edge"
+      >
+        <CalendarDays size={12} className="mt-0.5 shrink-0 text-accent" />
+        <span className="text-2xs leading-relaxed text-dim">
+          <span className="font-semibold text-ink">Appointments on your phone.</span>{' '}
+          Every booking can appear in the calendar you already use.
+          {onCalendar ? ' Set that up in Calendar →' : ' See the Calendar step.'}
+        </span>
+      </button>
 
       <TextList
         label="Services you offer"
@@ -745,122 +761,6 @@ function Suggestions({ report, onAdd, onAddAll }) {
           className="rounded-lg border border-edge px-2 py-1 text-2xs font-semibold text-dim transition-colors hover:border-accent/50 hover:text-ink"
         >
           Add all {candidates.length}
-        </button>
-      )}
-    </div>
-  )
-}
-
-/**
- * The diary, on the phone the business actually runs its day from.
- *
- * A subscription URL rather than a connected account: every calendar client
- * already knows how to read one, nobody signs into anything, and no consent
- * screen can change underneath it. It is read-only by construction, which
- * keeps the database the one place allowed to say an appointment exists.
- *
- * The link is a secret, so replacing it is offered in exactly those terms —
- * it is how a link that has been forwarded gets taken back.
- */
-function CalendarSubscription() {
-  const [state, setState] = useState(null)
-  const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    api
-      .getCalendarSubscription()
-      .then(setState)
-      .catch(() => setState({ active: false, urls: null }))
-  }, [])
-
-  if (!state) return null
-
-  const run = async (action) => {
-    setBusy(true)
-    setError(null)
-    try {
-      setState(await action())
-      setCopied(false)
-    } catch (err) {
-      setError(err.message)
-    }
-    setBusy(false)
-  }
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(state.urls.https)
-      setCopied(true)
-    } catch {
-      setError('Could not copy — select the link and copy it by hand.')
-    }
-  }
-
-  return (
-    <div className="space-y-1.5 rounded-lg border border-edge px-3 py-2.5">
-      <p className="flex items-start gap-2 text-2xs text-dim">
-        <CalendarDays size={12} className="mt-0.5 shrink-0 text-accent" />
-        <span>
-          <span className="font-semibold text-ink">Appointments on your phone.</span>{' '}
-          Subscribe once and every booking shows up in the calendar you already
-          use. No account to connect, and nothing can be changed from there.
-        </span>
-      </p>
-
-      {error && <p className="text-2xs text-crit">{error}</p>}
-
-      {state.active ? (
-        <>
-          <a
-            href={state.urls.webcal}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-2xs font-semibold text-bg transition-opacity hover:opacity-90"
-          >
-            <CalendarDays size={12} />
-            Add to this device
-          </a>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={copy}
-              className="flex items-center gap-1.5 rounded-lg border border-edge px-2 py-1 text-2xs font-semibold text-dim transition-colors hover:border-accent/50 hover:text-ink"
-            >
-              {copied ? <Check size={11} /> : <Copy size={11} />}
-              {copied ? 'Copied' : 'Copy link for another phone'}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => run(api.createCalendarSubscription)}
-              className="rounded-lg border border-edge px-2 py-1 text-2xs font-semibold text-dim transition-colors hover:border-warn/50 hover:text-ink disabled:opacity-40"
-            >
-              Replace link
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => run(api.deleteCalendarSubscription)}
-              className="rounded-lg border border-edge px-2 py-1 text-2xs font-semibold text-faint transition-colors hover:border-crit/50 hover:text-crit disabled:opacity-40"
-            >
-              Turn off
-            </button>
-          </div>
-          <p className="text-2xs leading-relaxed text-faint">
-            Anyone with this link can see your appointments — it is the only
-            thing standing in front of them. Replacing it stops every phone
-            already subscribed, which is how you take one back.
-          </p>
-        </>
-      ) : (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => run(api.createCalendarSubscription)}
-          className="flex items-center gap-1.5 rounded-lg border border-edge px-3 py-1.5 text-2xs font-semibold text-dim transition-colors hover:border-accent/50 hover:text-ink disabled:opacity-40"
-        >
-          {busy ? <Loader2 size={12} className="animate-spin" /> : <CalendarDays size={12} />}
-          Create a calendar link
         </button>
       )}
     </div>

@@ -169,9 +169,11 @@ async def main() -> int:
                 taken.append("03-setup-business")
             for index, (label, name) in enumerate(
                 [
+                    ("Where you are", "03b-setup-timezone"),
                     ("Connect WhatsApp", "04-setup-whatsapp"),
                     ("Prices and knowledge", "05-setup-knowledge"),
                     ("Hours and booking", "06-setup-hours"),
+                    ("Calendar", "06b-setup-calendar"),
                     ("Alerts", "07-setup-alerts"),
                     ("Your board", "08-setup-board"),
                     ("Learning", "09-setup-learning"),
