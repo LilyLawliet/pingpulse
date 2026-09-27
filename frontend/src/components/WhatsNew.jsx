@@ -12,6 +12,76 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.4.7',
+    date: '28 September 2026',
+    items: [
+      {
+        title: 'Setup says what is required, and waits for it',
+        body:
+          'The steps are in three groups now: required, recommended and optional. The four '
+          + 'required ones are what your agent cannot answer a customer properly without — '
+          + 'your business, your prices, your timezone and your WhatsApp number — and WhatsApp '
+          + 'is deliberately last, because connecting it is the moment real customers start '
+          + 'getting answers. Until those four are done the inbox, board and analytics stay '
+          + 'shut, and each one tells you exactly what is missing and takes you to it. You can '
+          + 'still try the agent before any of that, from Test agent.',
+      },
+      {
+        title: 'Your timezone is its own step, and it is one click',
+        body:
+          'It was a dropdown buried two thirds of the way down the business form, under the '
+          + 'currency, and almost nobody set it — which meant every opening hour and every '
+          + 'appointment was being read as UTC. It is a step of its own now, it offers the zone '
+          + 'your computer is already in, and it prints the current time there so a wrong one is '
+          + 'obvious before a customer finds it.',
+      },
+      {
+        title: 'The calendar link has its own step too',
+        body:
+          'It used to sit at the bottom of the hours form, below the services list, where a '
+          + 'business could take a booking and have nowhere to see it. It is on the setup list '
+          + 'now, under Recommended, with the link ready to copy to a second phone.',
+      },
+      {
+        title: 'It tells you when your phone has dropped',
+        body:
+          'A WhatsApp connection that goes offline now appears under Needs attention and at the '
+          + 'top of Setup, in those words — rather than leaving you to notice that nothing has '
+          + 'come in for a while. It does not lock you out of your own inbox while it is down.',
+      },
+    ],
+  },
+  {
+    version: '1.4.6',
+    date: '27 September 2026',
+    items: [
+      {
+        title: 'A dashboard you can read',
+        body:
+          'Navigation moved into a sidebar down the left, so the inbox, board, analytics and '
+          + 'setup are one click from anywhere instead of hidden behind a menu. Type is larger '
+          + 'throughout, and there is a light theme as well as the dark one — the switch is at '
+          + 'the bottom of the sidebar and it remembers which you picked.',
+      },
+      {
+        title: 'Anything wrong is in one place',
+        body:
+          'Needs attention gathers the things that actually need you — somebody waiting, alerts '
+          + 'going nowhere, a phone that has dropped — each one saying what is wrong and taking '
+          + 'you to the fix. When nothing is wrong it is not there at all.',
+      },
+      {
+        title: 'The QR code comes up in seconds',
+        body:
+          'Pairing a phone had been failing for days: abandoned attempts were quietly retrying '
+          + 'in the background and crowding out new ones. They are cleared properly now, a code '
+          + 'appears in about twenty seconds, and a phone that was already paired reconnects by '
+          + 'itself instead of asking you to scan again. While you are scanning, the Twilio '
+          + 'option is folded away behind a button rather than sitting alongside it.',
+      },
+    ],
+  },
+  {
     version: '1.4.3',
     date: '24 September 2026',
     items: [
