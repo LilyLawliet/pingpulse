@@ -316,7 +316,7 @@ export default function AgentSettings() {
   return (
     <section className="space-y-3">
       <header className="flex items-start gap-2.5">
-        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-accent/12 ring-1 ring-inset ring-accent/25">
+        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-xl bg-accent/10 ring-1 ring-inset ring-accent/20">
           <Clock size={14} className="text-accent" />
         </span>
         <div className="min-w-0">
@@ -646,7 +646,7 @@ export default function AgentSettings() {
           type="button"
           disabled={saving}
           onClick={save}
-          className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-2xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-2xs font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
         >
           {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
           Save rules

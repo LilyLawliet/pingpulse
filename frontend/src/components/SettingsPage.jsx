@@ -9,9 +9,10 @@ import {
   MessageSquare,
   Save,
   Store,
+  Settings,
   TriangleAlert,
-  X,
 } from 'lucide-react'
+import { PageHeader } from './ui.jsx'
 import { api } from '../api.js'
 import AgentSettings from './AgentSettings.jsx'
 import ErrorLog from './ErrorLog.jsx'
@@ -113,10 +114,69 @@ function sellingExample(currency) {
 }
 
 const inputClass =
-  'w-full rounded-lg border border-edge bg-bg px-3 py-2 text-xs text-ink placeholder:text-faint focus:border-accent/60'
+  'w-full rounded-xl border border-edge bg-panel px-3.5 py-2.5 text-sm text-ink placeholder:text-faint focus:border-accent/60 focus:outline-none focus:ring-4 focus:ring-accent/10'
 
-export default function SettingsPage({ open, onClose, onSaved }) {
-  const [active, setActive] = useState('business')
+/** The required steps, for anything that only needs to count them. */
+export const REQUIRED_STEPS = ['business', 'whatsapp', 'knowledge', 'hours', 'alerts']
+
+/**
+ * Which setup steps are done, read from the real backend.
+ *
+ * Exported so the sidebar can say how many are left without opening this page.
+ */
+export async function readSetup() {
+  const next = {
+    business: false,
+    whatsapp: false,
+    knowledge: false,
+    hours: false,
+    alerts: false,
+  }
+  let org = null
+
+  try {
+    org = await api.activeOrganization()
+    // The timezone counts. Without one every hour this business states is
+    // read as UTC, so a step calling itself done without it would be
+    // reporting a setup that cannot book anybody correctly.
+    const zone = (org?.timezone || '').trim()
+    next.business =
+      Boolean((org?.sales_prompt || '').trim().length > 40) &&
+      Boolean(zone) &&
+      zone !== 'UTC'
+    next.knowledge = Boolean((org?.product_rules || '').trim())
+  } catch {
+    /* not loaded */
+  }
+  try {
+    const status = await api.whatsappStatus()
+    next.whatsapp = Boolean(status?.connected)
+  } catch {
+    /* a failed check is not a finished step */
+  }
+  try {
+    const readiness = await api.knowledgeReadiness()
+    next.knowledge = next.knowledge || Boolean(readiness?.ready || readiness?.documents > 0)
+  } catch {
+    /* not ready */
+  }
+  try {
+    const config = await api.getAgentConfig()
+    next.hours = Object.keys(config?.agent_config?.business_hours || {}).length > 0
+  } catch {
+    /* not ready */
+  }
+  try {
+    const alerts = await api.notificationSettings()
+    next.alerts = Boolean(alerts?.email || alerts?.devices > 0 || alerts?.subscribed)
+  } catch {
+    /* not ready */
+  }
+  return { next, org }
+}
+
+export default function SettingsPage({ open = true, onSaved, onProgress, initialStep = 'business' }) {
+  const [active, setActive] = useState(initialStep)
   const [ready, setReady] = useState(null)
   const [form, setForm] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -126,63 +186,23 @@ export default function SettingsPage({ open, onClose, onSaved }) {
   // Every step's state comes from the backend. A step cannot be completed by
   // looking at it, and one done elsewhere already shows as done.
   const check = useCallback(async () => {
-    const next = {
-      business: false,
-      whatsapp: false,
-      knowledge: false,
-      hours: false,
-      alerts: false,
-    }
-
-    try {
-      const org = await api.activeOrganization()
-      // The timezone counts. Without one, every hour this business states is
-      // read as UTC, so a step that called itself done without it would be
-      // reporting a setup that cannot book anybody correctly.
-      const zone = (org?.timezone || '').trim()
-      next.business =
-        Boolean((org?.sales_prompt || '').trim().length > 40) && Boolean(zone) && zone !== 'UTC'
-      next.knowledge = Boolean((org?.product_rules || '').trim())
+    const { next, org } = await readSetup()
+    if (org) {
       setForm({
-        name: org?.name || '',
-        target_tone: org?.target_tone || '',
-        product_rules: org?.product_rules || '',
-        sales_prompt: org?.sales_prompt || '',
-        default_currency: org?.default_currency || 'USD',
-        default_language: org?.default_language || 'en',
-        timezone: org?.timezone || '',
+        name: org.name || '',
+        target_tone: org.target_tone || '',
+        product_rules: org.product_rules || '',
+        sales_prompt: org.sales_prompt || '',
+        default_currency: org.default_currency || 'USD',
+        default_language: org.default_language || 'en',
+        timezone: org.timezone || '',
       })
-    } catch {
+    } else {
       setForm((was) => was || { ...EMPTY_FORM })
     }
-
-    try {
-      const status = await api.whatsappStatus()
-      next.whatsapp = Boolean(status?.connected)
-    } catch {
-      /* a failed check is not a finished step */
-    }
-    try {
-      const readiness = await api.knowledgeReadiness()
-      next.knowledge = next.knowledge || Boolean(readiness?.ready || readiness?.documents > 0)
-    } catch {
-      /* not ready */
-    }
-    try {
-      const config = await api.getAgentConfig()
-      next.hours = Object.keys(config?.agent_config?.business_hours || {}).length > 0
-    } catch {
-      /* not ready */
-    }
-    try {
-      const alerts = await api.notificationSettings()
-      next.alerts = Boolean(alerts?.email || alerts?.devices > 0 || alerts?.subscribed)
-    } catch {
-      /* not ready */
-    }
-
     setReady(next)
-  }, [])
+    onProgress?.(next)
+  }, [onProgress])
 
   useEffect(() => {
     if (open) check()
@@ -289,33 +309,41 @@ export default function SettingsPage({ open, onClose, onSaved }) {
 
   const current = STEPS.find((s) => s.key === active) || STEPS[0]
   const outstanding = STEPS.filter((s) => s.required && ready && !ready[s.key])
+  const requiredCount = STEPS.filter((s) => s.required).length
+  const requiredDone = requiredCount - outstanding.length
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-bg">
-      <header className="flex shrink-0 items-center gap-3 border-b border-edge px-4 py-3 sm:px-6">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-ink">Set up your business</h2>
-          <p className="mt-0.5 text-2xs text-dim">
-            {ready === null
-              ? 'Checking what is done…'
-              : outstanding.length === 0
-                ? 'Everything needed is done. The rest is optional.'
-                : `${outstanding.length} thing${outstanding.length === 1 ? '' : 's'} still needed before this runs properly.`}
-          </p>
-        </div>
-        <button
-          onClick={onClose}
-          className="ml-auto rounded-lg border border-edge p-1.5 text-faint transition-colors hover:border-edge-hi hover:text-ink"
-          aria-label="Close settings"
-        >
-          <X size={15} />
-        </button>
-      </header>
+    <div className="flex h-full min-h-0 flex-col">
+      <PageHeader
+        icon={Settings}
+        title="Setup"
+        subtitle={
+          ready === null
+            ? 'Checking what is done…'
+            : outstanding.length === 0
+              ? 'Everything needed is done. The rest is optional.'
+              : `${outstanding.length} thing${outstanding.length === 1 ? '' : 's'} still needed before this runs properly.`
+        }
+      >
+        {ready && (
+          <div className="flex items-center gap-3">
+            <div className="h-2 w-32 overflow-hidden rounded-full bg-edge">
+              <div
+                className="h-full rounded-full bg-accent transition-[width] duration-500"
+                style={{ width: `${(requiredDone / requiredCount) * 100}%` }}
+              />
+            </div>
+            <span className="text-xs font-semibold tabular-nums text-dim">
+              {requiredDone}/{requiredCount}
+            </span>
+          </div>
+        )}
+      </PageHeader>
 
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row lg:gap-6 lg:px-8 lg:pb-6">
         {/* The steps. A row on a phone, a column on a desktop — the order is
             the same either way, because the order is the instruction. */}
-        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-edge p-2 lg:w-[290px] lg:flex-col lg:overflow-y-auto lg:border-b-0 lg:border-r lg:p-3">
+        <nav className="flex shrink-0 gap-1.5 overflow-x-auto border-b border-edge px-4 pb-3 sm:px-6 lg:w-[270px] lg:flex-col lg:self-start lg:overflow-visible lg:rounded-2xl lg:border lg:bg-panel lg:p-2 lg:shadow-card">
           {STEPS.map((step, index) => {
             const done = ready?.[step.key]
             const selected = step.key === active
@@ -323,12 +351,14 @@ export default function SettingsPage({ open, onClose, onSaved }) {
               <button
                 key={step.key}
                 onClick={() => setActive(step.key)}
-                className={`flex shrink-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors lg:w-full ${
-                  selected ? 'bg-panel-2 text-ink' : 'text-dim hover:bg-panel-2/60 hover:text-ink'
+                className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors lg:w-full ${
+                  selected
+                    ? 'bg-accent/10 text-ink ring-1 ring-inset ring-accent/25'
+                    : 'text-dim hover:bg-panel-2 hover:text-ink'
                 }`}
               >
                 <span
-                  className={`grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-semibold ${
+                  className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-semibold ${
                     done
                       ? 'bg-ok/15 text-ok'
                       : step.required
@@ -338,32 +368,32 @@ export default function SettingsPage({ open, onClose, onSaved }) {
                 >
                   {done ? <Check size={11} /> : index + 1}
                 </span>
-                <span className="min-w-0 flex-1 whitespace-nowrap text-2xs font-semibold lg:whitespace-normal">
+                <span className="min-w-0 flex-1 whitespace-nowrap text-sm font-medium lg:whitespace-normal">
                   {step.title}
                 </span>
                 {!step.required && (
-                  <span className="hidden text-[10px] text-faint lg:inline">optional</span>
+                  <span className="hidden rounded-full bg-panel-2 px-2 py-0.5 text-[11px] text-faint lg:inline">optional</span>
                 )}
               </button>
             )
           })}
         </nav>
 
-        <div className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-          <div className="mx-auto max-w-2xl space-y-5">
+        <div className="min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 lg:rounded-2xl lg:border lg:border-edge lg:bg-panel lg:px-8 lg:py-7 lg:shadow-card">
+          <div className="mx-auto max-w-2xl space-y-6">
             <div>
               <div className="flex items-center gap-2">
-                <current.icon size={15} className="shrink-0 text-accent" />
-                <h3 className="text-sm font-semibold text-ink">{current.title}</h3>
+                <current.icon size={18} className="shrink-0 text-accent" />
+                <h3 className="text-base font-semibold text-ink">{current.title}</h3>
                 {ready?.[current.key] && (
-                  <span className="flex items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[10px] font-semibold text-ok">
+                  <span className="flex items-center gap-1 rounded-full bg-ok/10 px-2 py-0.5 text-[11px] font-semibold text-ok">
                     <Check size={10} /> done
                   </span>
                 )}
               </div>
-              <p className="mt-1.5 text-xs leading-relaxed text-dim">{current.why}</p>
+              <p className="mt-1.5 text-sm leading-relaxed text-dim">{current.why}</p>
               {current.skipped && !ready?.[current.key] && (
-                <p className="mt-2 flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2 text-2xs leading-relaxed text-warn">
+                <p className="mt-3 flex items-start gap-2 rounded-xl bg-warn/10 px-3.5 py-2.5 text-xs leading-relaxed text-warn">
                   <TriangleAlert size={12} className="mt-0.5 shrink-0" />
                   <span>
                     <strong className="font-semibold">If you skip this:</strong>{' '}
@@ -377,7 +407,7 @@ export default function SettingsPage({ open, onClose, onSaved }) {
               (form === null ? (
                 <Loader2 size={16} className="animate-spin text-faint" />
               ) : (
-                <form onSubmit={saveBusiness} className="space-y-3.5">
+                <form onSubmit={saveBusiness} className="space-y-4">
                   {error && (
                     <p className="rounded-lg bg-crit/10 px-3 py-2 text-2xs text-crit">{error}</p>
                   )}
@@ -386,12 +416,12 @@ export default function SettingsPage({ open, onClose, onSaved }) {
                   )}
 
                   <label className="block">
-                    <span className="eyebrow mb-1.5 block">Business name</span>
+                    <span className="mb-1.5 block text-sm font-medium text-ink">Business name</span>
                     <input required {...field('name')} className={inputClass} placeholder="Luxe Footwear" />
                   </label>
 
                   <label className="block">
-                    <span className="eyebrow mb-1.5 block">How should it sound?</span>
+                    <span className="mb-1.5 block text-sm font-medium text-ink">How should it sound?</span>
                     <input
                       {...field('target_tone')}
                       className={inputClass}
@@ -400,7 +430,7 @@ export default function SettingsPage({ open, onClose, onSaved }) {
                   </label>
 
                   <label className="block">
-                    <span className="eyebrow mb-1.5 block">What you sell</span>
+                    <span className="mb-1.5 block text-sm font-medium text-ink">What you sell</span>
                     <textarea
                       rows={3}
                       {...field('product_rules')}
@@ -414,7 +444,7 @@ export default function SettingsPage({ open, onClose, onSaved }) {
 
                   <div className="grid grid-cols-2 gap-3">
                     <label className="block">
-                      <span className="eyebrow mb-1.5 block">Currency</span>
+                      <span className="mb-1.5 block text-sm font-medium text-ink">Currency</span>
                       <select {...field('default_currency')} className={inputClass}>
                         {CURRENCIES.map((code) => (
                           <option key={code} value={code}>
@@ -424,7 +454,7 @@ export default function SettingsPage({ open, onClose, onSaved }) {
                       </select>
                     </label>
                     <label className="block">
-                      <span className="eyebrow mb-1.5 block">Replies in</span>
+                      <span className="mb-1.5 block text-sm font-medium text-ink">Replies in</span>
                       <select {...field('default_language')} className={inputClass}>
                         {LANGUAGES.map(([code, label]) => (
                           <option key={code} value={code}>
@@ -473,7 +503,7 @@ export default function SettingsPage({ open, onClose, onSaved }) {
                   </label>
 
                   <label className="block">
-                    <span className="eyebrow mb-1.5 block">How it should sell</span>
+                    <span className="mb-1.5 block text-sm font-medium text-ink">How it should sell</span>
                     <textarea
                       required
                       rows={5}
@@ -486,7 +516,7 @@ export default function SettingsPage({ open, onClose, onSaved }) {
                   <button
                     type="submit"
                     disabled={saving}
-                    className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
+                    className="btn-primary"
                   >
                     <Save size={14} /> {saving ? 'Saving…' : 'Save'}
                   </button>
@@ -528,7 +558,7 @@ function Next({ steps, active, onPick }) {
   return (
     <button
       onClick={() => onPick(next.key)}
-      className="flex w-full items-center justify-between rounded-lg border border-edge px-3.5 py-2.5 text-left text-2xs text-dim transition-colors hover:border-edge-hi hover:text-ink"
+      className="flex w-full items-center justify-between rounded-xl border border-edge px-4 py-3 text-left text-sm text-dim transition-colors hover:border-accent/40 hover:bg-accent/5 hover:text-ink"
     >
       <span>
         Next: <span className="font-semibold">{next.title}</span>

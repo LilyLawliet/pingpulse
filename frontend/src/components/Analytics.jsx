@@ -5,8 +5,8 @@ import {
   MessageSquareReply,
   TrendingDown,
   TriangleAlert,
-  X,
 } from 'lucide-react'
+import { PageHeader, Segmented } from './ui.jsx'
 import { api } from '../api.js'
 import { bucketLabel, duration, percent } from '../format.js'
 
@@ -32,7 +32,7 @@ const WINDOWS = [
  * conversion rate — it is a question with no answer yet. Both render as an
  * em dash rather than as a zero, because a zero is a claim and these are not.
  */
-export default function Analytics({ onClose }) {
+export default function Analytics() {
   const [window_, setWindow_] = useState('30d')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -61,55 +61,17 @@ export default function Analytics({ onClose }) {
     funnel?.stages?.filter((stage) => stage.outcome === 'won').slice(-1)[0]?.label || 'Won'
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-2 backdrop-blur-sm sm:p-4">
-      {/* A real dialog rather than a div that looks like one. The window
-          buttons below are titled the same as the ones on the metric strip
-          behind this overlay, and without a landmark to scope to, "Today"
-          is ambiguous to a screen reader for exactly the reason it was
-          ambiguous to the browser driving the test. */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="How it is going"
-        className="max-h-[92vh] w-full max-w-4xl overflow-auto rounded-2xl border border-edge bg-panel shadow-lift"
-      >
-        <header className="sticky top-0 z-10 flex flex-wrap items-center gap-2.5 border-b border-edge bg-panel px-4 py-3.5 sm:px-5 sm:py-4">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent/12 ring-1 ring-inset ring-accent/25">
-            <ChartNoAxesColumn size={15} className="text-accent" />
-          </span>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-ink">How it is going</h3>
-            <p className="mt-0.5 text-2xs text-dim">
-              Where leads get to, and how fast they get answered
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="ml-auto rounded-lg p-1 text-faint transition-colors hover:bg-panel-2 hover:text-ink"
-          >
-            <X size={16} />
-          </button>
-          <div className="flex w-full flex-wrap items-center gap-1 sm:w-auto">
-            {WINDOWS.map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setWindow_(key)}
-                className={`rounded-lg px-2 py-1 text-2xs transition-colors ${
-                  window_ === key
-                    ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/30'
-                    : 'text-faint hover:text-ink'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </header>
+    <div className="h-full min-h-0 overflow-y-auto" role="region" aria-label="How it is going">
+      <div className="mx-auto max-w-6xl">
+        <PageHeader
+          icon={ChartNoAxesColumn}
+          title="Analytics"
+          subtitle="Where leads get to, and how fast they get answered"
+        >
+          <Segmented label="Time span" options={WINDOWS} value={window_} onChange={setWindow_} />
+        </PageHeader>
 
-        <div className="space-y-5 px-4 py-4 sm:px-5 sm:py-5">
+        <div className="space-y-5 px-4 pb-8 sm:px-6 lg:px-8">
           {error && (
             <p className="flex items-start gap-2 rounded-lg bg-crit/10 px-3 py-2 text-2xs text-crit">
               <TriangleAlert size={12} className="mt-0.5 shrink-0" />
@@ -158,11 +120,11 @@ export default function Analytics({ onClose }) {
 
 function Stat({ label, value, hint }) {
   return (
-    <div className="bg-panel px-3 py-2.5">
-      <p className="font-mono text-base font-semibold leading-none tabular-nums text-ink sm:text-lg">
+    <div className="bg-panel px-4 py-3.5">
+      <p className="truncate text-xs font-medium text-dim">{label}</p>
+      <p className="mt-1.5 text-xl font-semibold leading-none tracking-tight tabular-nums text-ink sm:text-2xl">
         {value}
       </p>
-      <p className="mt-1 truncate text-2xs text-dim">{label}</p>
       {hint && <p className="mt-0.5 truncate text-2xs text-faint">{hint}</p>}
     </div>
   )
@@ -170,7 +132,7 @@ function Stat({ label, value, hint }) {
 
 function Headline({ entered, converted, rate, median, wonLabel }) {
   return (
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-edge bg-edge lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-edge bg-edge shadow-card lg:grid-cols-4">
       <Stat label="Leads who arrived" value={entered} />
       <Stat label={`Reached ${wonLabel.toLowerCase()}`} value={converted} />
       <Stat label="Of everyone who arrived" value={percent(rate)} />
@@ -207,7 +169,7 @@ function Revenue({ funnel, entered }) {
         entered === 1 ? 'lead has' : 'leads have'
       } a value on them. Nothing else is counted here.`}
     >
-      <div className="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-edge bg-edge">
+      <div className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl border border-edge bg-edge shadow-card">
         <Stat label="Won" value={money(funnel.revenue)} />
         <Stat label="Still open" value={money(funnel.open_value)} hint="not lost yet" />
         <Stat label="Average won deal" value={money(funnel.average_deal)} />
@@ -439,7 +401,7 @@ function Replies({ replies }) {
       title="How fast people get answered"
       hint="Measured per conversation turn, not per message — somebody typing three lines in a row waited once."
     >
-      <div className="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-edge bg-edge">
+      <div className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl border border-edge bg-edge shadow-card">
         <Stat label="Typical" value={duration(replies?.median_seconds)} />
         <Stat label="Slowest 10%" value={duration(replies?.p90_seconds)} />
         <Stat label="First reply" value={duration(replies?.first_median_seconds)} />
@@ -531,9 +493,10 @@ function Footnote({ data }) {
 
 function Section({ title, hint, children }) {
   return (
-    <section>
-      <h4 className="text-xs font-semibold text-ink">{title}</h4>
-      {hint && <p className="mb-2 mt-0.5 text-2xs leading-relaxed text-dim">{hint}</p>}
+    <section className="rounded-2xl border border-edge bg-panel p-4 shadow-card sm:p-5">
+      <h4 className="text-sm font-semibold text-ink">{title}</h4>
+      {hint && <p className="mb-3 mt-0.5 text-xs leading-relaxed text-dim">{hint}</p>}
+      {!hint && <div className="mb-3" />}
       {children}
     </section>
   )

@@ -1,54 +1,94 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* PingPulse operations console — a deliberately single-theme black surface.
-   Every colour is painted explicitly so the page never borrows a host ground.
+/* PingPulse — two themes, one set of names.
 
-   Black, not near-black: the ground is #000 so the console reads as one
-   continuous surface on an OLED panel and the panels sit *on* it rather than
-   floating in a slightly different grey. Depth comes from the hairline borders
-   and a single inset highlight, not from stacking ever-lighter greys.
+   Colours are stored as bare RGB channels rather than hex, so Tailwind can
+   compose an opacity onto them (`bg-accent/12`) through the
+   `rgb(var(--x) / <alpha-value>)` form in tailwind.config.js. Anything reading
+   one of these directly has to wrap it in rgb() itself.
 
-   Colour is spent sparingly, which is what keeps it feeling expensive. Platinum
-   carries the brand mark and the chrome; emerald is the one live accent and
-   means "working"; blue, amber and red are states, never decoration. */
-/* Colours are stored as bare RGB channels rather than hex.
-
-   Tailwind cannot compose an opacity onto a colour it cannot see into: with
-   `--accent: #3ae3ae`, every `bg-accent/12`, `bg-crit/10` and `ring-accent/25`
-   in the app silently generated no rule at all, so every tinted chip, error
-   box and empty state has been rendering with no fill. Channels plus the
-   `rgb(var(--x) / <alpha-value>)` form in tailwind.config.js is what makes the
-   modifier work. The consequence is that anything reading one of these
-   directly has to wrap it in rgb() itself. */
+   Light is the default. Dark follows the system setting unless somebody has
+   picked a theme in the sidebar, which sets `data-theme` on <html>. */
 :root {
-  --bg: 0 0 0;
-  --panel: 10 11 13;
-  --panel-2: 18 20 24;
-  --edge: 29 32 39;
-  --edge-hi: 47 52 61;
+  --bg: 244 246 249;
+  --panel: 255 255 255;
+  --panel-2: 241 244 247;
+  --edge: 226 230 236;
+  --edge-hi: 203 209 219;
 
-  --ink: 243 245 248;
-  --ink-dim: 153 161 173;
-  --ink-faint: 98 106 119;
+  --ink: 15 23 42;
+  --ink-dim: 71 85 105;
+  --ink-faint: 115 126 143;
 
-  /* The brand mark is brushed silver, so the chrome that frames it is too. */
+  --platinum: 71 85 105;
+  --platinum-dim: 100 116 139;
+
+  --accent: 5 138 96;
+  --ok: 5 138 96;
+  --accent-deep: 4 108 76;
+  --customer: 37 99 235;
+  --warn: 180 83 9;
+  --crit: 220 38 38;
+
+  --on-accent: 255 255 255;
+  --scrim: 15 23 42;
+  --shadow-lift: 0 18px 48px -16px rgba(15, 23, 42, 0.28), 0 2px 6px rgba(15, 23, 42, 0.06);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.04);
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: 11 13 17;
+    --panel: 19 22 27;
+    --panel-2: 27 31 38;
+    --edge: 37 42 51;
+    --edge-hi: 55 62 74;
+    --ink: 236 239 244;
+    --ink-dim: 163 171 184;
+    --ink-faint: 114 123 138;
+    --platinum: 203 210 220;
+    --platinum-dim: 141 149 162;
+    --accent: 52 211 153;
+    --ok: 52 211 153;
+    --accent-deep: 16 150 110;
+    --customer: 96 165 250;
+    --warn: 251 191 36;
+    --crit: 248 113 113;
+    --on-accent: 6 24 18;
+    --scrim: 0 0 0;
+    --shadow-lift: 0 20px 50px -18px rgba(0, 0, 0, 0.8);
+    --shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: 11 13 17;
+  --panel: 19 22 27;
+  --panel-2: 27 31 38;
+  --edge: 37 42 51;
+  --edge-hi: 55 62 74;
+  --ink: 236 239 244;
+  --ink-dim: 163 171 184;
+  --ink-faint: 114 123 138;
   --platinum: 203 210 220;
   --platinum-dim: 141 149 162;
-
-  --accent: 58 227 174;
-  /* Confirmation rather than emphasis. Written as its own name because
-     seven "Saved" notes already ask for text-ok, and until this existed
-     Tailwind generated no such class and they rendered colourless. */
-  --ok: 58 227 174;
-  --accent-deep: 15 127 98;
-  --customer: 106 168 255;
-  --warn: 242 178 62;
-  --crit: 255 107 114;
-
+  --accent: 52 211 153;
+  --ok: 52 211 153;
+  --accent-deep: 16 150 110;
+  --customer: 96 165 250;
+  --warn: 251 191 36;
+  --crit: 248 113 113;
+  --on-accent: 6 24 18;
+  --scrim: 0 0 0;
+  --shadow-lift: 0 20px 50px -18px rgba(0, 0, 0, 0.8);
+  --shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   color-scheme: dark;
 }
 
@@ -68,25 +108,13 @@ body {
   margin: 0;
   background: rgb(var(--bg));
   color: rgb(var(--ink));
-  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
   -webkit-font-smoothing: antialiased;
 }
 
-/* Subtle depth: a single wash behind the console, not a gradient hero. Kept
-   far dimmer than it was — on a black ground the same values read as a stain
-   rather than as light. */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(1100px 500px at 16% -12%, rgba(58, 227, 174, 0.045), transparent 72%),
-    radial-gradient(900px 420px at 92% 0%, rgba(106, 168, 255, 0.03), transparent 72%);
-}
-
 ::selection {
-  background: rgba(58, 227, 174, 0.26);
+  background: rgb(var(--accent) / 0.22);
   color: rgb(var(--ink));
 }
 
@@ -112,31 +140,45 @@ body::before {
 
 @layer components {
   .eyebrow {
-    @apply text-[10px] font-semibold uppercase tracking-[0.16em] text-faint;
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-faint;
   }
   .panel {
-    /* `min-w-0` matters as much as `min-h-0`. A flex child defaults to
-       min-width:auto, so a panel refuses to shrink below its widest content -
-       and one unbreakable 148-character URL in a conversation widened the
-       whole column and put a horizontal scrollbar across the entire board.
-       Wrapping the text fixed that URL; this fixes the class of problem. */
-    @apply flex min-h-0 min-w-0 flex-col rounded-xl border border-edge bg-panel;
-    /* One hairline of light along the top edge. On black this is what makes a
-       panel read as a raised surface; a drop shadow would not, since there is
-       nothing darker than the ground for it to fall on. */
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.045),
-      0 1px 2px rgba(0, 0, 0, 0.6);
+    /* `min-w-0` matters as much as `min-h-0`: a flex child defaults to
+       min-width:auto, and one unbreakable URL in a conversation would widen
+       the whole column. */
+    @apply flex min-h-0 min-w-0 flex-col rounded-2xl border border-edge bg-panel;
+    box-shadow: var(--shadow-card);
   }
   .panel-head {
-    @apply flex shrink-0 items-center gap-2 border-b border-edge px-4 py-2.5;
+    @apply flex shrink-0 items-center gap-2 border-b border-edge px-4 py-3;
   }
-  /* The brand mark, and anything that should feel like the same metal. */
+  /* The dimmed layer behind a dialog or drawer. */
+  .scrim {
+    background: rgb(var(--scrim) / 0.45);
+    @apply backdrop-blur-[2px];
+  }
+  /* Kept for the release numbers in What's new; flat ink now, since a metal
+     gradient only reads on black. */
   .platinum {
-    background: linear-gradient(160deg, #ffffff 0%, rgb(var(--platinum)) 42%, #7f8794 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    color: rgb(var(--ink));
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent-deep disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-edge bg-panel px-3.5 py-2 text-sm font-medium text-ink transition hover:border-edge-hi hover:bg-panel-2 disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5 text-sm font-medium text-dim transition hover:bg-panel-2 hover:text-ink;
+  }
+  .seg {
+    @apply inline-flex items-center gap-0.5 rounded-xl border border-edge bg-panel-2 p-0.5;
+  }
+  .seg-item {
+    @apply rounded-[10px] px-2.5 py-1 text-xs font-medium text-dim transition hover:text-ink;
+  }
+  .seg-item[aria-pressed='true'] {
+    @apply bg-panel text-ink shadow-sm;
   }
 }
 
@@ -186,6 +228,49 @@ body::before {
 .dot-1 { animation: typing 1.15s ease-in-out infinite; }
 .dot-2 { animation: typing 1.15s ease-in-out 0.15s infinite; }
 .dot-3 { animation: typing 1.15s ease-in-out 0.3s infinite; }
+
+
+/* Dialogs rise into place and drawers slide in from the edge they belong to,
+   so it is clear where they came from and that they can be dismissed. */
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes slide-in-right {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.animate-pop {
+  animation: pop 0.2s cubic-bezier(0.22, 0.68, 0.35, 1) both;
+}
+.animate-slide-right {
+  animation: slide-in-right 0.22s cubic-bezier(0.22, 0.68, 0.35, 1) both;
+}
+.animate-slide-left {
+  animation: slide-in-left 0.22s cubic-bezier(0.22, 0.68, 0.35, 1) both;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,

@@ -22,7 +22,7 @@ import { prettyPhone } from '../format.js'
  */
 const REFRESH_MS = 60000
 
-export default function ConnectionStatus({ compact = false }) {
+export default function ConnectionStatus({ compact = false, placement = 'down' }) {
   const [status, setStatus] = useState(null)
   const [open, setOpen] = useState(false)
 
@@ -41,7 +41,7 @@ export default function ConnectionStatus({ compact = false }) {
   }, [load])
 
   if (!status) {
-    return <Loader2 size={13} className="animate-spin text-faint" />
+    return <Loader2 size={14} className="animate-spin text-faint" />
   }
 
   const degraded =
@@ -69,15 +69,27 @@ export default function ConnectionStatus({ compact = false }) {
       <button
         type="button"
         onClick={() => setOpen((was) => !was)}
-        className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-2xs transition-colors hover:bg-panel-2 ${tone}`}
+        className={`flex items-center gap-2 rounded-lg text-xs transition-colors ${
+          compact ? 'p-2 hover:bg-panel-2' : 'w-full py-0.5 hover:opacity-80'
+        } ${tone}`}
         title="WhatsApp connection"
+        aria-expanded={open}
       >
-        <Icon size={13} />
-        {!compact && <span className="font-semibold">{label}</span>}
+        <Icon size={compact ? 18 : 14} />
+        {!compact && (
+          <span className="flex-1 text-left">
+            <span className="font-semibold">WhatsApp</span>{' '}
+            <span className="text-dim">· {label.toLowerCase()}</span>
+          </span>
+        )}
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-1.5 w-72 rounded-xl border border-edge bg-panel p-3.5 shadow-lift">
+        <div
+          className={`absolute z-40 w-72 rounded-2xl border border-edge bg-panel p-4 shadow-lift ${
+            placement === 'up' ? 'bottom-full left-0 mb-2' : 'right-0 top-full mt-1.5'
+          }`}
+        >
           <div className="flex items-center gap-2">
             <PlugZap size={13} className={tone} />
             <span className="text-xs font-semibold text-ink">{label}</span>

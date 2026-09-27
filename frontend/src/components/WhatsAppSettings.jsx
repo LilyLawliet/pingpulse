@@ -461,7 +461,7 @@ export default function WhatsAppSettings({ onChanged }) {
             <span className="eyebrow mb-1.5 block">Twilio Account SID</span>
             <input
               {...field('account_sid')}
-              className={`${inputClass} font-mono text-[11px]`}
+              className={`${inputClass} font-mono text-[12px]`}
               placeholder="AC…"
               spellCheck={false}
               autoComplete="off"
@@ -472,7 +472,7 @@ export default function WhatsAppSettings({ onChanged }) {
             <input
               {...field('auth_token')}
               type="password"
-              className={`${inputClass} font-mono text-[11px]`}
+              className={`${inputClass} font-mono text-[12px]`}
               placeholder="••••••••"
               autoComplete="off"
             />
@@ -496,7 +496,7 @@ export default function WhatsAppSettings({ onChanged }) {
           type="button"
           onClick={connect}
           disabled={busy || (provider === 'TWILIO' && !form.phone_number.trim())}
-          className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
+          className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           <Plug size={13} />{' '}
           {busy
@@ -521,7 +521,7 @@ export default function WhatsAppSettings({ onChanged }) {
           <Link2 size={12} /> Paste this into Twilio
         </p>
         <div className="flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded-md bg-panel-2 px-2.5 py-2 font-mono text-[11px] text-ink">
+          <code className="min-w-0 flex-1 truncate rounded-md bg-panel-2 px-2.5 py-2 font-mono text-[12px] text-ink">
             {webhookUrl}
           </code>
           <button

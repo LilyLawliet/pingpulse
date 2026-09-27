@@ -24,34 +24,30 @@ export default function InboxFilters({ filters, onChange, stages = DEFAULT_STAGE
   )
 
   return (
-    <div className="space-y-2 border-b border-edge px-3 py-2.5">
+    <div className="space-y-2 px-3 pb-3 pt-2">
       <div className="relative">
         <Search
-          size={12}
-          className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint"
+          size={15}
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint"
         />
         <input
+          type="search"
           value={filters.search || ''}
           onChange={(e) => set({ search: e.target.value })}
-          placeholder="Name, number, company, notes"
-          className="w-full rounded-lg border border-edge bg-bg py-1.5 pl-7 pr-2 text-2xs text-ink placeholder:text-faint focus:border-accent/60"
+          placeholder="Search name, number, notes…"
+          aria-label="Search conversations"
+          className="w-full rounded-xl border border-transparent bg-panel-2 py-2 pl-9 pr-3 text-sm text-ink placeholder:text-faint focus:border-accent/50 focus:bg-panel focus:outline-none"
         />
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <select
-          value={filters.stage || ''}
-          onChange={(e) => set({ stage: e.target.value })}
-          className="min-w-0 flex-1 rounded-lg border border-edge bg-bg px-2 py-1 text-2xs text-ink focus:border-accent/60"
-        >
-          <option value="">Every stage</option>
-          {stages.map((stage) => (
-            <option key={stage.key} value={stage.key}>
-              {stage.label}
-            </option>
-          ))}
-        </select>
-
+        <Toggle
+          on={!(filters.stage || filters.unread_only || filters.taken_over)}
+          onClick={() =>
+            onChange({ search: filters.search || '', stage: '', unread_only: false, taken_over: false })
+          }
+          label="All"
+        />
         <Toggle
           on={Boolean(filters.unread_only)}
           onClick={() => set({ unread_only: !filters.unread_only })}
@@ -63,6 +59,23 @@ export default function InboxFilters({ filters, onChange, stages = DEFAULT_STAGE
           label="Mine"
           title="Conversations a person has taken over"
         />
+        <select
+          value={filters.stage || ''}
+          onChange={(e) => set({ stage: e.target.value })}
+          aria-label="Filter by stage"
+          className={`min-w-0 max-w-[9.5rem] shrink-0 cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium focus:outline-none ${
+            filters.stage
+              ? 'border-accent/40 bg-accent/10 text-accent'
+              : 'border-edge bg-panel text-dim hover:text-ink'
+          }`}
+        >
+          <option value="">Any stage</option>
+          {stages.map((stage) => (
+            <option key={stage.key} value={stage.key}>
+              {stage.label}
+            </option>
+          ))}
+        </select>
 
         {active && (
           <button
@@ -70,10 +83,10 @@ export default function InboxFilters({ filters, onChange, stages = DEFAULT_STAGE
             onClick={() =>
               onChange({ search: '', stage: '', unread_only: false, taken_over: false })
             }
-            className="flex items-center gap-1 rounded-lg px-1.5 py-1 text-2xs text-faint transition-colors hover:text-ink"
+            className="ml-auto flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-faint transition-colors hover:text-ink"
             title="Clear filters"
           >
-            <X size={11} />
+            <X size={13} /> Clear
           </button>
         )}
       </div>
@@ -87,10 +100,11 @@ function Toggle({ on, onClick, label, title }) {
       type="button"
       onClick={onClick}
       title={title}
-      className={`rounded-lg px-2 py-1 text-2xs transition-colors ${
+      aria-pressed={on}
+      className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
         on
-          ? 'bg-accent/15 text-accent ring-1 ring-inset ring-accent/30'
-          : 'border border-edge text-dim hover:text-ink'
+          ? 'border-accent/40 bg-accent/10 text-accent'
+          : 'border-edge bg-panel text-dim hover:text-ink'
       }`}
     >
       {label}

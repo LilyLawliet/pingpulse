@@ -20,10 +20,11 @@ export default {
         ok: 'rgb(var(--ok) / <alpha-value>)',
         warn: 'rgb(var(--warn) / <alpha-value>)',
         crit: 'rgb(var(--crit) / <alpha-value>)',
+        'on-accent': 'rgb(var(--on-accent) / <alpha-value>)',
       },
       fontFamily: {
-        sans: ['"IBM Plex Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', '"Segoe UI"', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
       // Tailwind's opacity scale has no 8 or 12, and a modifier it does not
       // recognise generates no rule at all rather than an error - so the
@@ -33,13 +34,13 @@ export default {
         12: '0.12',
       },
       fontSize: {
-        '2xs': ['0.6875rem', { lineHeight: '1rem' }],
+        '2xs': ['0.75rem', { lineHeight: '1.125rem' }],
+        xs: ['0.8125rem', { lineHeight: '1.25rem' }],
       },
       boxShadow: {
-        lift: '0 10px 30px -12px rgba(0, 0, 0, 0.85)',
-        // A raised surface on black is described by light along its top edge,
-        // not by a shadow underneath it.
-        rim: 'inset 0 1px 0 rgba(255, 255, 255, 0.06)',
+        lift: 'var(--shadow-lift)',
+        card: 'var(--shadow-card)',
+        rim: 'var(--shadow-card)',
       },
     },
   },

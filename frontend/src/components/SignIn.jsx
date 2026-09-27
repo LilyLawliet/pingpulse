@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import BrandMark from './BrandMark.jsx'
-import { KeyRound } from 'lucide-react'
+import { ArrowRight, KeyRound, Loader2, TriangleAlert } from 'lucide-react'
 import { api, auth } from '../api.js'
 
 /**
@@ -36,53 +36,63 @@ export default function SignIn({ onSignedIn }) {
   }
 
   return (
-    <div className="grid h-full place-items-center p-6">
-      <form onSubmit={submit} className="w-full max-w-sm">
-        <BrandMark size={56} className="mb-7" />
+    <div className="grid h-full place-items-center overflow-y-auto p-4 sm:p-6">
+      <div className="w-full max-w-[400px]">
+        <BrandMark size={44} className="mb-8 justify-center" />
 
-        <h2 className="text-lg font-semibold text-ink">Enter your access token</h2>
-        <p className="mb-5 mt-1 text-xs text-dim">
-          Paste the token we sent you. You only need to do this once.
-        </p>
-
-        {error && (
-          <p className="mb-4 rounded-lg bg-crit/10 px-3 py-2 text-xs text-crit">{error}</p>
-        )}
-
-        <label className="block">
-          <span className="eyebrow mb-1.5 block">Access token</span>
-          <div className="relative">
-            <KeyRound
-              size={14}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint"
-            />
-            <input
-              required
-              autoFocus
-              spellCheck={false}
-              autoComplete="off"
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-              placeholder="pp_live_…"
-              className="w-full rounded-lg border border-edge bg-bg py-2 pl-9 pr-3 font-mono text-[12px] text-ink placeholder:text-faint focus:border-accent/60"
-            />
-          </div>
-        </label>
-
-        <button
-          type="submit"
-          disabled={busy || !token.trim()}
-          className="mt-5 w-full rounded-lg bg-accent px-4 py-2.5 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-50"
+        <form
+          onSubmit={submit}
+          className="rounded-3xl border border-edge bg-panel p-6 shadow-lift sm:p-8"
         >
-          {busy ? 'Connecting…' : 'Connect'}
-        </button>
+          <h2 className="text-xl font-semibold tracking-tight text-ink">Welcome</h2>
+          <p className="mb-6 mt-1 text-sm leading-relaxed text-dim">
+            Paste the access token we sent you. You only need to do this once on this device.
+          </p>
 
-        <p className="mt-4 text-center text-[11px] leading-relaxed text-faint">
-          Do not have a token, or yours has stopped working?
-          <br />
-          Contact your PingPulse representative.
+          {error && (
+            <p className="mb-4 flex items-start gap-2 rounded-xl bg-crit/10 px-3.5 py-2.5 text-sm text-crit">
+              <TriangleAlert size={15} className="mt-0.5 shrink-0" />
+              {error}
+            </p>
+          )}
+
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-ink">Access token</span>
+            <div className="relative">
+              <KeyRound
+                size={16}
+                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-faint"
+              />
+              <input
+                required
+                autoFocus
+                spellCheck={false}
+                autoComplete="off"
+                value={token}
+                onChange={(event) => setToken(event.target.value)}
+                placeholder="pp_live_…"
+                className="w-full rounded-xl border border-edge bg-panel py-3 pl-10 pr-3 font-mono text-sm text-ink placeholder:text-faint focus:border-accent/60 focus:outline-none focus:ring-4 focus:ring-accent/10"
+              />
+            </div>
+          </label>
+
+          <button type="submit" disabled={busy || !token.trim()} className="btn-primary mt-5 w-full py-3">
+            {busy ? (
+              <>
+                <Loader2 size={16} className="animate-spin" /> Connecting…
+              </>
+            ) : (
+              <>
+                Connect <ArrowRight size={16} />
+              </>
+            )}
+          </button>
+        </form>
+
+        <p className="mt-6 text-center text-xs leading-relaxed text-faint">
+          No token, or yours stopped working? Contact your PingPulse representative.
         </p>
-      </form>
+      </div>
     </div>
   )
 }

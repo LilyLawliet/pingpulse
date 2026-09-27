@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { FlaskConical, Loader2, Send, ShieldAlert, TriangleAlert, X } from 'lucide-react'
+import { FlaskConical, Loader2, RotateCcw, Send, ShieldAlert, TriangleAlert } from 'lucide-react'
+import { PageHeader } from './ui.jsx'
 import { api } from '../api.js'
 
 /**
@@ -20,7 +21,14 @@ import { api } from '../api.js'
  * person — that is the behaviour, and hiding it behind a smooth reply that
  * would never have been sent would be a lie about what the agent does.
  */
-export default function AgentSandbox({ onClose }) {
+const SUGGESTIONS = [
+  'How much is it?',
+  'Do you deliver today?',
+  'Can I book for tomorrow?',
+  'I want a refund',
+]
+
+export default function AgentSandbox() {
   const [turns, setTurns] = useState([])
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -55,34 +63,44 @@ export default function AgentSandbox({ onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-edge bg-panel shadow-lift">
-        <header className="flex items-center gap-2.5 border-b border-edge px-5 py-4">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent/12 ring-1 ring-inset ring-accent/25">
-            <FlaskConical size={15} className="text-accent" />
-          </span>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-ink">Try it out</h3>
-            <p className="mt-0.5 text-2xs text-dim">
-              The real agent, with your prices and rules. Nothing is sent.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="ml-auto rounded-lg p-1 text-faint transition-colors hover:bg-panel-2 hover:text-ink"
-          >
-            <X size={16} />
+    <div className="flex h-full min-h-0 flex-col">
+      <PageHeader
+        icon={FlaskConical}
+        title="Test your agent"
+        subtitle="The real agent, with your prices and rules. Nothing is sent to anyone."
+      >
+        {turns.length > 0 && (
+          <button type="button" onClick={() => setTurns([])} className="btn-secondary">
+            <RotateCcw size={14} /> Start over
           </button>
-        </header>
+        )}
+      </PageHeader>
 
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+      <div className="mx-4 mb-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-edge bg-panel shadow-card sm:mx-6 lg:mx-8 lg:mb-6">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6">
           {turns.length === 0 && (
-            <p className="py-6 text-center text-2xs leading-relaxed text-dim">
-              Type what a customer might ask. Try a price, something you do not sell,
-              and a complaint — the three that show whether it is set up properly.
-            </p>
+            <div className="mx-auto max-w-md py-10 text-center">
+              <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-accent/10 text-accent">
+                <FlaskConical size={22} />
+              </span>
+              <p className="text-base font-semibold text-ink">Ask it what a customer would</p>
+              <p className="mt-1.5 text-sm leading-relaxed text-dim">
+                Try a price, something you do not sell, and a complaint. Those three show
+                whether it is set up properly.
+              </p>
+              <div className="mt-5 flex flex-wrap justify-center gap-2">
+                {SUGGESTIONS.map((text) => (
+                  <button
+                    key={text}
+                    type="button"
+                    onClick={() => setMessage(text)}
+                    className="rounded-full border border-edge px-3 py-1.5 text-xs font-medium text-dim transition hover:border-accent/50 hover:text-accent"
+                  >
+                    {text}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           {error && (
@@ -94,12 +112,12 @@ export default function AgentSandbox({ onClose }) {
 
           {turns.map((turn, index) => (
             <div key={index} className="space-y-2">
-              <p className="ml-auto max-w-[80%] rounded-xl rounded-br-sm bg-customer/15 px-3 py-2 text-[13px] leading-relaxed text-ink">
+              <p className="ml-auto w-fit max-w-[80%] rounded-2xl rounded-br-md bg-accent px-4 py-2.5 text-sm leading-relaxed text-on-accent">
                 {turn.message}
               </p>
 
               {turn.escalated ? (
-                <div className="max-w-[85%] rounded-xl rounded-bl-sm bg-warn/10 px-3 py-2.5">
+                <div className="w-fit max-w-[85%] rounded-2xl rounded-bl-md bg-warn/10 px-4 py-3">
                   <p className="flex items-center gap-1.5 text-2xs font-semibold text-warn">
                     <ShieldAlert size={12} />
                     Handed to a person
@@ -107,9 +125,9 @@ export default function AgentSandbox({ onClose }) {
                   <p className="mt-1 text-2xs leading-relaxed text-dim">{turn.note}</p>
                 </div>
               ) : (
-                <div className="max-w-[85%] rounded-xl rounded-bl-sm bg-panel-2 px-3 py-2">
-                  <p className="text-[13px] leading-relaxed text-ink">{turn.reply}</p>
-                  <p className="mt-1.5 flex flex-wrap items-center gap-x-2 font-mono text-[10px] text-faint">
+                <div className="w-fit max-w-[85%] rounded-2xl rounded-bl-md bg-panel-2 px-4 py-2.5">
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{turn.reply}</p>
+                  <p className="mt-1.5 flex flex-wrap items-center gap-x-2 font-mono text-[11px] text-faint">
                     <span>{turn.provider}</span>
                     <span>{turn.latency_ms}ms</span>
                     {turn.fallback_used && <span className="text-warn">fallback</span>}
@@ -123,7 +141,7 @@ export default function AgentSandbox({ onClose }) {
           ))}
         </div>
 
-        <footer className="flex items-end gap-2 border-t border-edge px-5 py-3.5">
+        <footer className="flex items-end gap-2 border-t border-edge bg-panel px-3 py-3 sm:px-4">
           <textarea
             rows={1}
             value={message}
@@ -135,13 +153,13 @@ export default function AgentSandbox({ onClose }) {
               }
             }}
             placeholder="How much are the black boots?"
-            className="min-h-[38px] flex-1 resize-none rounded-lg border border-edge bg-bg px-3 py-2 text-[13px] text-ink placeholder:text-faint focus:border-accent/60"
+            className="min-h-[44px] flex-1 resize-none rounded-xl border border-edge bg-panel-2 px-4 py-2.5 text-sm text-ink placeholder:text-faint focus:border-accent/60 focus:bg-panel focus:outline-none"
           />
           <button
             type="button"
             disabled={busy || !message.trim()}
             onClick={send}
-            className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="btn-primary h-11"
           >
             {busy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
             Ask

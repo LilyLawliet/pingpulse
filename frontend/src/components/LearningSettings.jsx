@@ -112,7 +112,7 @@ export default function LearningSettings() {
   return (
     <section className="space-y-4">
       <header className="flex items-start gap-2.5">
-        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-accent/12 ring-1 ring-inset ring-accent/25">
+        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-xl bg-accent/10 ring-1 ring-inset ring-accent/20">
           <MessageSquareQuote size={14} className="text-accent" />
         </span>
         <div className="min-w-0">
@@ -170,7 +170,7 @@ export default function LearningSettings() {
         <div className="flex flex-wrap items-center gap-2">
           <span className="eyebrow">How you write</span>
           {sources.voice && (
-            <span className="rounded-md bg-ok/10 px-1.5 py-0.5 text-[10px] text-ok">live</span>
+            <span className="rounded-md bg-ok/10 px-1.5 py-0.5 text-[11px] text-ok">live</span>
           )}
           <button
             type="button"
@@ -237,7 +237,7 @@ export default function LearningSettings() {
                 type="button"
                 disabled={busy !== null}
                 onClick={applyVoice}
-                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-2xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-2xs font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 {busy === 'apply' ? (
                   <Loader2 size={12} className="animate-spin" />
@@ -266,7 +266,7 @@ export default function LearningSettings() {
         <div className="flex flex-wrap items-center gap-2">
           <span className="eyebrow">What you have already told customers</span>
           {sources.learned_facts > 0 && (
-            <span className="font-mono text-[10px] text-faint">
+            <span className="font-mono text-[11px] text-faint">
               {sources.learned_facts} saved
             </span>
           )}
@@ -306,7 +306,7 @@ export default function LearningSettings() {
                     className="mt-0.5 accent-accent"
                   />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[10px] uppercase tracking-wide text-faint">
+                    <span className="block text-[11px] uppercase tracking-wide text-faint">
                       {entry.topic}
                     </span>
                     <span className="block text-2xs leading-relaxed text-ink">
@@ -320,7 +320,7 @@ export default function LearningSettings() {
               type="button"
               disabled={busy !== null || !Object.values(chosen).some(Boolean)}
               onClick={importFacts}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-2xs font-semibold text-bg transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-2xs font-semibold text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               {busy === 'import' ? (
                 <Loader2 size={12} className="animate-spin" />
