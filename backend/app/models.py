@@ -970,5 +970,9 @@ NOTIFY_EVENTS: tuple[tuple[str, str, bool], ...] = (
     # A customer asked for a human, the agent could not give them one, and
     # nobody was told anything.
     ("unanswered", "The agent could not answer something", True),
+    # The AI providers stopped answering and replies came from the documents
+    # alone. Nothing else says so: the customer still gets an answer, which
+    # is the point, and nobody would notice they were getting worse ones.
+    ("ai_down", "The AI stopped answering, so replies are coming from your documents alone", True),
 )
 NOTIFY_KEYS = tuple(key for key, _, _ in NOTIFY_EVENTS)

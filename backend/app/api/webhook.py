@@ -904,6 +904,19 @@ async def process_inbound_message(
         ),
     )
 
+    # Neither provider answered. The customer still got the worked-out reply;
+    # whoever runs this business should know the AI is down, once per
+    # cool-off rather than once per message.
+    if generation.provider == "none" and generation.error and "not configured" not in generation.error:
+        await notifications.raise_and_send(
+            db,
+            organization,
+            "ai_down",
+            "The AI stopped answering",
+            "Replies are being put together from your documents alone, without the AI, "
+            f"because neither provider answered.\n\nWhat they said: {generation.error[:300]}",
+        )
+
     # The agent did not have the answer. A person is alerted and the
     # customer is told what actually happened, instead of a filler question.
     if generation.needs_team is not None:

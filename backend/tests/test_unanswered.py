@@ -190,3 +190,38 @@ async def test_a_live_chat_alerts_the_team_and_sends_what_happened(db_session, m
     sent = (await db_session.execute(select(Message).where(Message.sender == "agent"))).scalars().all()
     assert "unanswered" in raised
     assert sent and "passed it to the team" in sent[-1].content
+
+
+@pytest.mark.asyncio
+async def test_the_shop_is_told_when_the_ai_stops_answering(db_session, monkeypatch):
+    from app.api.webhook import process_inbound_message
+    from app.schemas import GenerationResult, TwilioWebhookPayload
+    from app.services.twilio_service import TwilioService
+
+    organization = Organization(name="Acme Solar", sales_prompt="Sell solar installs.")
+    db_session.add(organization)
+    await db_session.flush()
+
+    async def fake_send(self, to_number, body, media_urls=None, sender=None):
+        return True, "SM_out_2"
+
+    async def fake_generate(*_a, **_k):
+        return GenerationResult(
+            provider="none", text="Panels are PKR 31,800 each.", prompt_used="p", latency_ms=5,
+            fallback_used=True, error="groq: HTTP 503 | gemini: HTTP 500",
+        )
+
+    raised = []
+
+    async def record(db, org, event, title, body, contact_id=None):
+        raised.append(event)
+
+    monkeypatch.setattr(TwilioService, "send_whatsapp", fake_send)
+    monkeypatch.setattr("app.api.webhook.llm_service.generate_reply", fake_generate)
+    monkeypatch.setattr(notifications, "raise_and_send", record)
+    payload = TwilioWebhookPayload.model_validate(
+        {"From": "whatsapp:+15551230009", "To": "whatsapp:+16602075318",
+         "Body": "Price of the 550W panel?", "MessageSid": "SMai1"}
+    )
+    await process_inbound_message(db_session, payload)
+    assert "ai_down" in raised
