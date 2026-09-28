@@ -173,9 +173,49 @@ def test_a_colour_is_not_a_different_kind(items):
     assert offers.quote("pink bunny notebook price", items).lines[0].differs == ""
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        # "standard gel" was reported as missing from a shop that sells gel pens.
+        "standard gel pens please",
+        "regular pens",
+        "modern planner",
+        "thick paper",
+    ],
+)
+def test_a_word_about_quality_is_not_a_kind_we_do_not_stock(items, message):
+    lines = offers.quote(message, items).lines
+    assert lines and all(line.differs == "" for line in lines), message
+
+
 def test_a_number_in_the_product_s_name_is_not_a_quantity(items):
     line = offers.quote("Do you have the 2027 planner in blue?", items).lines[0]
     assert line.quantity is None and line.total is None
+
+
+def test_a_number_elsewhere_in_the_name_is_still_a_quantity(items):
+    """"Printer Paper A4" made "4 reams of A4 paper" ask for no reams at all."""
+    line = offers.quote("4 reams of A4 paper", items).lines[0]
+    assert line.item.sku == "MK-PA-901"
+    assert line.quantity == 4 and line.total == Decimal("7600")
+
+
+def test_a_size_in_the_name_does_not_swallow_the_count():
+    """A live trade order: "Cable 4 mm2" stopped "4 coils" being priced."""
+    cable = offers.read_items(
+        [(
+            "list",
+            "Product | SKU | Details | Pack | Price\n"
+            "CopperCore XLPE Cable 4 mm2 | NS-CBL-201 | 100 m coil | 1 coil | PKR 18,750\n",
+        )]
+    )
+    line = offers.quote("I want 4 coils of the 4mm cable", cable).lines[0]
+    assert line.quantity == 4 and line.total == Decimal("75000")
+
+
+def test_the_number_is_still_the_name_when_they_wrote_it_that_way(items):
+    line = offers.quote("2 of the 2027 planner", items).lines[0]
+    assert line.quantity == 2 and line.total == Decimal("6800")
 
 
 def test_things_named_together_in_an_order_are_one_each(items):

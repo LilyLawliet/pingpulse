@@ -1341,6 +1341,21 @@ def _counts_pieces(item: Item, wanted: Wanted) -> bool:
     return counted in plural or bool(counted_in_spec)
 
 
+def _names_the_product(item: Item, wanted: Wanted) -> bool:
+    """Whether the number they typed is part of the product's name, not a count.
+
+    The number and the word after it, as they typed them: "2027 planner" is
+    written into "Sakura Days 2027 Planner", so it names it. "4 coils" is not
+    written into "CopperCore XLPE Cable 4 mm2", so the 4 counts coils - which
+    a bare search for "4" in the name got wrong, and stopped pricing the order.
+    """
+    number = _num(wanted.quantity)
+    typed = re.search(
+        rf"(?<![\w.,]){re.escape(number)}\s+([a-z]+)", _plain(wanted.text).lower()
+    )
+    return bool(typed) and f"{number} {typed.group(1)}" in _plain(item.name).lower()
+
+
 def _not_this(item: Item, text: str) -> str:
     """The kind they asked for, when this item is only the same sort of thing.
 
@@ -1352,6 +1367,12 @@ def _not_this(item: Item, text: str) -> str:
     known = item.haystack_words() | name
     for match in re.finditer(r"\b([a-z]{4,})\s+(?=([a-z]{3,})\b)", plain):
         before, noun = match.group(1), match.group(2)
+        # Only when the noun ends what they named. "standard gel pens" is not
+        # a request for "standard gel": the word after is part of the name
+        # as well, and this item is a gel pen.
+        after = re.match(rf"{re.escape(noun)}\s+([a-z]{{3,}})\b", plain[match.end():])
+        if after and _stem(after.group(1)) in known:
+            continue
         if (
             _stem(noun) in name
             and _stem(before) not in known
@@ -1370,6 +1391,11 @@ _NOT_A_KIND = {
     "need", "want", "have", "like", "buy", "order", "price", "cost", "sell", "show", "with",
     "pink", "blue", "green", "white", "black", "red", "purple", "yellow", "mint", "lilac",
     "little", "small", "big", "large", "mini", "new", "latest",
+    # Quality and size words. "regular pens" is not a kind of pen a shop could
+    # fail to stock, so it is not something to tell a customer we do not have.
+    "standard", "regular", "normal", "ordinary", "usual", "plain", "simple",
+    "basic", "premium", "modern", "classic", "special", "custom", "extra",
+    "thick", "thin", "heavy", "light", "quick", "fast", "urgent", "proper",
 }
 
 
@@ -1420,11 +1446,7 @@ def quote(message: str, items: list[Item], context: str = "") -> Quote:
         if key in seen and not wanted.quantity:
             continue
         seen.add(key)
-        if (
-            len(matches) == 1
-            and wanted.quantity
-            and re.search(rf"(?<![\d.,]){_num(wanted.quantity)}(?![\d.,])", matches[0].name)
-        ):
+        if len(matches) == 1 and wanted.quantity and _names_the_product(matches[0], wanted):
             # "the 2027 planner" names the Sakura Days 2027 Planner; it does
             # not ask for two thousand of them.
             wanted = Wanted(wanted.text)
