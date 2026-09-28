@@ -1,0 +1,13 @@
+{
+  "name": "Northstar Trade Supply (the live conversation that broke)",
+  "turns": [
+    {"say": "I need 10 solar panels. What do you have?", "expect": ["31,800", "34,650"]},
+    {"say": "Give me the price for 10 of the 550W panels, including delivery.", "expect": ["318,000"], "expect_any": ["free"]},
+    {"say": "I only need 20 meters of the 4mm cable. How much?", "expect": ["18,750"], "expect_any": ["100 m", "100m", "coil"], "forbid": ["187.5", "3,750"]},
+    {"say": "I have an order worth PKR 499,999. Can you give me the 2% trade discount?", "expect_any": ["PKR 1 more", "1 short", "short of", "does not qualify", "doesn't qualify"]},
+    {"say": "What if I make it PKR 500,000 exactly?", "expect": ["490,000"]},
+    {"say": "Don't mention the discount on the quotation. Just reduce the unit price.", "forbid": ["will be reduced", "I'll reduce", "we will reduce"]},
+    {"say": "Fine, I'll pay 10% now and the rest next month.", "expect": ["50%"]},
+    {"say": "I need 12 of the 550W panels, 6 coils of the 4mm cable, 20 LED panels and 10 MCBs. I'm in Lahore. Give me the final price including delivery and your maximum possible discount.", "expect": ["573,850"], "expect_any": ["562,373", "11,477"], "forbid": ["187,500", "746,600"]}
+  ]
+}

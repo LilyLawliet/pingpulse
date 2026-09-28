@@ -890,7 +890,9 @@ async def process_inbound_message(
         # If both providers are down the customer still gets a real answer built
         # from retrieved facts — never a promise that a human will call back.
         # A worked-out quote comes first: it is the answer to what they asked.
-        last_resort=(offer.reply() if offer and offer.reply() else None)
+        last_resort=""
+        if offer and offer.quote.unknown_place
+        else (offer.reply() if offer and offer.reply() else None)
         or sales_policy.without_filler(
             sales_policy.deterministic_reply(
                 analysis, chunks, organization, products,

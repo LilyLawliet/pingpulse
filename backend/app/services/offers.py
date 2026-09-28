@@ -136,7 +136,16 @@ WORD_NUMBERS = {
     "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
     "fifteen": 15, "twenty": 20, "thirty": 30, "fifty": 50, "hundred": 100, "dozen": 12,
     "half": Decimal("0.5"), "quarter": Decimal("0.25"),
+    # Roman Urdu, as customers type it: "do kg", "teen suits", "das packets".
+    "ek": 1, "do": 2, "teen": 3, "char": 4, "chaar": 4, "panch": 5, "paanch": 5,
+    "chay": 6, "chhe": 6, "che": 6, "saat": 7, "aath": 8, "nau": 9, "das": 10,
+    "bees": 20, "pachas": 50, "sau": 100,
 }
+# Those that are also English words or too short to trust alone: they count
+# only with the unit or the product straight after them, so "do kg" is two
+# kilos and "do you have" is a question.
+_LOOSE_NUMBERS = {"ek", "do", "teen", "char", "chaar", "panch", "paanch", "chay", "chhe",
+                  "che", "saat", "aath", "nau", "das", "bees", "pachas", "sau"}
 
 # A number followed by one of these is a specification, not an amount: 4 mm²
 # cable, a 550 W panel, a 32 A breaker, a 20 kg bag of adhesive.
@@ -195,6 +204,7 @@ SAME_WORD = {
     "boys": "man", "gentlemen": "man", "kids": "child", "kid": "child", "children": "child",
     "people": "person", "persons": "person", "guests": "person", "guest": "person",
     "pax": "person", "heads": "person", "head": "person", "attendees": "person",
+    "ppl": "person", "log": "person", "bande": "person", "afraad": "person",
     "teeth": "tooth", "feet": "foot", "mice": "mouse",
 }
 
@@ -222,7 +232,9 @@ def _plain(text: str) -> str:
 def words(text: str) -> set[str]:
     return {
         _stem(w)
-        for w in re.findall(r"[a-z][a-z0-9\-]{2,}", _plain(text).lower())
+        # Three letters and up, or a short code with a digit in it: "A4",
+        # "A5", "4K" name the product as surely as a word does.
+        for w in re.findall(r"[a-z][a-z0-9\-]{2,}|\b[a-z]\d{1,2}\b|\b\d[a-z]\b", _plain(text).lower())
         if w not in STOPWORDS
     }
 
@@ -589,7 +601,8 @@ def read_request(message: str, nouns: set[str]) -> list[Wanted]:
         c.strip()
         for c in re.split(
             NOT_A_STOP + r"(?<=[a-z0-9)][.!?])\s+"
-            r"|[;\n]|,\s*(?=\d|a\b|an\b|one\b)|\band\s+(?=\d|a\b|an\b|the\b|one\b)", text, flags=re.I
+            r"|[;\n]|,\s*(?=\d|a\b|an\b|one\b)"
+            r"|\b(?:and|aur|or|plus|&)\s+(?=\d|a\b|an\b|the\b|one\b|ek\b|do\b|teen\b|char\b|panch\b|das\b)", text, flags=re.I
         )
         if c and c.strip()
     ]
@@ -630,12 +643,23 @@ def read_request(message: str, nouns: set[str]) -> list[Wanted]:
                 found = Wanted(clause, number)
                 break
             noun_words = [w for w in re.findall(r"[a-z]+", (match.group("noun") or "").lower())]
+            if raw in _LOOSE_NUMBERS and not match.group("measure") and not match.group("times"):
+                first = noun_words[0] if noun_words else ""
+                if not (_stem(first) in nouns or any(_near(_stem(first), n) for n in nouns)):
+                    continue
+                noun_words = [first]
             # "3 packs of gel pens" counts packs; "20 gel pens" counts pens.
             leading = [w for w in noun_words if w not in {"of", "the", "these", "those", "your"}]
             if leading and _stem(leading[0]) in set(SALE_UNITS) and _stem(leading[0]) in nouns:
                 counted = leading[0]
             else:
                 counted = next((w for w in reversed(noun_words) if _stem(w) in nouns), None)
+                # "teen kurte": an Urdu plural, one letter from the product's word.
+                if counted is None:
+                    counted = next(
+                        (w for w in noun_words if len(w) >= 5 and any(_near(_stem(w), n) for n in nouns)),
+                        None,
+                    )
             if counted and raw not in {"a", "an"} or (counted and raw in {"a", "an"} and _stem(counted) in set(SALE_UNITS)):
                 found = Wanted(clause, number, counted_as=counted)
                 break
@@ -672,6 +696,19 @@ def _asked_forms(text: str) -> tuple[set[str], set[str], set[str]]:
     return joined, short, initials
 
 
+def _near(a: str, b: str) -> bool:
+    """One slip of the thumb apart: "chocolat", "keratine", "vanila"."""
+    if abs(len(a) - len(b)) > 1 or min(len(a), len(b)) < 5 or a[0] != b[0]:
+        return False
+    if len(a) == len(b):
+        diffs = [i for i in range(len(a)) if a[i] != b[i]]
+        # One letter wrong, or two neighbours swapped.
+        return len(diffs) == 1 or (len(diffs) == 2 and diffs[1] == diffs[0] + 1
+                                   and a[diffs[0]] == b[diffs[1]] and a[diffs[1]] == b[diffs[0]])
+    short, long_ = (a, b) if len(a) < len(b) else (b, a)
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+
+
 def score(item: Item, text: str, rarity: dict[str, float] | None = None) -> float:
     """How well one item answers one piece of what the customer wrote.
 
@@ -697,6 +734,9 @@ def score(item: Item, text: str, rarity: dict[str, float] | None = None) -> floa
     name_hits = (asked | joined) & name_words
     # "mani" for "manicure": a start of a name word, four letters or more.
     name_hits |= {w for w in name_words if w not in name_hits and any(w.startswith(p) and w != p for p in short)}
+    # A typo still names the thing, when nothing else in the name was hit.
+    if not name_hits:
+        name_hits |= {w for w in name_words if any(_near(w, a) for a in asked)}
     detail_hits = (asked & item.haystack_words()) - name_hits
     weight = lambda w: (rarity or {}).get(w, 1.0)  # noqa: E731
     total += 1.5 * sum(weight(w) for w in name_hits) + 0.5 * len(detail_hits)
@@ -1230,6 +1270,10 @@ class Quote:
     # An order value the customer named themselves - "what if I make it PKR
     # 500,000?" - which the rules were applied to instead of the goods above.
     stated: Decimal | None = None
+    # A place they asked about delivering to that nothing the business wrote
+    # mentions: "do you ship to Dubai?" is for a person, not for the rules
+    # about Karachi.
+    unknown_place: str | None = None
 
     @property
     def currency(self) -> str | None:
@@ -1245,7 +1289,10 @@ class Quote:
         return sum(totals, Decimal(0))
 
     def empty(self) -> bool:
-        return not self.lines and not self.options and not self.applied and not self.rules
+        return (
+            not self.lines and not self.options and not self.applied and not self.rules
+            and not self.unknown_place
+        )
 
     @property
     def order_value(self) -> Decimal | None:
@@ -1314,6 +1361,12 @@ class Quote:
                 )
             out.append("- The order-size rules, already applied (use these exact figures):")
             out += [f"    {line}" for line in self.applied.lines()]
+        if self.unknown_place:
+            out.append(
+                f"- They asked about {self.unknown_place}, which none of this business's "
+                "documents mention. Do not say whether it is covered: reply NEEDS_TEAM: "
+                f"delivery to {self.unknown_place}."
+            )
         if self.rules:
             out.append("- What this business's own documents say about what they asked (quoted):")
             out += [f'    "{rule}"' for rule in self.rules]
@@ -1343,7 +1396,7 @@ class Quote:
     # ----------------------------------------------------------- when nobody can
     def reply(self) -> str:
         """The answer itself, for when neither model is reachable."""
-        if self.empty():
+        if self.empty() or (self.unknown_place and not self.lines):
             return ""
         out: list[str] = []
         for line in self.lines:
@@ -1352,8 +1405,12 @@ class Quote:
             out.append(_describe_line(line, for_customer=True))
         for wanted, items in self.options:
             out.append("We have these:")
+            labels = [item.label.split(" (")[0] for item in items]
             for item in items:
                 bit = f"• {item.label}: {item.priced()}"
+                if labels.count(item.label.split(" (")[0]) > 1 and item.spec:
+                    # Two "Mochi Bunny Notebook A5"s: what tells them apart.
+                    bit = f"• {item.label} — {item.spec}: {item.priced()}"
                 if wanted.quantity and not wanted.measure:
                     bit += f" ({_num(wanted.quantity)} = {money(item.price * wanted.quantity, item.currency)})"
                 out.append(bit)
@@ -1563,6 +1620,7 @@ def _not_this(item: Item, text: str) -> str:
             and before not in _NOT_A_KIND
             and before not in MEASURES
             and before not in WORD_NUMBERS
+            and not any(_near(before, k) for k in known)
             and _stem(before) not in set(SALE_UNITS)
         ):
             return f"{before} {noun}"
@@ -1914,6 +1972,19 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
     # worth PKR 499,999"). A follow-up like "what if I make it PKR 999,999?"
     # names no topic, so the ones asked about just before carry over.
     topics = topics_in(message) or (topics_in(earlier) if stated_value(message) else set())
+    tiers = read_tiers(texts)
+    places = {p for t in tiers if t.topic == "delivery" for p in _places_named(t.condition)}
+    said_words = set(re.findall(r"[a-z]+", _plain(message).lower()))
+    # "I'm in Karachi" after "how much with delivery?" answers which city.
+    if not topics and places & said_words and "delivery" in topics_in(earlier):
+        topics = {"delivery"}
+    # "Do you ship to Dubai?" - a place none of the documents mention.
+    if "delivery" in topics_in(message):
+        everything = _plain(" ".join(text for _, text in texts)).lower()
+        for place in re.findall(r"\b(?:to|in|into|at)\s+([A-Z][a-z]{2,})", _plain(message)):
+            if place.lower() not in everything and place.lower() not in STOPWORDS:
+                result.unknown_place = place
+                break
     value = result.order_value or stated_value(message)
     if value is None and topics & {"discount", "delivery"}:
         # "What about delivery?" after an order was described: the order is
@@ -1925,10 +1996,18 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
             value = quote(said, items).order_value or stated_value(said)
             if value:
                 break
+    # A discount the order qualifies for is said whether or not they asked:
+    # a school buying PKR 15,000 of notebooks should hear it gets 10% off.
+    unasked_discount = (
+        "discount" not in topics
+        and result.order_value is not None
+        and any(t.topic == "discount" and t.covers(result.order_value) for t in tiers)
+    )
+    if unasked_discount:
+        topics = topics | {"discount"}
     if topics & {"discount", "delivery"} and value:
         if result.order_value is None and stated_value(message) is not None:
             result.stated = value
-        tiers = read_tiers(texts)
         # The currency the rules and the price list are written in comes
         # before the business's default: a shop set to USD whose documents are
         # in PKR is quoting in PKR.
@@ -1941,6 +2020,9 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
         )
         said = " ".join([*said_before[-6:], message])
         result.applied = apply_tiers(value, tiers, currency, topics, where=said)
+        if unasked_discount and result.applied:
+            # Said because it applies; the next rate up is for when they ask.
+            result.applied.next_discount = None
     if result.empty() and not topics and earlier_one:
         # "I'm a new customer" straight after "I'll pay after delivery" is
         # still about paying; only the terms topics carry over, and only from

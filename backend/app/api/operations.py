@@ -780,7 +780,9 @@ async def simulate(
         # The sandbox sends nothing, pictures included.
         photos_attached=False,
         photos_available=await product_search.has_photos(db, tenant.id),
-        last_resort=offer.reply()
+        last_resort=""
+        if offer.quote.unknown_place
+        else offer.reply()
         or sales_policy.without_filler(
             sales_policy.deterministic_reply({}, chunks, organization, message=message)
         ),

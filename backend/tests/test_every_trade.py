@@ -150,3 +150,34 @@ def test_with_no_model_the_answer_is_the_sentence_that_answers(kind, message, ex
 
     reply = sales_policy.deterministic_reply({}, [Chunk()], None, message=message)
     assert expected.lower() in reply.lower(), reply
+
+
+# ---------------------------------------------------------------- typos and Roman Urdu
+@pytest.mark.parametrize(
+    "kind, message, name, total",
+    [
+        ("bakery", "do kg chocolat cake kitne ka?", "Chocolate fudge cake", "4800"),
+        ("clothing", "teen kurte chahiye", "Khaddar Kurta", "10350"),
+        ("catering", "gold menu 4 ppl", "Gold menu", "10400"),
+        ("bakery", "vanila cake 1kg", "Plain vanilla sponge", "1900"),
+        ("salon", "keratine price", "Keratin treatment", None),
+    ],
+)
+def test_typos_and_roman_urdu_are_understood(kind, message, name, total):
+    result = offers.quote(message, _items(kind))
+    assert [line.item.name for line in result.lines] == [name], result.reply()
+    assert result.lines[0].total == (Decimal(total) if total else None)
+    assert result.lines[0].differs == "", "a typo is not a product we lack"
+
+
+@pytest.mark.parametrize("message", ["do you have tomatoes?", "do you have dupatta"])
+def test_do_in_english_is_not_two(message):
+    kind = "grocer" if "tomato" in message else "clothing"
+    assert offers.quote(message, _items(kind)).lines[0].quantity is None
+
+
+def test_aur_joins_two_lines_of_an_order():
+    result = offers.quote("do dupatte aur ek kurta", _items("clothing"))
+    assert {(l.item.name, l.quantity) for l in result.lines} == {
+        ("Chiffon Dupatta", 2), ("Khaddar Kurta", 1)
+    }

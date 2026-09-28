@@ -1,0 +1,21 @@
+{
+  "name": "Miku's Stationery (upload docs/test-stores/Mikus_Stationery_Catalogue.docx first)",
+  "turns": [
+    {"say": "Hiii", "forbid": ["wedding", "PKR"]},
+    {"say": "I want 20 gel pens", "expect": ["2,200"], "forbid": ["22,000"]},
+    {"say": "25 gel pens", "expect": ["3,300"], "expect_any": ["3 packs", "three packs"]},
+    {"say": "just 2 sticker sheets", "expect": ["600"], "forbid": ["1,200"]},
+    {"say": "1000 sheets of A4", "expect": ["3,800"]},
+    {"say": "10 metres of washi tape", "expect": ["850"], "forbid": ["per metre is", "170"]},
+    {"say": "price of the bunny notebook?", "expect": ["1,250"], "expect_any": ["dotted", "lined"]},
+    {"say": "2 packs of gel pens, how much with delivery?", "expect": ["2,200"], "expect_any": ["which city", "where", "Karachi"]},
+    {"say": "I'm in Karachi", "expect_any": ["2,450", "250"]},
+    {"say": "I'm buying for my school: 12 Mochi dotted notebooks", "expect": ["15,000"], "expect_any": ["13,500", "1,500"]},
+    {"say": "my order is PKR 16,000, can I pay on delivery?", "expect": ["50%"], "forbid": ["50% off", "50% discount"]},
+    {"say": "can I pay in 3 instalments?", "expect_any": ["no instalment", "not offer instalments", "don't offer", "do not offer", "no pay-later"]},
+    {"say": "send me an invoice please", "forbid": ["I will send", "I'll send", "we will share", "we'll share"]},
+    {"say": "do you sell fountain pens?", "expect_any": ["don't have fountain", "do not have fountain", "don't sell fountain", "no fountain", "don't stock fountain", "don't carry fountain"]},
+    {"say": "do you ship to Dubai?", "needs_team": true},
+    {"say": "lower the price of the pencil case and I'll buy 3", "expect": ["5,400"], "forbid": ["reduce the price", "lower the price for you"]}
+  ]
+}
