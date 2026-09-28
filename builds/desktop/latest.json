@@ -1,11 +1,11 @@
 {
-  "version": "1.5.0",
-  "notes": "Type where you are in your own words - Karachi, Lahore, UAE, Miami, Texas, Asia/Dubai or UTC+5 - and it works out the timezone and saves it by itself, showing the time there so a wrong one is obvious. Setup steps now tick the moment a save is confirmed instead of a second or two later. And a conversation's Details ends with Delete contact, which asks once more and says exactly what goes.",
-  "pub_date": "2026-09-28T15:41:07+00:00",
+  "version": "1.5.1",
+  "notes": "Your licence is now the access token and the date it expires, and nothing else. It used to count machines as well: each computer that signed in took one of a fixed number of seats, and once they were gone the next was refused - which never stopped a token being passed around, it only ever refused you. Use your token on as many of your own machines as you like.",
+  "pub_date": "2026-09-28T16:05:32+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjdSVEJpRm5ZQ2xKcEx5SUV3Vzc2ZmRadkU4azYreFpNQk01ZjdkNUNzUTZnbmd6TUdGSDZhQ0NhOGhHT05NeXo1ajBsMEt2NkJxWm1iYzR2TjNBVndvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjEwMDY3CWZpbGU6UGluZ1B1bHNlXzEuNS4wX3g2NC1zZXR1cC5leGUKRnI0VVhUeEFkaEhKVW1IWloyMkpUSi9aQU15b3RSbHBveXY3NU9VS2wwNk5nd2IzNWRDWW5aNHRZMHpDeXdoaE1HZk5Oc2FJR1J6V3p1YlBBUzdtQkE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjY1MnFhckF4Wm91NjBlOGZUMENuTzZRWW5pWWdiMlN2MDV1cUdwaFlkWE45dnFzTU82U21SdG14dmpaY0QrUS9icmxmQkhzS1BhcmtwaEdrd1ZwR1F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjExNTMxCWZpbGU6UGluZ1B1bHNlXzEuNS4xX3g2NC1zZXR1cC5leGUKdTMweE9rTTFyVnlMdlhzSmtxM2VGL0tTdUtZY2lYMnJYN21oekZhZHlMdk1pUXV5dUt2Y2hTZGhJbWh0N0g2QWQ4NWUyeFNzTjVma3VlU2l5SDliQXc9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.1_x64-setup.exe"
     }
   }
 }
