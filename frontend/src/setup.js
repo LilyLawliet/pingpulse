@@ -168,6 +168,47 @@ const RECOMMENDED_KEYS = ['alerts', 'hours', 'calendar']
 const QUOTABLE = new Set(['ready', 'described'])
 
 /**
+ * The two steps the business record itself answers, from a record the server
+ * returned - whether read here or handed back by a save.
+ */
+export function fromOrganization(org) {
+  const zone = (org?.timezone || '').trim()
+  return {
+    // The server fills in "You are a helpful sales agent." for a business
+    // that never wrote its own, so a line that short is not an answer.
+    business: Boolean((org?.sales_prompt || '').trim().length > 40),
+    // Created businesses start on UTC. Nobody chose that, so it does not count.
+    timezone: Boolean(zone) && zone !== 'UTC',
+  }
+}
+
+/**
+ * Apply a save that has just succeeded, before the server is asked again.
+ *
+ * Every tick is still the server's: `patch` only ever carries what a save
+ * response has just confirmed - the record it returned, the file it indexed,
+ * the channel it created - and the re-read that follows replaces it. What it
+ * removes is the wait. The tick, the banner and the lock used to hold until a
+ * second full round of checks came back, so a step visibly saved and then
+ * went on saying it was not done.
+ *
+ * `org`, when given, is the business record the save returned, which is how a
+ * business created a moment ago stops counting as missing.
+ */
+export function patchSetup(state, patch, org) {
+  if (!state || state.error) return state
+  const next = { ...state, done: { ...state.done, ...patch }, gate: { ...state.gate, ...patch } }
+  // Connected now also means connected at some point; not connected now says
+  // nothing about before, so it never takes the gate away.
+  if (patch?.whatsapp === false) next.gate.whatsapp = state.gate.whatsapp
+  if (org) {
+    next.org = org
+    next.hasOrg = true
+  }
+  return next
+}
+
+/**
  * Whether WhatsApp is connected, from the channel list.
  *
  * The same rule /whatsapp/status applies - the active channel, a live paired
@@ -249,14 +290,9 @@ export async function readSetup(onRequired) {
   ].map((check) => check.catch(() => {}))
 
   const snapshot = (pending) => {
-    const zone = (org?.timezone || '').trim()
     const done = {
-      // The server fills in "You are a helpful sales agent." for a business
-      // that never wrote its own, so a line that short is not an answer.
-      business: Boolean((org?.sales_prompt || '').trim().length > 40),
+      ...fromOrganization(org),
       knowledge,
-      // Created businesses start on UTC. Nobody chose that, so it does not count.
-      timezone: Boolean(zone) && zone !== 'UTC',
       whatsapp: whatsapp.connected,
       ...rest,
     }

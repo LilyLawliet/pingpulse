@@ -95,8 +95,10 @@ export default function WhatsAppSettings({ onChanged }) {
         auth_token: provider === 'TWILIO' ? token || null : null,
       })
       setForm({ phone_number: '', account_sid: '', auth_token: '' })
+      // A Twilio number is connected the moment the server has it. A QR
+      // channel is not, until the phone is scanned - that tick comes below.
+      onChanged?.(provider === 'TWILIO' ? { whatsapp: true } : undefined)
       await load()
-      onChanged?.()
     } catch (err) {
       setError(err.message || 'Could not connect that number.')
     } finally {
@@ -127,8 +129,8 @@ export default function WhatsAppSettings({ onChanged }) {
             : current,
         )
         if (state.status === 'AUTHENTICATED') {
+          onChanged?.({ whatsapp: true })
           await load()
-          onChanged?.()
         }
       } catch {
         /* the bridge may still be starting; the next tick retries */
@@ -158,8 +160,8 @@ export default function WhatsAppSettings({ onChanged }) {
     setBusy(true)
     try {
       await api.removeChannel(id)
-      await load()
       onChanged?.()
+      await load()
     } catch (err) {
       setError(err.message || 'Could not disconnect that number.')
     } finally {

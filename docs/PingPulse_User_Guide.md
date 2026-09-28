@@ -170,9 +170,13 @@ suggestion you confirm, never as a silent change.
 **Purpose.** The timezone your day is in. Every opening hour, appointment and
 follow-up is read against it.
 
-**What you give.** Your timezone, picked from a list. The computer you are on
-is offered as the answer, so this is usually one click, and the current time
-there is shown so a wrong choice is obvious.
+**What you give.** Where you are, typed the way you would say it — a city
+(*Karachi*, *Lahore*), a country (*UAE*, *Pakistan*), a US place (*Miami*,
+*Texas*) or a timezone name (*Asia/Dubai*). It is checked as you type, and saved
+by itself as soon as it is recognised, with the current time there shown so a
+wrong one is obvious. Something it cannot find is shown in red with the
+closest matches, and a typing slip like *Karachy* offers *Asia/Karachi*. The
+computer you are on is also offered as a one-click answer.
 
 **If you skip it.** Times are read as UTC instead. The agent offers hours you
 are shut and books people at the wrong time. Hours cannot be saved without it
@@ -314,6 +318,13 @@ In the picture above, the customer asked for earbuds and the agent answered
 with two products, two real prices and two real stock counts — every one of
 them out of the price list that was uploaded in step two. It made up
 nothing, because it cannot.
+
+- **Delete a contact.** Open **Details** on a conversation; the last section
+  deletes the contact. It asks once more, naming them, because it removes
+  everything recorded about them — every message, their appointments and their
+  place on the board — and cannot be undone. If they message again they arrive
+  as a new contact. To stop messaging somebody, do not delete them: their
+  asking to stop is recorded on the contact, and deleting it forgets that.
 
 ### The board
 

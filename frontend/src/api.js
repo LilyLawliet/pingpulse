@@ -159,6 +159,9 @@ export const api = {
     return request(`/crm/contacts${query ? `?${query}` : ''}`)
   },
   contactMessages: (id) => request(`/crm/contacts/${id}/messages`),
+  // Removes the contact with everything recorded about them - messages,
+  // appointments, stage history. There is no undo.
+  deleteContact: (id) => request(`/crm/contacts/${id}`, { method: 'DELETE' }),
 
   // Follow-ups. The automatic sequence fires hours later for warm
   // conversations only, so this is the same machinery driven by hand — which

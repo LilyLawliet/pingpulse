@@ -67,11 +67,13 @@ export default function KnowledgeSettings({ onChanged }) {
     setNote(null)
     setHours(null)
     const done = []
+    let indexed = 0
 
     for (const file of chosen) {
       try {
         const result = await api.uploadKnowledge(file)
         done.push(`${result.filename}: ${result.passages_indexed} passage(s)`)
+        indexed += result.passages_indexed || 0
         // What the file filled in - hours, services, areas - decides whether
         // the agent can book at all and what it says it does. Far too big to
         // leave the owner to discover. The server says it in plain words.
@@ -86,9 +88,11 @@ export default function KnowledgeSettings({ onChanged }) {
 
     if (done.length) setNote(`Added ${done.join(', ')}.`)
     setBusy(false)
+    // Told first, and told what the server just confirmed: passages indexed is
+    // what makes the knowledge answer "ready". Waiting for this panel's own
+    // re-read first held the tick up by a round trip for no reason.
+    onChanged?.(indexed > 0 ? { knowledge: true } : undefined)
     await load()
-    // Setup ticks this step from the server, so it has to be told to look.
-    onChanged?.()
   }
 
   const remove = async (source) => {
@@ -99,8 +103,10 @@ export default function KnowledgeSettings({ onChanged }) {
     } catch (err) {
       setError(err.message)
     }
-    await load()
+    // No hint: whether what is left is still enough to quote from is the
+    // server's call.
     onChanged?.()
+    await load()
   }
 
   return (
@@ -165,16 +171,18 @@ export default function KnowledgeSettings({ onChanged }) {
                 onClick={async () => {
                   setBusy(true)
                   setError(null)
+                  let imported = 0
                   try {
                     const done = await api.importCatalogue(scale)
+                    imported = done.imported || 0
                     setNote(`Imported ${done.imported} product(s) from WhatsApp.`)
                     setCatalogue(null)
                   } catch (err) {
                     setError(err.message)
                   }
                   setBusy(false)
+                  onChanged?.(imported > 0 ? { knowledge: true } : undefined)
                   await load()
-                  onChanged?.()
                 }}
                 className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-2xs font-semibold text-on-accent transition-opacity hover:opacity-90"
               >

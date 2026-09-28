@@ -123,8 +123,10 @@ export default function NotificationSettings({ onChanged }) {
         email: state.email || '',
       })
       setNote('Saved.')
-      // Setup ticks this step from the server, so it has to be told to look.
-      onChanged?.()
+      // An address the server has just accepted is somewhere alerts can go.
+      // Without one, a device may still be set up, so that is left to the
+      // re-read rather than unticked here.
+      onChanged?.(state.email ? { alerts: true } : undefined)
     } catch (err) {
       setError(saidPlainly(err))
     }
@@ -138,8 +140,8 @@ export default function NotificationSettings({ onChanged }) {
     try {
       await subscribeWithPrompt(state)
       setNote('This device will now be alerted.')
+      onChanged?.({ alerts: true })
       await load()
-      onChanged?.()
     } catch (err) {
       setError(saidPlainly(err))
     }
@@ -153,8 +155,8 @@ export default function NotificationSettings({ onChanged }) {
     try {
       await unsubscribeDevice()
       setNote('This device will no longer be alerted.')
-      await load()
       onChanged?.()
+      await load()
     } catch (err) {
       setError(saidPlainly(err))
     }

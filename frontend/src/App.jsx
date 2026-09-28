@@ -513,6 +513,18 @@ function Dashboard({ onSignedOut }) {
   // the business somebody just switched away from must not land on top of the
   // one they switched to.
   const checkSeq = useRef(0)
+
+  // What Setup reports - a save it has just applied, or a read it has just
+  // made - is newer than anything this dashboard asked for before it, so any
+  // such answer still on its way is dropped rather than allowed to undo it.
+  const onSetupReport = useCallback(
+    (state) => {
+      checkSeq.current += 1
+      onSetupProgress(state)
+    },
+    [onSetupProgress],
+  )
+
   const checkSetup = useCallback(() => {
     checkSeq.current += 1
     const mine = checkSeq.current
@@ -1015,7 +1027,7 @@ function Dashboard({ onSignedOut }) {
                 await loadContacts()
                 await loadStats()
               }}
-              onProgress={onSetupProgress}
+              onProgress={onSetupReport}
             />
           )}
           </>
@@ -1081,6 +1093,20 @@ function Dashboard({ onSignedOut }) {
           stages={stages}
           onClose={() => setShowDrawer(false)}
           onSaved={loadContacts}
+          onDeleted={(id) => {
+            // Gone from the screen at once, then re-read: the server has
+            // already removed them, so the list only confirms it.
+            setShowDrawer(false)
+            setMobilePane('list')
+            setContacts((rows) => rows.filter((row) => row.id !== id))
+            setThreads((all) => {
+              const { [id]: _gone, ...rest } = all
+              return rest
+            })
+            setSelectedContact((current) => (current === id ? null : current))
+            loadContacts()
+            loadStats()
+          }}
         />
       )}
       {showProspects && (

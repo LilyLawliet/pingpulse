@@ -309,8 +309,9 @@ export default function AgentSettings({ onCalendar, onChanged, onTimezone }) {
       // stored copy for the same reason.
       setFromDocument(null)
       setDrafted(null)
-      // Setup ticks this step from the server, so it has to be told to look.
-      onChanged?.()
+      // The server has just accepted these hours, so the step is done as of
+      // now; Setup re-reads to confirm.
+      onChanged?.({ hours: Object.keys(config.business_hours || {}).length > 0 })
       setPreview(null)
       // Reloaded rather than assumed: the undo offer has to name the change
       // that was actually recorded, and the server decides what that was.

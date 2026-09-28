@@ -45,10 +45,11 @@ export default function CalendarSettings({ onChanged }) {
     setBusy(true)
     setError(null)
     try {
-      setState(await action())
+      const next = await action()
+      setState(next)
       setCopied(false)
-      // The step is ticked from the server, so tell whoever is counting.
-      onChanged?.()
+      // What the server just answered is the tick; Setup re-reads to confirm.
+      onChanged?.({ calendar: Boolean(next?.active) })
     } catch (err) {
       setError(err.message)
     }

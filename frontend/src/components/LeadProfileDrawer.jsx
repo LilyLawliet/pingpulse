@@ -5,6 +5,7 @@ import {
   Hand,
   Loader2,
   Save,
+  Trash2,
   TriangleAlert,
   User,
   X,
@@ -41,7 +42,13 @@ const FIELDS = [
  * matters much less than whether it is right, and anything wrong is editable
  * in place.
  */
-export default function LeadProfileDrawer({ contact, stages = DEFAULT_STAGES, onClose, onSaved }) {
+export default function LeadProfileDrawer({
+  contact,
+  stages = DEFAULT_STAGES,
+  onClose,
+  onSaved,
+  onDeleted,
+}) {
   const [draft, setDraft] = useState({})
   const [saving, setSaving] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -304,6 +311,8 @@ export default function LeadProfileDrawer({ contact, stages = DEFAULT_STAGES, on
               />
             </label>
           </section>
+
+          <DeleteContact contact={contact} onDeleted={onDeleted} />
         </div>
 
         <footer className="flex items-center gap-2 border-t border-edge px-5 py-3.5">
@@ -328,5 +337,96 @@ export default function LeadProfileDrawer({ contact, stages = DEFAULT_STAGES, on
         </footer>
       </aside>
     </div>
+  )
+}
+
+/**
+ * Removing somebody from the dashboard, for good.
+ *
+ * Two presses, and the second one says exactly what goes: the contact, every
+ * message, their appointments and their history on the board. The backend
+ * deletes all of it together and there is no copy to restore from, so the
+ * confirmation names the person rather than asking "are you sure".
+ *
+ * If they message again they arrive as somebody new - which is also why this
+ * is not the way to stop messaging a person; asking to stop is recorded on the
+ * contact, and deleting it would forget that they asked.
+ */
+function DeleteContact({ contact, onDeleted }) {
+  const [asking, setAsking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const name = contactLabel(contact)
+
+  useEffect(() => {
+    setAsking(false)
+    setError(null)
+  }, [contact.id])
+
+  const remove = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.deleteContact(contact.id)
+      onDeleted?.(contact.id)
+    } catch (err) {
+      setError(err.message || 'That contact could not be deleted.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-crit/25 p-3">
+      <p className="text-xs font-semibold text-ink">Delete this contact</p>
+      <p className="mt-0.5 text-2xs leading-relaxed text-dim">
+        Removes {name} and everything recorded about them from PingPulse.
+      </p>
+
+      {contact.opt_out && (
+        <p className="mt-2 text-2xs leading-relaxed text-warn">
+          They asked not to be messaged. Deleting them forgets that they asked, so if they
+          write again they will be treated as somebody new.
+        </p>
+      )}
+
+      {error && <p className="mt-2 text-2xs text-crit">{error}</p>}
+
+      {asking ? (
+        <div className="mt-3 space-y-2 rounded-lg bg-crit/10 p-3">
+          <p className="text-2xs leading-relaxed text-crit">
+            <span className="font-semibold">This cannot be undone.</span> {name}, every message
+            in this conversation, their appointments and their history on the board are deleted
+            now. If they message again they arrive as a new contact.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={remove}
+              className="flex items-center gap-1.5 rounded-lg bg-crit px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            >
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              Delete {name}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setAsking(false)}
+              className="rounded-lg px-3 py-1.5 text-xs text-dim transition-colors hover:text-ink"
+            >
+              Keep them
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setAsking(true)}
+          className="mt-3 flex items-center gap-1.5 rounded-lg border border-crit/30 px-3 py-1.5 text-xs font-semibold text-crit transition-colors hover:bg-crit/10"
+        >
+          <Trash2 size={13} /> Delete contact
+        </button>
+      )}
+    </section>
   )
 }

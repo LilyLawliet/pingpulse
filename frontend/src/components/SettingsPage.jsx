@@ -6,12 +6,15 @@ import {
   STEPS,
   TIER_HINT,
   TIER_LABEL,
+  fromOrganization,
   mergeSetup,
+  patchSetup,
   readSetup,
   requiredLeft,
   setupKnown,
 } from '../setup.js'
 import AgentSettings from './AgentSettings.jsx'
+import TimezoneField from './TimezoneField.jsx'
 import CalendarSettings from './CalendarSettings.jsx'
 import ErrorLog from './ErrorLog.jsx'
 import KnowledgeSettings from './KnowledgeSettings.jsx'
@@ -41,56 +44,6 @@ import WhatsAppSettings from './WhatsAppSettings.jsx'
  * shop with no board customisation works fine. A shop with no WhatsApp
  * connection is not a shop that is running.
  */
-
-// The timezone list the browser already has, so nobody types "America/New_York"
-// from memory.
-//
-// It was a free-text box asking for an IANA name, which is a thing engineers
-// know and shop owners do not - so the field existed and was still not a way
-// to set a timezone. Falling back to a short list on a browser too old for
-// supportedValuesOf, because an empty dropdown would be worse than the box it
-// replaced.
-const FALLBACK_ZONES = [
-  'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
-  'America/Sao_Paulo', 'Europe/London', 'Europe/Dublin', 'Europe/Paris',
-  'Europe/Berlin', 'Europe/Madrid', 'Europe/Istanbul', 'Africa/Lagos',
-  'Africa/Johannesburg', 'Africa/Cairo', 'Asia/Dubai', 'Asia/Karachi',
-  'Asia/Kolkata', 'Asia/Dhaka', 'Asia/Singapore', 'Asia/Tokyo',
-  'Australia/Sydney', 'UTC',
-]
-
-const ZONES = (() => {
-  try {
-    const all = Intl.supportedValuesOf('timeZone')
-    return all?.length ? all : FALLBACK_ZONES
-  } catch {
-    return FALLBACK_ZONES
-  }
-})()
-
-// What this machine believes, offered as the answer rather than guessed at:
-// it is right nearly always, and the one click to accept it is the point.
-const detectedZone = (() => {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || ''
-  } catch {
-    return ''
-  }
-})()
-
-/** What the clock says in a zone, so a wrong guess is visible before it books
- *  somebody at four in the morning. */
-function localTime(zone) {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZone: zone,
-    }).format(new Date())
-  } catch {
-    return '—'
-  }
-}
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'PKR', 'AED', 'SAR', 'INR', 'TRY', 'NGN', 'ZAR']
 const LANGUAGES = [
@@ -169,16 +122,21 @@ export default function SettingsPage({
   // The form is filled from the server only when there is nothing in it yet,
   // or straight after a save. A background re-read that rewrote it would throw
   // away whatever somebody was halfway through typing.
+  //
+  // Only the newest read may land. One that was already on its way when a save
+  // went through was asked before that save, and would put its tick back.
+  const readSeq = useRef(0)
   const check = useCallback(
     async ({ refill = false } = {}) => {
+      readSeq.current += 1
+      const mine = readSeq.current
       const apply = (state) => {
-        if (!setupKnown(state)) return
+        if (!setupKnown(state) || mine !== readSeq.current) return
         setForm((was) => {
           if (was && !refill) return was
           return state.org ? formFrom(state.org) : was || { ...EMPTY_FORM }
         })
         setSetup((was) => mergeSetup(was, state))
-        onProgress?.(state)
       }
       // The steps and the form appear as soon as the business itself has
       // answered, not after every check has.
@@ -191,8 +149,35 @@ export default function SettingsPage({
       }
       return state
     },
-    [onProgress],
+    [],
   )
+
+  // Whatever this page knows, the sidebar and the lock know the same moment.
+  useEffect(() => {
+    if (setupKnown(setup)) onProgress?.(setup)
+  }, [setup, onProgress])
+
+  // "Your agent is running" appears the moment the last required step goes,
+  // and the warning goes with it - from whichever save or read did it.
+  const leftBefore = useRef(null)
+  useEffect(() => {
+    if (!setupKnown(setup)) return
+    const left = requiredLeft(setup).length
+    if (leftBefore.current > 0 && left === 0) setJustFinished(true)
+    if (left > 0) setJustFinished(false)
+    leftBefore.current = left
+  }, [setup])
+
+  /**
+   * A save succeeded: show it now, then let the server confirm it.
+   *
+   * Any read already in flight was asked before this save and is dropped, so
+   * it cannot undo the tick on its way back.
+   */
+  const applySaved = (patch, org) => {
+    readSeq.current += 1
+    setSetup((was) => patchSetup(was, patch, org))
+  }
 
   const mounted = useRef(true)
   const retry = useRef(null)
@@ -213,12 +198,11 @@ export default function SettingsPage({
     onChange: (event) => setForm((f) => ({ ...f, [key]: event.target.value })),
   })
 
-  // Re-read after a save, and say so if that save was the last thing standing
-  // between this business and a running agent.
-  const recheck = async () => {
-    const before = requiredLeft(setup).length
-    const after = requiredLeft(await check({ refill: true })).length
-    if (before > 0 && after === 0) setJustFinished(true)
+  // Called by each step's panel after it saves. `patch` is what that save
+  // has just confirmed, shown at once; the re-read then settles it.
+  const recheck = (patch) => {
+    if (patch && typeof patch === 'object') applySaved(patch)
+    return check()
   }
 
   const saveBusiness = async (event) => {
@@ -237,8 +221,11 @@ export default function SettingsPage({
         ? await api.updateActiveOrganization(body)
         : await api.createOrganization(body)
       setNote('Saved.')
-      await onSaved?.(saved)
-      await recheck()
+      applySaved(fromOrganization(saved), saved)
+      // Neither of these holds up the tick. The dashboard re-reading its
+      // business list is its own business.
+      onSaved?.(saved)
+      check({ refill: true })
     } catch (err) {
       // The server writes these for a shop owner - "'Miami' is not a timezone.
       // Use an IANA name like America/New_York" is the whole answer, and
@@ -248,27 +235,18 @@ export default function SettingsPage({
     setSaving(false)
   }
 
-  const saveTimezone = async (event) => {
-    event.preventDefault()
-    const zone = (form.timezone || '').trim()
+  // The timezone step saves itself as soon as what was typed is a real zone.
+  // Throws with the server's words if it refuses, which the field shows.
+  const saveZone = async (zone) => {
     setNote(null)
-    if (!zone) {
-      setError('Choose your timezone first.')
-      return
-    }
-    setSaving(true)
     setError(null)
-    try {
-      // Only the zone. Sending the whole form from here would write back a
-      // business description this step never showed anybody.
-      const saved = await api.updateActiveOrganization({ timezone: zone })
-      setNote('Saved.')
-      onSaved?.(saved)
-      await recheck()
-    } catch (err) {
-      setError(err?.message || 'That did not save. Check the details and try again.')
-    }
-    setSaving(false)
+    // Only the zone. Sending the whole form from here would write back a
+    // business description this step never showed anybody.
+    const saved = await api.updateActiveOrganization({ timezone: zone })
+    applySaved(fromOrganization(saved), saved)
+    setForm((f) => (f ? { ...f, timezone: saved.timezone || zone } : f))
+    onSaved?.(saved)
+    check()
   }
 
   /**
@@ -620,58 +598,13 @@ export default function SettingsPage({
               (form === null ? (
                 <Loader2 size={16} className="animate-spin text-faint" />
               ) : (
-                <form onSubmit={saveTimezone} className="space-y-4">
-                  {error && (
-                    <p className="rounded-lg bg-crit/10 px-3 py-2 text-2xs text-crit">{error}</p>
-                  )}
-                  {note && (
-                    <p className="rounded-lg bg-ok/10 px-3 py-2 text-2xs text-ok">{note}</p>
-                  )}
-
-                  <label className="block">
-                    <span className="mb-1.5 block text-sm font-medium text-ink">Your timezone</span>
-                    <select {...field('timezone')} className={inputClass}>
-                      <option value="">Choose your timezone…</option>
-                      {ZONES.map((zone) => (
-                        <option key={zone} value={zone}>
-                          {zone === detectedZone ? `${zone} — this computer` : zone}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="mt-1.5 block text-2xs leading-relaxed text-faint">
-                      Picked from the list your browser already has, so nobody
-                      has to remember how an IANA name is spelt.
-                    </span>
-                  </label>
-
-                  {/* The one click that is the point: this machine is nearly
-                      always right, and typing is what people got wrong. */}
-                  {detectedZone && form.timezone !== detectedZone && (
-                    <button
-                      type="button"
-                      onClick={() => setForm((f) => ({ ...f, timezone: detectedZone }))}
-                      className="flex w-full items-center justify-between rounded-xl border border-edge px-4 py-3 text-left text-sm text-dim transition-colors hover:border-accent/40 hover:bg-accent/5 hover:text-ink"
-                    >
-                      <span>
-                        This computer is set to{' '}
-                        <span className="font-semibold text-ink">{detectedZone}</span>
-                      </span>
-                      <span className="text-xs font-semibold text-accent">Use it</span>
-                    </button>
-                  )}
-
-                  {form.timezone && (
-                    <p className="rounded-xl bg-panel-2/60 px-3.5 py-2.5 text-2xs leading-relaxed text-dim">
-                      It is{' '}
-                      <span className="font-semibold text-ink">{localTime(form.timezone)}</span>{' '}
-                      there now. If that is not your clock, the zone is wrong.
-                    </p>
-                  )}
-
-                  <button type="submit" disabled={saving} className="btn-primary">
-                    <Save size={14} /> {saving ? 'Saving…' : 'Save'}
-                  </button>
-                </form>
+                <TimezoneField
+                  saved={setup?.org?.timezone || form.timezone}
+                  onSave={saveZone}
+                  // Until the business record exists there is nothing to save
+                  // the zone against; opening this step is creating it.
+                  disabled={noBusiness}
+                />
               ))}
 
             {waitingForBusiness ? (
