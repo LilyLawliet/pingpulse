@@ -625,6 +625,236 @@ def rules_for(message: str, texts: Iterable[tuple[str, str]], limit: int = 2) ->
     return found
 
 
+# ------------------------------------------------------------------ tiers
+@dataclass
+class Tier:
+    """One rung of a rule that depends on how big the order is.
+
+    "Orders of PKR 500,000 or more receive 2% off" is a discount tier from
+    500,000 up. "PKR 1,500 for orders from PKR 100,000 to PKR 249,999" is a
+    delivery tier with both ends. Read from the business's own sentence, so
+    the threshold and the rate are theirs, not the model's recollection.
+    """
+
+    topic: str  # "discount" or "delivery"
+    low: Decimal | None  # applies from this amount...
+    high: Decimal | None  # ...up to and including this one
+    percent: Decimal | None = None
+    fee: Decimal | None = None
+    free: bool = False
+    currency: str | None = None
+    condition: str = ""  # "within Lahore": said, not decided here
+    sentence: str = ""
+
+    def covers(self, value: Decimal) -> bool:
+        return (self.low is None or value >= self.low) and (self.high is None or value <= self.high)
+
+    def describe(self) -> str:
+        if self.percent is not None:
+            what = f"{_num(self.percent)}% off"
+        elif self.free:
+            what = "free"
+        else:
+            what = money(self.fee, self.currency)
+        span = (
+            f"from {money(self.low, self.currency)} to {money(self.high, self.currency)}"
+            if self.low is not None and self.high is not None
+            else f"from {money(self.low, self.currency)}"
+            if self.low is not None
+            else f"up to {money(self.high, self.currency)}"
+        )
+        return f"{what} for orders {span}" + (f" {self.condition}" if self.condition else "")
+
+
+_AMOUNT = rf"(?:{_CURRENCY_WORD}\s*{_NUMBER}|{_NUMBER}\s*{_CURRENCY_WORD})"
+
+
+def _amount_in(text: str) -> Decimal | None:
+    found = re.search(_NUMBER, text or "")
+    return to_decimal(found.group(0)) if found else None
+
+
+def _bounds(clause: str) -> tuple[Decimal | None, Decimal | None, list[tuple[int, int]]]:
+    """The order-size range a clause states, and where its amounts sit."""
+    low = high = None
+    spans: list[tuple[int, int]] = []
+    between = re.search(rf"(?:from|between)\s+({_AMOUNT})\s+(?:to|and|-|–)\s+({_AMOUNT})", clause, re.I)
+    if between:
+        low, high = _amount_in(between.group(1)), _amount_in(between.group(2))
+        spans.append(between.span())
+        return low, high, spans
+    for match in re.finditer(
+        rf"(?:(?P<up>of|over|above|exceeding|from|at least|minimum of)\s+(?P<a>{_AMOUNT})\s*(?P<more>or more|and above|or above|\+|and over|or over)?"
+        rf"|(?P<down>below|under|less than|up to)\s+(?P<b>{_AMOUNT}))",
+        clause,
+        re.I,
+    ):
+        spans.append(match.span())
+        if match.group("down"):
+            value = _amount_in(match.group("b"))
+            # "below 100,000" stops just short of it; "up to" includes it.
+            high = value if match.group("down").lower() == "up to" else value - Decimal("0.01")
+        else:
+            value = _amount_in(match.group("a"))
+            strict = match.group("up").lower() in {"over", "above", "exceeding"} and not match.group("more")
+            low = value + Decimal("0.01") if strict else value
+    return low, high, spans
+
+
+def read_tiers(texts: Iterable[tuple[str, str]]) -> list[Tier]:
+    """Every order-size rule for discounts and delivery the business wrote.
+
+    Only clauses that state both a range and exactly one rate, fee or "free"
+    are read. Anything less definite is left as a sentence for the model to
+    quote, because a rule read wrongly here would be applied with certainty.
+    """
+    tiers: list[Tier] = []
+    for _, text in texts:
+        currency = currency_of(text)
+        for sentence in _sentences(text):
+            low_sentence = sentence.lower()
+            if any(word in low_sentence for word in RULE_ELSEWHERE):
+                continue
+            topic = (
+                "discount" if ("discount" in low_sentence or "% off" in low_sentence or re.search(r"\d\s*%", sentence))
+                else "delivery" if any(w in low_sentence for w in RULE_TOPICS["delivery"][1])
+                else None
+            )
+            if topic is None:
+                continue
+            for clause in re.split(r";|\.\s+|,\s*and\s+|\band\s+(?=free\b)", sentence):
+                low, high, spans = _bounds(clause)
+                if low is None and high is None:
+                    continue
+                # What is left once the range is taken out is the rate.
+                rest = clause
+                for start, end in sorted(spans, reverse=True):
+                    rest = rest[:start] + " " + rest[end:]
+                percents = re.findall(r"(\d+(?:\.\d+)?)\s*%", rest)
+                fees = [m for m in re.finditer(_AMOUNT, rest, re.I)]
+                free = re.search(r"\bfree\b", rest, re.I) is not None
+                condition = ""
+                where = re.search(r"\b(within|inside|in)\s+([A-Z][\w ]{1,30})", clause)
+                if where:
+                    condition = f"{where.group(1)} {where.group(2).strip()}"
+                if topic == "discount" and len(percents) == 1 and not fees:
+                    tiers.append(Tier("discount", low, high, percent=to_decimal(percents[0]),
+                                      currency=currency_of(clause) or currency, condition=condition, sentence=sentence))
+                elif topic == "delivery" and (len(fees) == 1) != free and not percents:
+                    tiers.append(Tier("delivery", low, high,
+                                      fee=_amount_in(fees[0].group(0)) if fees else None, free=free,
+                                      currency=currency_of(clause) or currency, condition=condition, sentence=sentence))
+    return tiers
+
+
+@dataclass
+class Applied:
+    """What the order-size rules come to for one order value."""
+
+    value: Decimal
+    currency: str | None
+    discount: Tier | None = None
+    next_discount: Tier | None = None
+    delivery: Tier | None = None
+    had_discounts: bool = False
+    had_delivery: bool = False
+
+    @property
+    def saving(self) -> Decimal | None:
+        if not self.discount:
+            return None
+        return (self.value * self.discount.percent / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    @property
+    def topics(self) -> set[str]:
+        return ({"discount"} if self.had_discounts else set()) | ({"delivery"} if self.had_delivery else set())
+
+    def figures(self) -> set[Decimal]:
+        found = {self.value}
+        if self.saving is not None:
+            found |= {self.saving, self.value - self.saving}
+        if self.next_discount and self.next_discount.low is not None:
+            found |= {self.next_discount.low, self.next_discount.low - self.value}
+        if self.delivery and self.delivery.fee is not None:
+            found.add(self.delivery.fee)
+        return found
+
+    def lines(self) -> list[str]:
+        out = []
+        amount = money(self.value, self.currency)
+        if self.had_discounts:
+            if self.discount:
+                after = self.value - self.saving
+                out.append(
+                    f"On {amount}, the {_num(self.discount.percent)}% discount applies: "
+                    f"{money(self.saving, self.currency)} off, leaving {money(after, self.currency)}."
+                )
+            if self.next_discount and self.next_discount.low is not None:
+                short = self.next_discount.low - self.value
+                what = "No discount applies yet" if not self.discount else "The next rate is not reached"
+                out.append(
+                    f"{what}: {_num(self.next_discount.percent)}% off starts at "
+                    f"{money(self.next_discount.low, self.currency)}, which is {money(short, self.currency)} more."
+                )
+        if self.had_delivery and self.delivery:
+            charge = "free" if self.delivery.free else money(self.delivery.fee, self.currency)
+            out.append(
+                f"Delivery on {amount}: {charge}"
+                + (f" ({self.delivery.condition})" if self.delivery.condition else "")
+                + "."
+            )
+        return out
+
+
+def apply_tiers(value: Decimal, tiers: list[Tier], currency: str | None, topics: set[str]) -> Applied | None:
+    """Which discount and delivery rung an order of `value` falls on."""
+    discounts = [t for t in tiers if t.topic == "discount"] if "discount" in topics else []
+    deliveries = [t for t in tiers if t.topic == "delivery"] if "delivery" in topics else []
+    if not discounts and not deliveries:
+        return None
+    applying = [t for t in discounts if t.covers(value)]
+    # Rates are not added together; the best one that applies is the one.
+    discount = max(applying, key=lambda t: t.percent) if applying else None
+    ahead = sorted(
+        (t for t in discounts if t.low is not None and t.low > value
+         and (discount is None or t.percent > discount.percent)),
+        key=lambda t: t.low,
+    )
+    delivery = next((t for t in deliveries if t.covers(value)), None)
+    return Applied(
+        value=value,
+        currency=currency,
+        discount=discount,
+        next_discount=ahead[0] if ahead else None,
+        delivery=delivery,
+        had_discounts=bool(discounts),
+        had_delivery=bool(deliveries),
+    )
+
+
+def stated_value(message: str) -> Decimal | None:
+    """An order value the customer names: "an order worth PKR 499,999"."""
+    found = sorted(amounts(message), reverse=True)
+    if found:
+        return found[0]
+    bare = re.search(r"\b(?:worth|total(?:s|ling)?|value of|comes to|make it|of)\s+(\d{1,3}(?:,\d{3})+|\d{4,})\b", message or "", re.I)
+    return to_decimal(bare.group(1)) if bare else None
+
+
+def _rule_topic(sentence: str) -> str | None:
+    low = sentence.lower()
+    if "discount" in low or "% off" in low:
+        return "discount"
+    if any(w in low for w in RULE_TOPICS["delivery"][1]):
+        return "delivery"
+    return None
+
+
+def topics_in(text: str) -> set[str]:
+    lowered = (text or "").lower()
+    return {topic for topic, (asked, _) in RULE_TOPICS.items() if any(w in lowered for w in asked)}
+
+
 # ------------------------------------------------------------------ quoting
 @dataclass
 class Line:
@@ -648,6 +878,8 @@ class Quote:
     # The business's own sentences about delivery, discounts or tax, when the
     # customer asked about them.
     rules: list[str] = field(default_factory=list)
+    # Those rules worked out for this order's value, where they could be read.
+    applied: Applied | None = None
 
     @property
     def currency(self) -> str | None:
@@ -662,7 +894,7 @@ class Quote:
         return sum(totals, Decimal(0))
 
     def empty(self) -> bool:
-        return not self.lines and not self.options
+        return not self.lines and not self.options and not self.applied
 
     @property
     def order_value(self) -> Decimal | None:
@@ -685,6 +917,8 @@ class Quote:
                 found.add(item.price)
         if self.subtotal is not None:
             found.add(self.subtotal)
+        if self.applied:
+            found |= self.applied.figures()
         return found
 
     def quantities(self) -> set[Decimal]:
@@ -713,10 +947,13 @@ class Quote:
                 f"- Subtotal of the lines above: {money(self.subtotal, self.currency)}, before any "
                 "tax, delivery charge or discount."
             )
+        if self.applied and self.applied.lines():
+            out.append("- The order-size rules, already applied (use these exact figures):")
+            out += [f"    {line}" for line in self.applied.lines()]
         if self.rules:
             out.append("- What this business's own documents say about what they asked (quoted):")
             out += [f'    "{rule}"' for rule in self.rules]
-            if self.order_value is not None:
+            if self.order_value is not None and not self.applied:
                 out.append(
                     f"  Apply these to an order value of {money(self.order_value, self.currency or self.lines[0].item.currency)} "
                     "and show the sum."
@@ -752,11 +989,20 @@ class Quote:
                 out.append(bit)
         if self.subtotal is not None:
             out.append(f"Together that is {money(self.subtotal, self.currency)} before tax and delivery.")
-        # Quoted as written rather than applied: with no model there is nobody
-        # to read "within Lahore" and decide whether it covers this order.
+        if self.applied:
+            out += self.applied.lines()
+        # A rule that could not be applied is quoted as written: with no model
+        # there is nobody to read it and decide whether it covers this order.
         for rule in self.rules:
+            if self.applied and _rule_topic(rule) in self.applied.topics:
+                continue
             out.append(rule)
-        out.append("Which would you like?" if self.options else "Shall I put that together for you?")
+        if self.options:
+            out.append("Which would you like?")
+        elif self.lines:
+            out.append("Shall I put that together for you?")
+        else:
+            out.append("Anything else I can check for you?")
         return "\n".join(out)
 
 
@@ -843,14 +1089,23 @@ def quote(message: str, items: list[Item], context: str = "") -> Quote:
             nouns.add(_stem(item.sale_unit))
     nouns |= {_stem(unit) for unit in SALE_UNITS}
 
+    # Earlier messages decide the product only when this one asks for an
+    # amount or a price without naming it - "and how much for 3?". Otherwise
+    # "what about delivery?" came back quoting the cable from three turns ago.
+    asks_price = re.search(r"\b(how much|price|cost|total|each|per)\b", message or "", re.I)
+    seen: set[str] = set()
     for wanted in read_request(message, nouns):
         matches = best(items, wanted.text)
-        if not matches and context:
+        if not matches and context and (wanted.quantity or asks_price):
             matches = best(items, f"{context} {wanted.text}")
         if not matches:
             if wanted.quantity:
                 result.unmatched.append(wanted)
             continue
+        key = "|".join(sorted(item.label for item in matches))
+        if key in seen and not wanted.quantity:
+            continue
+        seen.add(key)
         if len(matches) == 1:
             result.lines.append(_line_for(matches[0], wanted))
         else:
@@ -927,6 +1182,24 @@ def unexplained(
     return pending
 
 
+def customer_figures(texts: Iterable[str]) -> set[Decimal]:
+    """Amounts the customer wrote themselves: "an order worth PKR 499,999".
+
+    Repeating a customer's own number back to them is not quoting a price,
+    and refusing it was what sent "can I get the discount on PKR 499,999?"
+    to both providers and out the other side after thirty seconds.
+    """
+    found: set[Decimal] = set()
+    for text in texts:
+        found |= amounts(text)
+        cleaned = _SPEC.sub(" ", text or "")
+        for raw in re.findall(r"(?<![\w.])(\d{1,3}(?:,\d{3})+|\d{4,})(?:\.\d+)?(?![\w.])", cleaned):
+            value = to_decimal(raw)
+            if value:
+                found.add(value)
+    return found
+
+
 def asked_quantities(texts: Iterable[str]) -> set[Decimal]:
     """Plain numbers a customer wrote that are not specifications or money."""
     found: set[Decimal] = set()
@@ -956,6 +1229,8 @@ def as_dict(result: Quote) -> dict[str, Any]:
         ],
         "options": [[item.label for item in items] for _, items in result.options],
         "subtotal": money(result.subtotal, result.currency) if result.subtotal is not None else None,
+        # The discount and delivery rules as they came out for this order.
+        "rules_applied": result.applied.lines() if result.applied else [],
         "catalogue_size": result.catalogue_size,
     }
 
@@ -1041,6 +1316,38 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
     for _, text in texts:
         written |= amounts(text)
     result = quote(message, items, context=earlier)
-    if not result.empty():
-        result.rules = rules_for(message, texts)
+
+    # Discount and delivery tiers, applied to what this order is worth: the
+    # goods worked out above, or an amount the customer names ("an order
+    # worth PKR 499,999"). A follow-up like "what if I make it PKR 999,999?"
+    # names no topic, so the ones asked about just before carry over.
+    topics = topics_in(message) or (topics_in(earlier) if stated_value(message) else set())
+    value = result.order_value or stated_value(message)
+    if value is None and topics & {"discount", "delivery"}:
+        # "What about delivery?" after an order was described: the order is
+        # the one in their previous messages, newest first.
+        for said in reversed(
+            [getattr(m, "content", "") or "" for m in list(history)[-6:]
+             if str(getattr(m, "sender", "")).lower() == "user"]
+        ):
+            value = quote(said, items).order_value or stated_value(said)
+            if value:
+                break
+    if topics & {"discount", "delivery"} and value:
+        tiers = read_tiers(texts)
+        # The currency the rules and the price list are written in comes
+        # before the business's default: a shop set to USD whose documents are
+        # in PKR is quoting in PKR.
+        currency = (
+            result.currency
+            or currency_of(message)
+            or next((t.currency for t in tiers if t.currency), None)
+            or next((i.currency for i in items if i.currency), None)
+            or getattr(organization, "default_currency", None)
+        )
+        result.applied = apply_tiers(value, tiers, currency, topics)
+    if not result.empty() or topics:
+        result.rules = rules_for(message if topics_in(message) else f"{message} {earlier}", texts)
+        if result.applied:
+            result.rules = [r for r in result.rules if _rule_topic(r) not in result.applied.topics]
     return Turn(result, items, written)

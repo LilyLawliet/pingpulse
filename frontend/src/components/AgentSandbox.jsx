@@ -128,6 +128,11 @@ export default function AgentSandbox() {
                 <div className="w-fit max-w-[85%] rounded-2xl rounded-bl-md bg-panel-2 px-4 py-2.5">
                   <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{turn.reply}</p>
                   <QuoteRead quote={turn.quote} />
+                  {turn.why && (
+                    <p className="mt-2 rounded-lg bg-warn/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-warn">
+                      Why the AI reply was not used: {turn.why}
+                    </p>
+                  )}
                   <p className="mt-1.5 flex flex-wrap items-center gap-x-2 font-mono text-[11px] text-faint">
                     <span>{turn.provider}</span>
                     <span>{turn.latency_ms}ms</span>
@@ -189,7 +194,8 @@ export default function AgentSandbox() {
  * before a customer does.
  */
 function QuoteRead({ quote }) {
-  if (!quote || (!quote.lines?.length && !quote.options?.length)) return null
+  if (!quote || (!quote.lines?.length && !quote.options?.length && !quote.rules_applied?.length))
+    return null
   return (
     <div className="mt-2 space-y-1 rounded-xl border border-edge bg-panel px-3 py-2 text-[11px] leading-relaxed text-dim">
       <p className="font-semibold text-faint">From your price list</p>
@@ -209,6 +215,9 @@ function QuoteRead({ quote }) {
           Subtotal <span className="text-ink">{quote.subtotal}</span> before tax and delivery
         </p>
       )}
+      {quote.rules_applied?.map((line) => (
+        <p key={line}>{line}</p>
+      ))}
     </div>
   )
 }

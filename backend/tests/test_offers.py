@@ -338,3 +338,193 @@ def test_a_passage_starting_mid_word_is_not_read_out_from_the_middle():
 
     reply = sales_policy.deterministic_reply({}, [Chunk()], None, message="returns?")
     assert reply.startswith("A return request"), reply
+
+
+# ---------------------------------------------------------------- order-size rules
+def test_discount_and_delivery_tiers_are_read_from_the_business_s_sentences():
+    tiers = offers.read_tiers([("price list", TABLE)])
+    discount = [t for t in tiers if t.topic == "discount"]
+    delivery = [t for t in tiers if t.topic == "delivery"]
+    assert [(t.low, t.percent) for t in discount] == [(Decimal("500000"), Decimal("2"))]
+    assert [(t.low, t.high, t.fee, t.free) for t in delivery] == [
+        (None, Decimal("99999.99"), Decimal("2500"), False),
+        (Decimal("100000"), Decimal("249999"), Decimal("1500"), False),
+        (Decimal("250000"), None, None, True),
+    ]
+    assert delivery[-1].condition == "within Lahore"
+
+
+def _applied(value, topics=("discount", "delivery")):
+    tiers = offers.read_tiers(
+        [("price list", TABLE + "\nOrders of PKR 1,000,000 or more receive 4%.")]
+    )
+    return offers.apply_tiers(Decimal(value), tiers, "PKR", set(topics))
+
+
+def test_one_rupee_short_of_the_discount_says_so():
+    applied = _applied("499999", ("discount",))
+    assert applied.discount is None
+    assert "PKR 1 more" in " ".join(applied.lines())
+
+
+def test_the_best_rate_that_applies_is_used_and_the_next_one_named():
+    applied = _applied("999999", ("discount",))
+    assert applied.discount.percent == 2
+    assert applied.saving == Decimal("19999.98")
+    assert applied.next_discount.percent == 4
+    assert _applied("1000000", ("discount",)).discount.percent == 4
+
+
+def test_delivery_follows_the_order_value():
+    assert _applied("40000", ("delivery",)).delivery.fee == Decimal("2500")
+    assert _applied("150000", ("delivery",)).delivery.fee == Decimal("1500")
+    assert _applied("318000", ("delivery",)).delivery.free
+
+
+def test_a_customer_s_own_figure_can_be_said_back():
+    listed = {Decimal("500000")}
+    said = offers.customer_figures(["I have an order worth PKR 499,999, or 499999 anyway"])
+    reply = "Your PKR 499,999 order is PKR 1 short of PKR 500,000."
+    assert offers.unexplained(reply, listed | said, set(), set()) == set()
+
+
+def test_an_earlier_product_is_not_dragged_into_an_unrelated_question(items):
+    assert offers.quote(
+        "What about delivery in Lahore?", items, context="6 coils of the 4mm cable"
+    ).lines == []
+
+
+def test_the_same_product_is_not_listed_twice(items):
+    result = offers.quote("4mm cable price? The 4mm cable, how much?", items)
+    assert len(result.lines) == 1
+
+
+# ---------------------------------------------------------------- the conversation that broke
+CONVERSATION = [
+    ("Hello", "Hello Test customer. We are open Monday to Saturday, 9:00 AM–6:00 PM PKT. "
+     "What trade materials are you looking for today?"),
+    ("I need 10 solar panels. What do you have?",
+     "We have two options for your 10-panel order:\nNS-SOL-110 (550 W) at PKR 31,800 per panel, "
+     "totaling PKR 318,000.\nNS-SOL-125 (585 W) at PKR 34,650 per panel, totaling PKR 346,500.\n"
+     "Which model fits your project better?"),
+    ("Give me the price for 10 of the 550W panels, including delivery.",
+     "10 x HelioMax 550 W panels at PKR 318,000, with free delivery within Lahore for orders "
+     "above PKR 250,000. Total is PKR 318,000. Where should we deliver the order?"),
+    ("I only need 20 meters of the 4mm cable. How much?",
+     "The 4 mm² CopperCore cable is sold as a full 100 m coil for PKR 18,750, so 20 meters "
+     "requires one coil. Shall I add this to your solar panel order?"),
+    ("Fine, give me 1 coil. How many meters is that?",
+     "That coil is 100 meters. With your 10 solar panels, your total is PKR 336,750 "
+     "(PKR 318,000 + PKR 18,750). What is your delivery address in Lahore?"),
+    ("I need 6 coils of the 4mm cable, 12 solar panels 550W, and 20 LED panels. What's my total?",
+     "6 coils of 4 mm² cable: PKR 112,500.\n12 panels 550 W: PKR 381,600.\n20 LED panels: "
+     "PKR 65,000.\nSubtotal: PKR 559,100.\nWith 2% trade discount: PKR 547,918.\n"
+     "Free delivery in Lahore. What is your site address?"),
+    ("What about delivery in Lahore?",
+     "Standard delivery within Lahore is free for orders of PKR 250,000 or more, so your "
+     "PKR 547,918 total incurs no delivery charge."),
+    ("I have an order worth PKR 499,999. Can you give me the 2% trade discount?",
+     "At PKR 499,999 you are PKR 1 short of the PKR 500,000 needed for the 2% trade discount, "
+     "so it does not apply yet. Add PKR 1 more and it will."),
+    ("What if I make it PKR 999,999?",
+     "At PKR 999,999 the 2% discount applies: PKR 19,999.98 off, so PKR 979,999.02. "
+     "The 4% rate starts at PKR 1,000,000, just PKR 1 more."),
+]
+
+
+@pytest.mark.asyncio
+async def test_the_whole_conversation_that_broke_is_answered_first_time(org_a, monkeypatch):
+    """Every reply here was right, or is what right looks like; none may be refused.
+
+    The last two were refused before because the customer's own figure was
+    treated as an invented price, and both providers timed out trying.
+    """
+    lines = [line for line in TABLE.splitlines() if "|" in line and "Version" not in line]
+    table = [[cell.strip() for cell in line.split("|")] for line in lines]
+    rules = [block for block in TABLE.split("\n\n") if "delivery" in block.lower()]
+    data = _docx(
+        ["Prices are quoted in Pakistani Rupees (PKR).", *rules,
+         "Orders of PKR 1,000,000 or more receive 4%. Discounts are not cumulative."],
+        table,
+    )
+    uploaded = await org_a._client.post(
+        "/api/v1/knowledge/upload",
+        headers=org_a.headers,
+        files={"file": ("price-list.docx", data, "application/octet-stream")},
+    )
+    assert uploaded.status_code == 201
+
+    history: list[dict] = []
+    for question, answer in CONVERSATION:
+        calls = []
+
+        async def groq(prompt, answer=answer):
+            calls.append(prompt)
+            return answer
+
+        monkeypatch.setattr(llm_service, "_call_groq", groq)
+        response = await org_a.post(
+            "/api/v1/agent/simulate", json={"message": question, "history": history}
+        )
+        body = response.json()
+        assert body["provider"] == "groq", (question, body.get("why"))
+        assert len(calls) == 1, f"{question!r} needed a retry: {body.get('why')}"
+        history += [{"sender": "user", "content": question}, {"sender": "agent", "content": answer}]
+
+
+@pytest.mark.asyncio
+async def test_the_discount_question_is_worked_out_before_the_model_answers(org_a, monkeypatch):
+    await _upload_catalogue(org_a)
+    prompts = []
+
+    async def groq(prompt):
+        prompts.append(prompt)
+        return "At PKR 499,999 you are PKR 1 short of PKR 500,000, so no discount yet."
+
+    monkeypatch.setattr(llm_service, "_call_groq", groq)
+    await org_a.post(
+        "/api/v1/agent/simulate",
+        json={"message": "I have an order worth PKR 499,999. Can you give me the 2% trade discount?"},
+    )
+    assert "No discount applies yet" in prompts[0] and "PKR 1 more" in prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_is_explained_in_the_sandbox(org_a, monkeypatch):
+    await _upload_catalogue(org_a)
+    seen = []
+
+    async def wrong(prompt):
+        seen.append(prompt)
+        return "The 4 mm cable is PKR 190 per metre."
+
+    monkeypatch.setattr(llm_service, "_call_groq", wrong)
+    monkeypatch.setattr(llm_service, "_call_gemini", wrong)
+    response = await org_a.post(
+        "/api/v1/agent/simulate", json={"message": "I only need 20 meters of the 4mm cable. How much?"}
+    )
+    body = response.json()
+    assert body["provider"] == "none"
+    assert "190" in body["why"], "the reason should name the refused figure"
+    assert "BEFORE YOU WRITE" in seen[2], "the second provider was not told what went wrong"
+
+
+@pytest.mark.asyncio
+async def test_rules_are_quoted_in_the_currency_they_are_written_in(org_a, monkeypatch):
+    """A business left on the USD default whose price list is in PKR."""
+    await _upload_catalogue(org_a)
+
+    async def down(*_a, **_k):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(llm_service, "_call_groq", down)
+    monkeypatch.setattr(llm_service, "_call_gemini", down)
+    response = await org_a.post(
+        "/api/v1/agent/simulate",
+        json={
+            "message": "What about delivery in Lahore?",
+            "history": [{"sender": "user", "content": "I need 12 solar panels 550W. What's my total?"}],
+        },
+    )
+    reply = response.json()["reply"]
+    assert "PKR 381,600" in reply and "free" in reply and "USD" not in reply

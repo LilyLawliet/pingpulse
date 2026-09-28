@@ -787,6 +787,10 @@ async def simulate(
         # How the price list was read for this message, so a shop can see
         # which product and which sums the answer was built on.
         "quote": offers.as_dict(offer.quote),
+        # Why a provider's reply was not used, when one was not. On a live
+        # conversation this is only in the logs; here the shop testing its
+        # agent can see it.
+        "why": generation.error if generation.fallback_used else None,
         "sent": False,
     }
 

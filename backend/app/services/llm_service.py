@@ -828,13 +828,20 @@ async def generate_reply(
     listed = offers.amounts(price_corpus) | {
         value for value in (offers.to_decimal(str(p)) for p in known_prices) if value
     }
+    # Whether this business has written any prices down at all - decided
+    # before the customer's figures are added, or a shop with no price list
+    # would start having replies refused.
+    has_prices = bool(listed)
+    # The customer's own figures may be said back to them. They are not a
+    # price this business is committing to; they are what was asked about.
+    listed |= offers.customer_figures([customer_said])
     quantities = offers.asked_quantities([customer_said]) | {
         value for value in (offers.to_decimal(str(q)) for q in known_quantities) if value
     }
     rates = offers.percentages(price_corpus)
 
     def unexplained(text: str) -> set[str]:
-        if not listed:
+        if not has_prices:
             # No price list at all: nothing to check against, as before.
             return set()
         return {
@@ -934,12 +941,17 @@ async def generate_reply(
             return text
 
         logger.warning("reply rejected (%s) — regenerating", "; ".join(problems))
+        corrections.append("; also ".join(problems))
         corrected = await call(
             prompt + "\n\nCORRECTION: " + "; also ".join(problems) + ". Rewrite the reply."
         )
 
-        if settings.price_guard_enabled and unexplained(corrected):
-            raise RuntimeError("reply still quoted an unlisted price")
+        still = unexplained(corrected) if settings.price_guard_enabled else set()
+        if still:
+            raise RuntimeError(
+                "reply still quoted " + ", ".join(sorted(still)) + ", which the price list "
+                "does not support"
+            )
         if settings.price_guard_enabled and unsupported_promises(corrected, price_corpus):
             raise RuntimeError("reply still promised something the business has not offered")
         if claims_to_be_human(corrected):
@@ -953,6 +965,10 @@ async def generate_reply(
         if expects_english and is_roman_urdu(corrected):
             raise RuntimeError("reply still came back in Roman Urdu")
         return corrected
+
+    # What the first provider was told to fix, so the second does not start
+    # from nothing and make the same mistake at six times the latency.
+    corrections: list[str] = []
 
     started = time.perf_counter()
     try:
@@ -969,7 +985,13 @@ async def generate_reply(
 
         fallback_started = time.perf_counter()
         try:
-            text = await guard(await _call_gemini(prompt), _call_gemini)
+            warned = (
+                prompt + "\n\nBEFORE YOU WRITE: an earlier draft was rejected because "
+                + corrections[-1] + "."
+                if corrections
+                else prompt
+            )
+            text = await guard(await _call_gemini(warned), _call_gemini)
             return GenerationResult(
                 provider="gemini",
                 text=text,
