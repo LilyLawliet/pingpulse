@@ -162,6 +162,11 @@ several; they add up rather than replace each other. Prices written into
 **If you skip it.** It has to refuse every question about cost. It will do so
 politely, but that is a demo, not a working agent.
 
+**Photos.** In a Word price list, put a picture in each product's row (a
+photo column works). Each picture becomes that product's photo, and the agent
+can send it when a customer asks to see it. A product without one is described
+instead, and if none of your products has a picture, the agent never offers one.
+
 **Worth knowing.** We show what we read back to you before it counts. If a
 document also states your opening hours, we offer to fill them in — as a
 suggestion you confirm, never as a silent change.

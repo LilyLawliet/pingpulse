@@ -34,9 +34,11 @@ itself. Nothing here is specific to one business or one trade.
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 import math
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Iterable
@@ -166,6 +168,11 @@ STOPWORDS = {
 
 
 def _stem(word: str) -> str:
+    # "wrapped", "wrapping" and "wrap" are one word to a customer.
+    for suffix in ("ing", "ed"):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 4:
+            base = word[: -len(suffix)]
+            return base[:-1] if len(base) > 4 and base[-1] == base[-2] else base
     for suffix in ("ies", "es", "s"):
         if word.endswith(suffix) and len(word) - len(suffix) >= 3:
             base = word[: -len(suffix)]
@@ -173,10 +180,15 @@ def _stem(word: str) -> str:
     return word
 
 
+def _plain(text: str) -> str:
+    """"Café" and "cafe" are the same word to a customer typing on a phone."""
+    return unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode("ascii")
+
+
 def words(text: str) -> set[str]:
     return {
         _stem(w)
-        for w in re.findall(r"[a-z][a-z0-9\-]{2,}", (text or "").lower())
+        for w in re.findall(r"[a-z][a-z0-9\-]{2,}", _plain(text).lower())
         if w not in STOPWORDS
     }
 
@@ -214,6 +226,8 @@ class Item:
         if self.content:
             amount, unit = self.content
             return f"{_article(amount)}{_num(amount)} {unit} {self.unit_word}"
+        if self.pack and self.pack > 1:
+            return f"{_article_word(self.unit_word)} {self.unit_word} of {_num(self.pack)}"
         return f"{_article_word(self.unit_word)} {self.unit_word}"
 
     def haystack_words(self) -> set[str]:
@@ -286,11 +300,16 @@ def _content_from(pack_cell: str, spec: str, unit: str | None) -> tuple[tuple[De
     # The specification often says what the pack number is of: "100 m coil",
     # "4 m length", "50 kg bag". Prefer the one that agrees with the pack cell.
     candidates = []
-    for amount, measure in re.findall(
-        r"(\d+(?:\.\d+)?)\s*(m|metres?|meters?|mtrs?|ft|feet|kg|kgs|l|ltrs?|litres?|liters?)\b",
+    for amount, measure, per in re.findall(
+        r"(\d+(?:\.\d+)?)\s*(m|metres?|meters?|mtrs?|ft|feet|kg|kgs|l|ltrs?|litres?|liters?)\b"
+        r"(\s+(?:per|a|each)\s+\w+|\s+each)?",
         spec or "",
         re.IGNORECASE,
     ):
+        # "5 m per roll" in a set of 5 rolls is one roll, not the set: the
+        # 5 beside it in the pack column counts rolls, not metres.
+        if per and not (unit and re.search(rf"\b{re.escape(unit)}", per, re.IGNORECASE)):
+            continue
         family, factor = MEASURES[measure.lower()]
         candidates.append((to_decimal(amount) * factor, family))
     for candidate in candidates:
@@ -451,7 +470,7 @@ class Wanted:
 
 
 _QUANTITY = re.compile(
-    rf"(?<![\w.,])(?P<n>\d+(?:\.\d+)?|{'|'.join(WORD_NUMBERS)})\s*"
+    rf"(?<![\w.,])(?P<n>\d+(?:\.\d+)?|(?:{'|'.join(WORD_NUMBERS)})\b)\s*"
     rf"(?:(?P<measure>{'|'.join(sorted((re.escape(k) for k in MEASURES), key=len, reverse=True))})\b"
     rf"|(?P<times>x|×|pcs|pc|pieces|piece|nos|units|qty)\b"
     rf"|(?P<noun>(?:of\s+(?:the|these|those|your)\s+)?(?:[a-z0-9\-²]+\s+){{0,3}}[a-z]+))",
@@ -472,7 +491,7 @@ def read_request(message: str, nouns: set[str]) -> list[Wanted]:
     clauses = [
         c.strip()
         for c in re.split(
-            r"[;\n]|(?<=[a-z0-9)][.!?])\s+|,\s*(?=\d|a\b|an\b|one\b)|\band\s+(?=\d)", text, flags=re.I
+            r"[;\n]|(?<=[a-z0-9)][.!?])\s+|,\s*(?=\d|a\b|an\b|one\b)|\band\s+(?=\d|a\b|an\b|the\b|one\b)", text, flags=re.I
         )
         if c and c.strip()
     ]
@@ -513,7 +532,12 @@ def read_request(message: str, nouns: set[str]) -> list[Wanted]:
                 found = Wanted(clause, number)
                 break
             noun_words = [w for w in re.findall(r"[a-z]+", (match.group("noun") or "").lower())]
-            counted = next((w for w in reversed(noun_words) if _stem(w) in nouns), None)
+            # "3 packs of gel pens" counts packs; "20 gel pens" counts pens.
+            leading = [w for w in noun_words if w not in {"of", "the", "these", "those", "your"}]
+            if leading and _stem(leading[0]) in set(SALE_UNITS) and _stem(leading[0]) in nouns:
+                counted = leading[0]
+            else:
+                counted = next((w for w in reversed(noun_words) if _stem(w) in nouns), None)
             if counted and raw not in {"a", "an"} or (counted and raw in {"a", "an"} and _stem(counted) in set(SALE_UNITS)):
                 found = Wanted(clause, number, counted_as=counted)
                 break
@@ -609,7 +633,8 @@ _WHOLE_WORD_TOPICS = {"payment", "returns"}
 # "I'll pay after delivery", "it was delivered 10 days ago": delivery named as
 # a moment, not asked about.
 _DELIVERY_AS_A_MOMENT = re.compile(
-    r"\b(?:after|on|upon|before|at|until|till|cash on|pay(?:ment)? on)\s+delivery\b|\bdelivered\b"
+    r"\b(?:after|on|upon|before|at|until|till|cash on|pay(?:ment)? on)\s+delivery\b"
+    r"|\b(?:was|were|been|got|it's|its|is)\s+delivered\b|\bdelivered\s+(?:\w+\s+){0,2}ago\b"
 )
 
 
@@ -813,6 +838,28 @@ def _bounds(clause: str) -> tuple[Decimal | None, Decimal | None, list[tuple[int
     return low, high, spans
 
 
+_PLACE = re.compile(
+    r"\b(within|inside|in|to|outside)\s+(?:the\s+)?((?:rest\s+of\s+|other\s+)?[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)"
+)
+
+
+def _place(text: str) -> str:
+    """"within Karachi", "to the rest of Pakistan": where a rule applies."""
+    found = _PLACE.search(text or "")
+    if not found:
+        return ""
+    preposition, where = found.group(1), found.group(2)
+    if preposition == "to" and not where.lower().startswith(("rest", "other")):
+        return ""  # "to Easypaisa" is not a place
+    return f"{preposition} {'the ' if where.lower().startswith('rest') else ''}{where}"
+
+
+def _places_named(condition: str) -> set[str]:
+    return {
+        w.lower() for w in re.findall(r"[A-Z][a-z]+", condition) if w.lower() not in {"rest", "other"}
+    }
+
+
 def read_tiers(texts: Iterable[tuple[str, str]]) -> list[Tier]:
     """Every order-size rule for discounts and delivery the business wrote.
 
@@ -827,6 +874,12 @@ def read_tiers(texts: Iterable[tuple[str, str]]) -> list[Tier]:
             low_sentence = sentence.lower()
             if any(word in low_sentence for word in RULE_ELSEWHERE):
                 continue
+            # "50% advance payment above PKR 15,000" is how to pay, not 50% off.
+            about_paying = any(
+                w in low_sentence for w in ("advance", "deposit", "payment", "instal", "upfront", "up front")
+            ) and not ("discount" in low_sentence or re.search(r"%\s*off\b", low_sentence))
+            if about_paying:
+                continue
             topic = (
                 "discount" if ("discount" in low_sentence or "% off" in low_sentence or re.search(r"\d\s*%", sentence))
                 else "delivery" if any(w in low_sentence for w in RULE_TOPICS["delivery"][1])
@@ -834,6 +887,10 @@ def read_tiers(texts: Iterable[tuple[str, str]]) -> list[Tier]:
             )
             if topic is None:
                 continue
+            # Where the whole sentence applies, when it says so before its
+            # first amount: "Delivery within Karachi is PKR 250 ...".
+            first_amount = re.search(_AMOUNT, sentence, re.I)
+            sentence_place = _place(sentence[: first_amount.start()] if first_amount else "")
             for clause in re.split(r";|\.\s+|,\s*and\s+|\band\s+(?=free\b)", sentence):
                 low, high, spans = _bounds(clause)
                 if low is None and high is None:
@@ -845,10 +902,7 @@ def read_tiers(texts: Iterable[tuple[str, str]]) -> list[Tier]:
                 percents = re.findall(r"(\d+(?:\.\d+)?)\s*%", rest)
                 fees = [m for m in re.finditer(_AMOUNT, rest, re.I)]
                 free = re.search(r"\bfree\b", rest, re.I) is not None
-                condition = ""
-                where = re.search(r"\b(within|inside|in)\s+([A-Z][\w ]{1,30})", clause)
-                if where:
-                    condition = f"{where.group(1)} {where.group(2).strip()}"
+                condition = _place(clause) or sentence_place
                 if topic == "discount" and len(percents) == 1 and not fees:
                     tiers.append(Tier("discount", low, high, percent=to_decimal(percents[0]),
                                       currency=currency_of(clause) or currency, condition=condition, sentence=sentence))
@@ -870,6 +924,9 @@ class Applied:
     delivery: Tier | None = None
     had_discounts: bool = False
     had_delivery: bool = False
+    # Delivery that depends on where it goes, when where was not said: every
+    # place's charge, rather than one picked for them.
+    delivery_by_place: list[Tier] = field(default_factory=list)
 
     @property
     def saving(self) -> Decimal | None:
@@ -889,6 +946,7 @@ class Applied:
             found |= {self.next_discount.low, self.next_discount.low - self.value}
         if self.delivery and self.delivery.fee is not None:
             found.add(self.delivery.fee)
+        found |= {t.fee for t in self.delivery_by_place if t.fee is not None}
         return found
 
     def lines(self) -> list[str]:
@@ -908,6 +966,12 @@ class Applied:
                     f"{what}: {_num(self.next_discount.percent)}% off starts at "
                     f"{money(self.next_discount.low, self.currency)}, which is {money(short, self.currency)} more."
                 )
+        if self.had_delivery and self.delivery_by_place and not self.delivery:
+            each = "; ".join(
+                f"{'free' if t.free else money(t.fee, self.currency)} {t.condition}".strip()
+                for t in self.delivery_by_place
+            )
+            out.append(f"Delivery on {amount} depends on where it goes: {each}. Ask which city it is for.")
         if self.had_delivery and self.delivery:
             charge = "free" if self.delivery.free else money(self.delivery.fee, self.currency)
             out.append(
@@ -918,8 +982,14 @@ class Applied:
         return out
 
 
-def apply_tiers(value: Decimal, tiers: list[Tier], currency: str | None, topics: set[str]) -> Applied | None:
-    """Which discount and delivery rung an order of `value` falls on."""
+def apply_tiers(
+    value: Decimal, tiers: list[Tier], currency: str | None, topics: set[str], where: str = ""
+) -> Applied | None:
+    """Which discount and delivery rung an order of `value` falls on.
+
+    `where` is what the customer has said, for delivery that is charged by
+    place: "I'm in Lahore" picks the rest-of-Pakistan rate over Karachi's.
+    """
     discounts = [t for t in tiers if t.topic == "discount"] if "discount" in topics else []
     deliveries = [t for t in tiers if t.topic == "delivery"] if "delivery" in topics else []
     if not discounts and not deliveries:
@@ -932,7 +1002,27 @@ def apply_tiers(value: Decimal, tiers: list[Tier], currency: str | None, topics:
          and (discount is None or t.percent > discount.percent)),
         key=lambda t: t.low,
     )
-    delivery = next((t for t in deliveries if t.covers(value)), None)
+    covering = [t for t in deliveries if t.covers(value)]
+    by_place: list[Tier] = []
+    places = {t.condition for t in covering}
+    delivery = covering[0] if covering else None
+    if len(places) > 1 and len({(t.fee, t.free) for t in covering}) == 1:
+        # Free everywhere is free: no need to ask where.
+        delivery = dataclasses.replace(covering[0], condition="")
+    elif len(places) > 1:
+        # Several schedules, one per place. The customer's own words decide
+        # which; otherwise every place's charge is given and they are asked.
+        said = _plain(where).lower()
+        named = [t for t in covering if _places_named(t.condition) & set(re.findall(r"[a-z]+", said))]
+        elsewhere = [t for t in covering if re.search(r"\b(rest|other|outside)\b", t.condition)]
+        mentions_a_place = re.search(r"\b(?:in|to|at|from)\s+[A-Z][a-z]+", _plain(where))
+        if named:
+            delivery = named[0]
+        elif elsewhere and mentions_a_place:
+            delivery = elsewhere[0]
+        else:
+            delivery = None
+            by_place = covering
     return Applied(
         value=value,
         currency=currency,
@@ -941,6 +1031,7 @@ def apply_tiers(value: Decimal, tiers: list[Tier], currency: str | None, topics:
         delivery=delivery,
         had_discounts=bool(discounts),
         had_delivery=bool(deliveries),
+        delivery_by_place=by_place,
     )
 
 
@@ -982,6 +1073,9 @@ class Line:
     # Said for information and not counted: "20 m of the cable" alongside
     # "6 coils of the cable" in one order is how it is sold, not a seventh coil.
     aside: bool = False
+    # What they asked for that this item is not: "fountain" in "fountain
+    # pens" when the list has gel pens. The closest thing, said as such.
+    differs: str = ""
 
 
 @dataclass
@@ -1056,6 +1150,12 @@ class Quote:
             return ""
         out = ["=== PRICE FACTS (worked out from this business's own price list) ==="]
         for line in self.lines:
+            if line.differs:
+                out.append(
+                    f'- They asked for "{line.differs}". The price list has no such item; the '
+                    "closest one is below. Say plainly that you don't have what they named, then "
+                    "offer this."
+                )
             out.append("- " + _describe_line(line))
         for wanted, items in self.options:
             asked = f" for {_num(wanted.quantity)} {wanted.counted_as or ''}".rstrip() if wanted.quantity else ""
@@ -1113,6 +1213,8 @@ class Quote:
             return ""
         out: list[str] = []
         for line in self.lines:
+            if line.differs:
+                out.append(f"We don't have {line.differs}. The closest we have:")
             out.append(_describe_line(line, for_customer=True))
         for wanted, items in self.options:
             out.append("We have these:")
@@ -1193,10 +1295,82 @@ def _line_for(item: Item, wanted: Wanted) -> Line:
             f"{MEASURE_NAME.get(family, family)} price in the price list, so {asked_text} "
             f"cannot be priced as asked.",
         )
+    if wanted.quantity and _counts_pieces(item, wanted):
+        # "20 gel pens" of a pack of 10, "2 sticker sheets" of a pack of 6:
+        # they counted what is inside, and packs are what is sold.
+        units = Decimal(math.ceil(wanted.quantity / item.pack))
+        total = units * item.price
+        asked = f"{_num(wanted.quantity)} {wanted.counted_as}"
+        if wanted.quantity % item.pack == 0:
+            how = f"{asked} is {_num(units)} {_plural(item.unit_word, units)}"
+        else:
+            how = (
+                f"we don't split a {item.unit_word}, so {asked} needs {_num(units)} "
+                f"{_plural(item.unit_word, units)} ({_num(units * item.pack)} in all)"
+            )
+        note = (
+            f"{item.label} is sold as {item.sold_as()} at {each}; {how}: "
+            f"{_num(units)} × {each} = {money(total, item.currency)}."
+        )
+        return Line(item, wanted.quantity, units, total, note)
     if wanted.quantity:
         total = wanted.quantity * item.price
         return Line(item, wanted.quantity, wanted.quantity, total)
     return Line(item)
+
+
+def _counts_pieces(item: Item, wanted: Wanted) -> bool:
+    """Whether they counted the pieces in a pack rather than the packs.
+
+    "20 gel pens" when a pack holds 10 pens: the word they counted is part
+    of what the product is, not the unit it is sold in, and the pack holds
+    more than one.
+    """
+    if not (wanted.counted_as and item.pack and item.pack > 1):
+        return False
+    counted = _stem(wanted.counted_as)
+    if item.sale_unit and counted == _stem(item.sale_unit):
+        return False
+    # The pieces are what the name is a plural of ("Gel Pens", "Sticker
+    # Sheets") or what the pack number counts in the details ("500 sheets").
+    # "3 washi tapes" of a "Washi Tape" set of 5 rolls counts sets.
+    plural = {_stem(w) for w in re.findall(r"[a-z]+s\b", _plain(item.name).lower())}
+    counted_in_spec = re.search(
+        rf"\b{_num(item.pack)}\s+(?:[a-z]+\s+)?{re.escape(counted)}", _plain(item.spec).lower()
+    )
+    return counted in plural or bool(counted_in_spec)
+
+
+def _not_this(item: Item, text: str) -> str:
+    """The kind they asked for, when this item is only the same sort of thing.
+
+    "Fountain pens" matched "Pastel Dream Gel Pens" on the word "pens". The
+    word before it, which the item says nothing of, is the difference.
+    """
+    plain = _plain(text).lower()
+    name = words(item.name)
+    known = item.haystack_words() | name
+    for match in re.finditer(r"\b([a-z]{4,})\s+(?=([a-z]{3,})\b)", plain):
+        before, noun = match.group(1), match.group(2)
+        if (
+            _stem(noun) in name
+            and _stem(before) not in known
+            and before not in STOPWORDS
+            and before not in _NOT_A_KIND
+            and _stem(before) not in set(SALE_UNITS)
+        ):
+            return f"{before} {noun}"
+    return ""
+
+
+# Words that come before a product noun without saying what kind it is.
+_NOT_A_KIND = {
+    "your", "some", "those", "these", "that", "this", "more", "many", "much", "cheap",
+    "cheapest", "best", "nice", "cute", "good", "other", "same", "same", "another", "about",
+    "need", "want", "have", "like", "buy", "order", "price", "cost", "sell", "show", "with",
+    "pink", "blue", "green", "white", "black", "red", "purple", "yellow", "mint", "lilac",
+    "little", "small", "big", "large", "mini", "new", "latest",
+}
 
 
 def _unit_as_typed(wanted: Wanted) -> str:
@@ -1246,10 +1420,31 @@ def quote(message: str, items: list[Item], context: str = "") -> Quote:
         if key in seen and not wanted.quantity:
             continue
         seen.add(key)
+        if (
+            len(matches) == 1
+            and wanted.quantity
+            and re.search(rf"(?<![\d.,]){_num(wanted.quantity)}(?![\d.,])", matches[0].name)
+        ):
+            # "the 2027 planner" names the Sakura Days 2027 Planner; it does
+            # not ask for two thousand of them.
+            wanted = Wanted(wanted.text)
         if len(matches) == 1:
-            result.lines.append(_line_for(matches[0], wanted))
+            line = _line_for(matches[0], wanted)
+            line.differs = _not_this(matches[0], wanted.text)
+            result.lines.append(line)
         else:
             result.options.append((wanted, matches))
+
+    # In an order that counts things, one named without a number is one of
+    # it: "2 notebooks, 25 pens and The Little Cat Café" includes the book.
+    ordering = len(result.lines) > 1 and re.search(
+        r"\b(total|deliver\w*|order|buy|need|want|take|send|ship)\b", message or "", re.I
+    )
+    if any(line.quantity for line in result.lines) or ordering:
+        for line in result.lines:
+            if line.quantity is None and not line.note and not line.differs:
+                line.quantity = line.units = Decimal(1)
+                line.total = line.item.price
 
     # The same item asked for twice in one message, once counted in what it is
     # sold as and once in a measure it is not ("6 coils of the 4mm cable ...
@@ -1460,6 +1655,10 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
         # An imported product (a WhatsApp or Shopify catalogue entry) carries
         # its price as a field. A price list uploaded as "product" does not,
         # and is read like any other document.
+        # A photo read out of an uploaded table: its price is already in
+        # that table, and reading it twice would list the product twice.
+        if (row.attributes or {}).get("photo_from"):
+            continue
         price = (row.attributes or {}).get("price") if row.doc_type == "product" else None
         if price:
             currency = (row.attributes or {}).get("currency") or ""
@@ -1524,7 +1723,8 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
             or next((i.currency for i in items if i.currency), None)
             or getattr(organization, "default_currency", None)
         )
-        result.applied = apply_tiers(value, tiers, currency, topics)
+        said = " ".join([*said_before[-6:], message])
+        result.applied = apply_tiers(value, tiers, currency, topics, where=said)
     if result.empty() and not topics and earlier_one:
         # "I'm a new customer" straight after "I'll pay after delivery" is
         # still about paying; only the terms topics carry over, and only from

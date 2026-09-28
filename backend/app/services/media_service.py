@@ -105,6 +105,23 @@ def public_url(filename: str) -> str:
     return f"{base}/media/{filename}" if base else f"/media/{filename}"
 
 
+PICTURE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
+
+
+def store_picture(data: bytes, content_type: str) -> str | None:
+    """Keep a product picture from an uploaded document; return its URL.
+
+    Only the picture kinds WhatsApp shows inline, and nothing over the size
+    it accepts. Anything else is left out rather than sent and dropped.
+    """
+    extension = PICTURE_TYPES.get((content_type or "").split(";")[0].strip().lower())
+    if not extension or not data or len(data) > MAX_BYTES:
+        return None
+    name = f"{uuid.uuid4().hex}{extension}"
+    (media_root() / name).write_bytes(data)
+    return public_url(name)
+
+
 def _extension_for(content_type: str, fallback_url: str) -> str | None:
     clean = (content_type or "").split(";")[0].strip().lower()
     if clean in ALLOWED_TYPES:

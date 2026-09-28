@@ -55,6 +55,15 @@ class UnreadableDocument(ValueError):
 
 
 @dataclass
+class Picture:
+    """A picture sitting in a table row: the photo of what that row sells."""
+
+    row: str
+    data: bytes
+    content_type: str
+
+
+@dataclass
 class Extracted:
     """What came out of one file."""
 
@@ -63,6 +72,7 @@ class Extracted:
     pages: int = 0
     tables: int = 0
     warnings: list[str] = field(default_factory=list)
+    pictures: list[Picture] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------- tables
@@ -126,13 +136,43 @@ def _from_docx(data: bytes) -> Extracted:
     parts = [p.text.strip() for p in document.paragraphs if p.text.strip()]
 
     tables = 0
+    pictures: list[Picture] = []
     for table in document.tables:
-        rendered = _render_table([[cell.text for cell in row.cells] for row in table.rows])
+        grid = [[cell.text for cell in row.cells] for row in table.rows]
+        # A column with a heading and nothing written under it - a photo
+        # column - is left out whole. Dropped cell by cell it went from the
+        # heading only, every row came out one cell short, and the prices
+        # were read from the wrong column.
+        width = max((len(r) for r in grid), default=0)
+        blank = {
+            c for c in range(width)
+            if len(grid) > 1 and all(not (r[c] if c < len(r) else "").strip() for r in grid[1:])
+        }
+        grid = [[cell for c, cell in enumerate(r) if c not in blank] for r in grid]
+        rendered = _render_table(grid)
         if rendered:
             parts.append(rendered)
             tables += 1
+        # A price list with a photo column: the picture belongs to the product
+        # on its row, the same way the price does.
+        for row, cells in zip(table.rows, grid):
+            line = _render_table([cells])
+            if not line:
+                continue
+            seen: set[str] = set()
+            for cell in row.cells:
+                for rid in cell._tc.xpath(".//a:blip/@r:embed"):
+                    if rid in seen:
+                        continue
+                    seen.add(rid)
+                    part = document.part.related_parts.get(rid)
+                    if part is not None and getattr(part, "content_type", "").startswith("image/"):
+                        pictures.append(Picture(line, part.blob, part.content_type))
+                        break
+                if seen:
+                    break
 
-    return Extracted(text="\n\n".join(parts), kind="docx", tables=tables)
+    return Extracted(text="\n\n".join(parts), kind="docx", tables=tables, pictures=pictures)
 
 
 # ---------------------------------------------------------------------- plain

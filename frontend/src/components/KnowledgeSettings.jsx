@@ -78,7 +78,12 @@ export default function KnowledgeSettings({ onChanged }) {
           result.products_found > 0
             ? `${result.products_found} product${result.products_found === 1 ? '' : 's'} with prices`
             : 'no priced products found'
-        done.push(`${result.filename}: ${products}, ${result.passages_indexed} passage(s)`)
+        // Pictures in the price table are the photos the agent can send.
+        const photos =
+          result.photos_found > 0
+            ? `, ${result.photos_found} with photo${result.photos_found === 1 ? '' : 's'}`
+            : ''
+        done.push(`${result.filename}: ${products}${photos}, ${result.passages_indexed} passage(s)`)
         indexed += result.passages_indexed || 0
         // What the file filled in - hours, services, areas - decides whether
         // the agent can book at all and what it says it does. Far too big to
@@ -123,6 +128,8 @@ export default function KnowledgeSettings({ onChanged }) {
           Send your price list, product details, and your delivery, payment and returns
           policies. PDF, Word or plain text. The agent quotes only what it finds here —
           it will never invent a price — so the more you add, the more it can answer.
+          To let it send product photos, put a picture in each row of the price table in
+          a Word file.
         </p>
       </div>
 

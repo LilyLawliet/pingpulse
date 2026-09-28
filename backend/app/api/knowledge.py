@@ -24,6 +24,7 @@ from app.services import (
     catalogue,
     document_facts,
     documents,
+    media_service,
     retrieval,
     whatsapp,
 )
@@ -210,6 +211,8 @@ async def upload_document(
         document.doc_type = doc_type
         stored.append(document)
 
+    photos = await _products_with_photos(db, tenant.id, extracted, file.filename or "document")
+
     await db.flush()
 
     # Read from the whole extracted document rather than the passages, so
@@ -240,7 +243,50 @@ async def upload_document(
         # whether its table was read - a price list that yields none is one
         # the agent will not be able to quote from.
         "products_found": len(offers.read_items([(file.filename or "document", extracted.text)])),
+        # Products whose row in the table carried a picture: the ones the
+        # agent can now send a photo of.
+        "photos_found": photos,
     }
+
+
+async def _products_with_photos(db, organization_id, extracted, filename: str) -> int:
+    """Store the pictures in a price table as photos of the products beside them.
+
+    Each becomes a catalogue entry carrying the picture, found the same way a
+    WhatsApp catalogue product is, so "can I see it?" is answered with the
+    photo from the owner's own document. The price stays read from the table:
+    these entries are marked, and the quote engine does not read them twice.
+    """
+    if not extracted.pictures:
+        return 0
+    items = offers.read_items([(filename, extracted.text)])
+    stored = 0
+    for picture in extracted.pictures:
+        row = picture.row
+        matches = [item for item in items if item.name and item.name in row]
+        if not matches:
+            continue
+        # A SKU on the row settles which of two same-named products it is.
+        item = next((i for i in matches if i.sku and i.sku in row), matches[0])
+        url = media_service.store_picture(picture.data, picture.content_type)
+        if not url:
+            continue
+        document = await retrieval.index_document(
+            db,
+            organization_id=organization_id,
+            title=item.label,
+            content=row.replace(" | ", ", "),
+            source=filename,
+        )
+        document.doc_type = "product"
+        document.media_urls = [url]
+        document.attributes = {
+            "price": str(item.price),
+            "currency": item.currency or "",
+            "photo_from": filename,
+        }
+        stored += 1
+    return stored
 
 
 @router.get("/documents", response_model=list[KnowledgeDocumentOut])
