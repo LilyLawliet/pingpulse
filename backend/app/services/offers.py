@@ -34,6 +34,7 @@ itself. Nothing here is specific to one business or one trade.
 
 from __future__ import annotations
 
+import itertools
 import math
 import re
 from dataclasses import dataclass, field
@@ -466,7 +467,15 @@ def read_request(message: str, nouns: set[str]) -> list[Wanted]:
     A specification ("4mm", "550W") is never read as an amount.
     """
     text = (message or "").replace("×", " x ")
-    clauses = [c.strip() for c in re.split(r"[;\n]|,\s*(?=\d|a\b|an\b|one\b)|\band\s+(?=\d)", text) if c.strip()]
+    # Sentences first: "...and 10 MCBs. Also, 20m of the 4mm cable" is two
+    # requests, and read as one the MCBs were matched to the cable.
+    clauses = [
+        c.strip()
+        for c in re.split(
+            r"[;\n]|(?<=[a-z0-9)][.!?])\s+|,\s*(?=\d|a\b|an\b|one\b)|\band\s+(?=\d)", text, flags=re.I
+        )
+        if c and c.strip()
+    ]
     wanted: list[Wanted] = []
     for clause in clauses or [text]:
         found = None
@@ -483,6 +492,13 @@ def read_request(message: str, nouns: set[str]) -> list[Wanted]:
             if _SPEC.match(clause[start:]) and not match.group("measure"):
                 continue
             if raw in {"a", "an", "one"} and not (match.group("noun") or match.group("times")):
+                continue
+            # "Delivered 10 days ago" is when, not how many days of anything.
+            if re.match(
+                r"\s*(?:days?|weeks?|months?|years?|hours?|nights?)\s+(?:ago|back|before|earlier|later|old)\b",
+                clause[start + len(match.group("n")):],
+                re.IGNORECASE,
+            ):
                 continue
             # Money is not a quantity.
             before = clause[max(0, start - 5):start]
@@ -570,6 +586,72 @@ RULE_TOPICS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     ),
     "tax": (("tax", "gst", "vat", "inclusive", "exclusive"), ("tax", "gst", "vat")),
     "minimum": (("minimum", "moq", "min order"), ("minimum order", "minimum", "moq")),
+    "payment": (
+        ("pay", "payment", "paid", "credit", "advance", "cash on delivery", "cod", "deposit",
+         "installment", "instalment", "upfront", "up front", "next month", "net 15", "net 30",
+         "cash", "cheque", "bank transfer"),
+        ("payment", "advance", "credit", "deposit", "cash", "installment", "instalment",
+         "upfront", "net 15", "net 30", "net 7", "net 60", "cheque", "bank transfer"),
+    ),
+    "returns": (
+        ("return", "refund", "exchange", "damaged", "defective", "faulty", "broken",
+         "wrong item", "warranty", "replace"),
+        ("return", "refund", "exchange", "damaged", "defective", "warranty", "restocking",
+         "replaced"),
+    ),
+}
+
+# Topics whose words are short enough to sit inside other words - "cod" in
+# "code", "pay" in "display" - are matched as whole words.
+_WHOLE_WORD_TOPICS = {"payment", "returns"}
+
+
+# "I'll pay after delivery", "it was delivered 10 days ago": delivery named as
+# a moment, not asked about.
+_DELIVERY_AS_A_MOMENT = re.compile(
+    r"\b(?:after|on|upon|before|at|until|till|cash on|pay(?:ment)? on)\s+delivery\b|\bdelivered\b"
+)
+
+
+_PRICE_AS_PAYING = re.compile(
+    r"\b(?:how much|what)\s+(?:do|will|would|should|shall|must)\s+(?:i|we)\s+(?:have to\s+|need to\s+)?pay\b"
+)
+
+
+def _asks(topic: str, lowered: str) -> bool:
+    asked = RULE_TOPICS[topic][0]
+    if topic == "delivery":
+        lowered = _DELIVERY_AS_A_MOMENT.sub(" ", lowered)
+    elif topic == "payment":
+        # "How much will I pay for 10?" asks a price, not the payment terms.
+        lowered = _PRICE_AS_PAYING.sub(" ", lowered)
+    elif topic == "returns":
+        lowered = lowered.replace("returning customer", " ")
+    if topic in _WHOLE_WORD_TOPICS:
+        return any(re.search(rf"\b{re.escape(w)}(?:s|es|ed|ing)?\b", lowered) for w in asked)
+    return any(w in lowered for w in asked)
+
+
+def _stems(text: str, drop_common: bool = False) -> set[str]:
+    return {
+        w[:5]
+        for w in re.findall(r"[a-z]{3,}", (text or "").lower())
+        if not (drop_common and w in _STOP)
+    }
+
+
+def _shares(stem: str, stems: set[str]) -> bool:
+    """"pay" is in "payment"; "insta" is in "installing" and "installation"."""
+    return any(s.startswith(stem) for s in stems)
+
+
+_STOP = {
+    "the", "and", "for", "you", "your", "can", "what", "how", "much", "this", "that", "with",
+    "have", "need", "want", "give", "will", "would", "about", "are", "did", "does", "any",
+    "all", "but", "not", "then", "them", "they", "its", "it's", "i'm", "i'll", "our", "from",
+    "just", "also", "please", "tell", "make", "any", "anything", "everything", "was", "were",
+    "only", "today", "now", "may", "must", "unless", "where", "which", "there", "their",
+    "after", "before", "into", "over", "than", "when", "been", "being", "some", "more",
 }
 
 
@@ -588,8 +670,12 @@ RULE_ELSEWHERE = ("refund", "return", "restocking", "warranty", "exchange", "can
 
 def _is_rule(topic: str, sentence: str, low: str) -> bool:
     """Whether this sentence states the rule, rather than mentioning the subject."""
+    if topic == "returns":
+        return True
     if any(word in low for word in RULE_ELSEWHERE):
         return False
+    if topic == "payment":
+        return True
     if topic == "delivery":
         return bool(amounts(sentence)) or re.search(r"\bfree\b", low) is not None
     if topic == "discount":
@@ -597,7 +683,9 @@ def _is_rule(topic: str, sentence: str, low: str) -> bool:
     return bool(amounts(sentence)) or "%" in sentence
 
 
-def rules_for(message: str, texts: Iterable[tuple[str, str]], limit: int = 2) -> list[str]:
+def rules_for(
+    message: str, texts: Iterable[tuple[str, str]], limit: int = 2, ignore: set[str] = frozenset()
+) -> list[str]:
     """The business's own sentences about what the customer asked besides price.
 
     "Including delivery?" is answered from the sentence that states the
@@ -605,23 +693,47 @@ def rules_for(message: str, texts: Iterable[tuple[str, str]], limit: int = 2) ->
     rounded into a different one. Only sentences with a figure or a
     percentage in them: the rule, not the paragraph about it.
     """
-    lowered = (message or "").lower()
-    wanted = [topic for topic, (asked, _) in RULE_TOPICS.items() if any(w in lowered for w in asked)]
+    wanted = [topic for topic in RULE_TOPICS if topic in topics_in(message)]
+    texts = list(texts)
     found: list[str] = []
     for topic in wanted:
         written = RULE_TOPICS[topic][1]
-        count = 0
+        candidates: list[str] = []
         for _, text in texts:
             for sentence in _sentences(text):
                 low = sentence.lower()
-                if any(w in low for w in written) and _is_rule(topic, sentence, low):
-                    if sentence not in found:
-                        found.append(sentence)
-                        count += 1
-                if count >= limit:
-                    break
-            if count >= limit:
-                break
+                if (
+                    any(w in low for w in written)
+                    and _is_rule(topic, sentence, low)
+                    and sentence not in found
+                    and sentence not in candidates
+                    # A heading - "Returns, Exchanges & Warranty" - is not a rule.
+                    and len(sentence.split()) >= 5
+                ):
+                    candidates.append(sentence)
+        # The sentences closest to what they said, in the order written:
+        # "I'm a new customer" is answered by "New customers: 50% advance",
+        # not by whichever payment sentence came first.
+        # Their words, weighted by how few of these sentences use them: every
+        # returns sentence says "return", only one says "installing".
+        # Product names are about the goods, not the terms: "cable" in an
+        # order is no reason to prefer the sentence about custom-cut cable.
+        asked = _stems(message, drop_common=True) - {w[:5] for w in ignore}
+        stems = {c: _stems(c, drop_common=True) for c in candidates}
+        rare = {
+            stem: 1 / count
+            for stem in asked
+            if (count := sum(1 for c in candidates if _shares(stem, stems[c])))
+        }
+
+        def closeness(sentence: str) -> tuple[float, int]:
+            low = sentence.lower()
+            said = sum(weight for stem, weight in rare.items() if _shares(stem, stems[sentence]))
+            states = 1 if re.search(r"\d", sentence) else 0
+            return (round(said, 3), sum(1 for w in written if w in low) + states)
+
+        ranked = sorted(candidates, key=closeness, reverse=True)[:limit]
+        found += [c for c in candidates if c in ranked]
     return found
 
 
@@ -843,6 +955,10 @@ def stated_value(message: str) -> Decimal | None:
 
 def _rule_topic(sentence: str) -> str | None:
     low = sentence.lower()
+    # "Within 7 days of delivery" is a returns rule, not the delivery charge,
+    # and is not answered by working the delivery charge out.
+    if any(word in low for word in RULE_ELSEWHERE):
+        return "returns"
     if "discount" in low or "% off" in low:
         return "discount"
     if any(w in low for w in RULE_TOPICS["delivery"][1]):
@@ -852,7 +968,7 @@ def _rule_topic(sentence: str) -> str | None:
 
 def topics_in(text: str) -> set[str]:
     lowered = (text or "").lower()
-    return {topic for topic, (asked, _) in RULE_TOPICS.items() if any(w in lowered for w in asked)}
+    return {topic for topic in RULE_TOPICS if _asks(topic, lowered)}
 
 
 # ------------------------------------------------------------------ quoting
@@ -863,6 +979,9 @@ class Line:
     units: Decimal | None = None
     total: Decimal | None = None
     note: str = ""
+    # Said for information and not counted: "20 m of the cable" alongside
+    # "6 coils of the cable" in one order is how it is sold, not a seventh coil.
+    aside: bool = False
 
 
 @dataclass
@@ -880,6 +999,9 @@ class Quote:
     rules: list[str] = field(default_factory=list)
     # Those rules worked out for this order's value, where they could be read.
     applied: Applied | None = None
+    # An order value the customer named themselves - "what if I make it PKR
+    # 500,000?" - which the rules were applied to instead of the goods above.
+    stated: Decimal | None = None
 
     @property
     def currency(self) -> str | None:
@@ -888,21 +1010,23 @@ class Quote:
 
     @property
     def subtotal(self) -> Decimal | None:
-        totals = [line.total for line in self.lines if line.total is not None]
-        if len(totals) < 2 or len(totals) != len(self.lines) or self.options:
+        counted = [line for line in self.lines if not line.aside]
+        totals = [line.total for line in counted if line.total is not None]
+        if len(totals) < 2 or len(totals) != len(counted) or self.options:
             return None
         return sum(totals, Decimal(0))
 
     def empty(self) -> bool:
-        return not self.lines and not self.options and not self.applied
+        return not self.lines and not self.options and not self.applied and not self.rules
 
     @property
     def order_value(self) -> Decimal | None:
         """What the goods come to: the subtotal, or the one line's total."""
         if self.subtotal is not None:
             return self.subtotal
-        if len(self.lines) == 1 and not self.options:
-            return self.lines[0].total
+        counted = [line for line in self.lines if not line.aside]
+        if len(counted) == 1 and not self.options:
+            return counted[0].total
         return None
 
     def figures(self) -> set[Decimal]:
@@ -948,16 +1072,26 @@ class Quote:
                 "tax, delivery charge or discount."
             )
         if self.applied and self.applied.lines():
+            if self.stated is not None:
+                out.append(
+                    f"- The customer named an order value of {money(self.stated, self.applied.currency)}. "
+                    "Answer for that value exactly as below, not for any earlier order in the "
+                    "conversation."
+                )
             out.append("- The order-size rules, already applied (use these exact figures):")
             out += [f"    {line}" for line in self.applied.lines()]
         if self.rules:
             out.append("- What this business's own documents say about what they asked (quoted):")
             out += [f'    "{rule}"' for rule in self.rules]
-            if self.order_value is not None and not self.applied:
+            if self.order_value is not None and not self.applied and self.lines:
                 out.append(
                     f"  Apply these to an order value of {money(self.order_value, self.currency or self.lines[0].item.currency)} "
                     "and show the sum."
                 )
+            out.append(
+                "  Answer from these sentences only. Do not add terms, exceptions, documents or "
+                "arrangements they do not state, and do not agree to anything they rule out."
+            )
         out.append(
             "How to use these facts:\n"
             "- Quote these figures exactly as written. Do not work out any other product price.\n"
@@ -990,6 +1124,8 @@ class Quote:
         if self.subtotal is not None:
             out.append(f"Together that is {money(self.subtotal, self.currency)} before tax and delivery.")
         if self.applied:
+            if self.stated is not None and not self.lines:
+                out.append(f"For an order of {money(self.stated, self.applied.currency)}:")
             out += self.applied.lines()
         # A rule that could not be applied is quoted as written: with no model
         # there is nobody to read it and decide whether it covers this order.
@@ -999,7 +1135,7 @@ class Quote:
             out.append(rule)
         if self.options:
             out.append("Which would you like?")
-        elif self.lines:
+        elif any(not line.aside for line in self.lines):
             out.append("Shall I put that together for you?")
         else:
             out.append("Anything else I can check for you?")
@@ -1094,9 +1230,13 @@ def quote(message: str, items: list[Item], context: str = "") -> Quote:
     # "what about delivery?" came back quoting the cable from three turns ago.
     asks_price = re.search(r"\b(how much|price|cost|total|each|per)\b", message or "", re.I)
     seen: set[str] = set()
-    for wanted in read_request(message, nouns):
+    requests = read_request(message, nouns)
+    # "I only need 20 meters of the 4mm cable. How much?" names its product;
+    # the "How much?" is about that, not about the panels asked for earlier.
+    names_something = any(best(items, wanted.text) for wanted in requests)
+    for wanted in requests:
         matches = best(items, wanted.text)
-        if not matches and context and (wanted.quantity or asks_price):
+        if not matches and context and not names_something and (wanted.quantity or asks_price):
             matches = best(items, f"{context} {wanted.text}")
         if not matches:
             if wanted.quantity:
@@ -1110,6 +1250,25 @@ def quote(message: str, items: list[Item], context: str = "") -> Quote:
             result.lines.append(_line_for(matches[0], wanted))
         else:
             result.options.append((wanted, matches))
+
+    # The same item asked for twice in one message, once counted in what it is
+    # sold as and once in a measure it is not ("6 coils of the 4mm cable ...
+    # I want 20m of the 4mm cable rather than a full coil"): the count is the
+    # order, the measure is answered with how it is sold and not added again.
+    counted = {line.item.label for line in result.lines if line.quantity and not line.note}
+    for line in result.lines:
+        if line.note and line.item.label in counted:
+            line.aside = True
+            item = line.item
+            family = item.content[1] if item.content else None
+            by_the = f" by the {MEASURE_NAME.get(family, family)}" if family else " in that measure"
+            line.note = (
+                f"{item.label} is sold only as {item.sold_as()} at {money(item.price, item.currency)}, "
+                f"not{by_the}, so a part of one cannot be supplied on its own. It is already "
+                "counted in the order above and is not added again."
+            )
+            line.units = None
+            line.total = None
     return result
 
 
@@ -1175,6 +1334,15 @@ def unexplained(
                     for a in in_reply
                     for b in in_reply
                 )
+                # An order of four lines is totalled in one figure, so a sum
+                # of several amounts already in the reply is working too.
+                if not ok and 3 <= len(in_reply) <= 14:
+                    terms = sorted(in_reply)
+                    ok = any(
+                        _close(value, sum(group, Decimal(0)))
+                        for size in range(3, min(6, len(terms)) + 1)
+                        for group in itertools.combinations(terms, size)
+                    )
             if ok:
                 accepted.add(value)
                 pending.discard(value)
@@ -1224,6 +1392,7 @@ def as_dict(result: Quote) -> dict[str, Any]:
                 "sold_as": line.item.sold_as(),
                 "price": money(line.item.price, line.item.currency),
                 "total": money(line.total, line.item.currency) if line.total is not None else None,
+                "aside": line.aside,
             }
             for line in result.lines
         ],
@@ -1231,6 +1400,8 @@ def as_dict(result: Quote) -> dict[str, Any]:
         "subtotal": money(result.subtotal, result.currency) if result.subtotal is not None else None,
         # The discount and delivery rules as they came out for this order.
         "rules_applied": result.applied.lines() if result.applied else [],
+        # Payment, returns and other terms, quoted as the business wrote them.
+        "terms_quoted": list(result.rules),
         "catalogue_size": result.catalogue_size,
     }
 
@@ -1312,6 +1483,12 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
         for m in list(history)[-4:]
         if str(getattr(m, "sender", "")).lower() == "user"
     )
+    said_before = [
+        getattr(m, "content", "") or ""
+        for m in list(history)
+        if str(getattr(m, "sender", "")).lower() == "user"
+    ]
+    earlier_one = said_before[-1] if said_before else ""
     written: set[Decimal] = set()
     for _, text in texts:
         written |= amounts(text)
@@ -1334,6 +1511,8 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
             if value:
                 break
     if topics & {"discount", "delivery"} and value:
+        if result.order_value is None and stated_value(message) is not None:
+            result.stated = value
         tiers = read_tiers(texts)
         # The currency the rules and the price list are written in comes
         # before the business's default: a shop set to USD whose documents are
@@ -1346,8 +1525,24 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
             or getattr(organization, "default_currency", None)
         )
         result.applied = apply_tiers(value, tiers, currency, topics)
+    if result.empty() and not topics and earlier_one:
+        # "I'm a new customer" straight after "I'll pay after delivery" is
+        # still about paying; only the terms topics carry over, and only from
+        # the message just before.
+        topics = topics_in(earlier_one) & {"payment", "returns"}
+        if topics:
+            earlier = earlier_one
+    # "Can I return the MCB?" is about returns, not the MCB's price.
+    if topics_in(message) & {"returns", "payment"} and not re.search(
+        r"\b(how much|price|cost|total|quote|quotation)\b", message or "", re.I
+    ):
+        result.lines = [line for line in result.lines if line.quantity]
+        result.options = []
     if not result.empty() or topics:
-        result.rules = rules_for(message if topics_in(message) else f"{message} {earlier}", texts)
+        names = {w for item in items for w in words(item.name)}
+        result.rules = rules_for(
+            message if topics_in(message) else f"{message} {earlier}", texts, ignore=names
+        )
         if result.applied:
             result.rules = [r for r in result.rules if _rule_topic(r) not in result.applied.topics]
     return Turn(result, items, written)

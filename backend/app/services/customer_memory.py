@@ -246,10 +246,18 @@ def apply_analysis(memory: dict[str, Any], analysis: dict[str, Any]) -> dict[str
     return memory
 
 
-def as_prompt_block(memory: dict[str, Any], contact: Any = None) -> str:
-    """Render memory for the prompt. Empty string when there is nothing to say."""
+def as_prompt_block(memory: dict[str, Any], contact: Any = None, greeting: bool = False) -> str:
+    """Render memory for the prompt. Empty string when there is nothing to say.
+
+    A message that only says hello gets none of it. "Hi" was answered with
+    "since your wedding pair is secured, what are you looking for next?" -
+    an old purchase, brought up unasked, from a catalogue the business had
+    since replaced.
+    """
     memory = normalise(memory)
     lines: list[str] = []
+    if greeting:
+        return ""
 
     facts = memory["facts"]
     if facts:
@@ -286,4 +294,9 @@ def as_prompt_block(memory: dict[str, Any], contact: Any = None) -> str:
     if memory["commitments"]:
         lines.append("Commitments made: " + "; ".join(memory["commitments"]))
 
+    if lines:
+        lines.append(
+            "Use the above only where it bears on what they are asking now. Do not open a "
+            "reply by bringing up an earlier purchase, order or conversation."
+        )
     return "\n".join(lines)

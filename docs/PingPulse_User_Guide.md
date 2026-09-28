@@ -361,6 +361,12 @@ Nothing reaches a customer, and no fake lead appears on your board.
 It is called **Test agent** in the sidebar. Use it after you upload a price list, after you change your hours, or whenever
 you want to know what it will say before it says it to somebody who matters.
 
+Under each answer, **From your price list** shows what it was built on: the
+products matched, the sums, the discount and delivery worked out, and any of
+your own sentences about payment or returns that it quoted. If a line there is
+wrong, the document was read wrongly, and you will see it before a customer
+does.
+
 If your message is one the agent would hand to a human, the sandbox shows you
 that rather than inventing a smooth answer. That *is* the behaviour, and
 hiding it would be a lie about what your agent does.
@@ -384,6 +390,11 @@ talked out of.
   system has actually recorded it.
 - **It never invents a price.** If it is not in what you uploaded, it says it
   will check rather than guessing.
+- **It never promises what only you can do.** It will not say it has lowered a
+  price, changed a quotation or will send an invoice or proforma, because
+  nothing in the system does those things. Asked for one, it quotes your terms.
+- **It only offers pictures you have.** If none of your products has a photo,
+  it never offers to send one.
 - **It never claims to be a person.** Asked directly, it says what it is.
 - **It only offers times it can actually honour** — inside your hours, in your
   timezone, and only books a slot it already offered.

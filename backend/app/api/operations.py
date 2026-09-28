@@ -39,6 +39,7 @@ from app.services import (
     offers,
     oplog,
     pipelines,
+    product_search,
     retrieval,
     sales_policy,
     trade_defaults,
@@ -776,6 +777,7 @@ async def simulate(
         known_quantities=offer.quote.quantities(),
         # The sandbox sends nothing, pictures included.
         photos_attached=False,
+        photos_available=await product_search.has_photos(db, tenant.id),
         last_resort=offer.reply()
         or sales_policy.deterministic_reply({}, chunks, organization, message=message),
     )

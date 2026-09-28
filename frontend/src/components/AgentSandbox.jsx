@@ -194,15 +194,22 @@ export default function AgentSandbox() {
  * before a customer does.
  */
 function QuoteRead({ quote }) {
-  if (!quote || (!quote.lines?.length && !quote.options?.length && !quote.rules_applied?.length))
+  if (
+    !quote ||
+    (!quote.lines?.length &&
+      !quote.options?.length &&
+      !quote.rules_applied?.length &&
+      !quote.terms_quoted?.length)
+  )
     return null
   return (
     <div className="mt-2 space-y-1 rounded-xl border border-edge bg-panel px-3 py-2 text-[11px] leading-relaxed text-dim">
       <p className="font-semibold text-faint">From your price list</p>
-      {quote.lines.map((line) => (
-        <p key={line.item}>
+      {quote.lines.map((line, i) => (
+        <p key={`${line.item}-${i}`}>
           <span className="text-ink">{line.item}</span> — sold as {line.sold_as} at {line.price}
           {line.total && line.units ? `; ${line.units} = ${line.total}` : ''}
+          {line.aside ? ' (asked in a unit it is not sold in; not added to the total)' : ''}
         </p>
       ))}
       {quote.options.map((choices) => (
@@ -218,6 +225,14 @@ function QuoteRead({ quote }) {
       {quote.rules_applied?.map((line) => (
         <p key={line}>{line}</p>
       ))}
+      {quote.terms_quoted?.length > 0 && (
+        <>
+          <p className="pt-1 font-semibold text-faint">Quoted from your terms</p>
+          {quote.terms_quoted.map((line) => (
+            <p key={line}>“{line}”</p>
+          ))}
+        </>
+      )}
     </div>
   )
 }

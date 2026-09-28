@@ -190,6 +190,24 @@ async def find_products(
     return [product for _, product in scored[:limit]]
 
 
+async def has_photos(db: AsyncSession, organization_id: uuid.UUID) -> bool:
+    """Whether this business has a picture of anything it sells.
+
+    Decides whether the agent may offer to send one. A trade supplier whose
+    catalogue is a price list has none, and "shall I send over product
+    images?" followed by nothing is a promise broken in the next message.
+    """
+    rows = (
+        await db.execute(
+            select(KnowledgeDocument.media_urls)
+            .where(KnowledgeDocument.organization_id == organization_id)
+            .where(KnowledgeDocument.doc_type == "product")
+            .limit(2000)
+        )
+    ).scalars().all()
+    return any(urls for urls in rows)
+
+
 def media_for(products: list[KnowledgeDocument], per_product: int = 1) -> list[str]:
     """One image per product by default — a wall of photos reads as spam."""
     urls: list[str] = []

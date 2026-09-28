@@ -92,7 +92,7 @@ ACTION_DIRECTIVES = {
 }
 
 
-def directives(analysis: dict[str, Any]) -> list[str]:
+def directives(analysis: dict[str, Any], photos_available: bool = True) -> list[str]:
     """Turn the analyzer's reading into instructions for the response step.
 
     A booking request short-circuits everything. Once someone has asked for a
@@ -111,7 +111,10 @@ def directives(analysis: dict[str, Any]) -> list[str]:
 
     stage = analysis.get("stage", "NEW")
     if stage in STAGE_DIRECTIVES:
-        lines.append(f"Sales stage is {stage}. {STAGE_DIRECTIVES[stage]}")
+        directive = STAGE_DIRECTIVES[stage]
+        if not photos_available:
+            directive = directive.replace(", and offer pictures", "")
+        lines.append(f"Sales stage is {stage}. {directive}")
 
     action = analysis.get("next_action")
     if action in ACTION_DIRECTIVES:
@@ -132,13 +135,16 @@ def directives(analysis: dict[str, Any]) -> list[str]:
         lines.append(
             "Product details are listed below for reference. No photos are attached this "
             "time, so do not say you are sending any — offer to send them instead."
+            if photos_available
+            else "This business has no product photos. Never offer to send pictures, and "
+            "never say one is attached."
         )
 
     return lines
 
 
-def as_prompt_block(analysis: dict[str, Any]) -> str:
-    lines = directives(analysis)
+def as_prompt_block(analysis: dict[str, Any], photos_available: bool = True) -> str:
+    lines = directives(analysis, photos_available)
     if not lines:
         return ""
     return "=== WHAT TO DO ON THIS TURN ===\n" + "\n".join(f"- {line}" for line in lines)
@@ -201,11 +207,7 @@ def deterministic_reply(
         )
 
     if knowledge_chunks:
-        best = knowledge_chunks[0]
-        body = _from_a_sentence_start(getattr(best, "content", "") or "")
-        # Keep it to a WhatsApp-sized answer.
-        sentences = re.split(r"(?<=[.!?])\s+", body.strip())
-        answer = " ".join(sentences[:3]).strip()
+        answer = relevant_sentences(message, knowledge_chunks)
         if answer:
             return f"{answer}\n\nAnything else you'd like to know?"
 
@@ -224,6 +226,52 @@ def deterministic_reply(
     )
 
 
+_COMMON = {
+    "the", "and", "for", "you", "your", "can", "what", "how", "much", "this", "that", "with",
+    "have", "need", "want", "give", "will", "would", "about", "are", "did", "does", "any",
+    "all", "but", "not", "then", "them", "they", "its", "our", "from", "just", "also",
+    "please", "tell", "make", "anything", "everything", "was", "were", "only", "today",
+    "now", "after", "before", "into", "over", "than", "when", "been", "some", "more", "i'll",
+    "i'm", "don't", "it's", "fine", "okay", "yes", "sure", "thanks",
+}
+
+
+def _stems(text: str) -> set[str]:
+    return {w[:5] for w in re.findall(r"[a-z']{3,}", (text or "").lower()) if w not in _COMMON}
+
+
+def relevant_sentences(message: str, knowledge_chunks: list[Any], limit: int = 2) -> str:
+    """The sentences of the retrieved passages that are about this message.
+
+    The top passage read out from its first sentence answered "I'll pay after
+    delivery" with the warranty terms, and a passage holding the price table
+    with the whole table. Only sentences sharing a word with what the customer
+    wrote are used, never a table row, and nothing at all is better than
+    something unrelated.
+    """
+    asked = _stems(message)
+    if not asked:
+        return ""
+    scored: list[tuple[int, int, str]] = []
+    order = 0
+    for chunk in knowledge_chunks:
+        body = _from_a_sentence_start(getattr(chunk, "content", "") or "")
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", body):
+            sentence = sentence.strip()
+            if len(sentence.split()) < 5 or "|" in sentence or not sentence[:1].isalnum():
+                continue
+            hits = sum(1 for stem in asked if any(s.startswith(stem) for s in _stems(sentence)))
+            if hits:
+                scored.append((hits, -order, sentence))
+            order += 1
+    if not scored:
+        return ""
+    chosen = sorted(scored, reverse=True)[:limit]
+    # Back in the order they were written.
+    chosen.sort(key=lambda row: -row[1])
+    return " ".join(sentence for _, _, sentence in chosen)
+
+
 _GREETING = re.compile(
     r"^\s*(?:hi+|hello+|hey+|hiya|salam|salaam|assalam(?:u|o)?\s*o?\s*alaikum|aoa|"
     r"good\s+(?:morning|afternoon|evening|day)|greetings|yo|namaste|marhaba)"
@@ -232,9 +280,12 @@ _GREETING = re.compile(
 )
 
 
-def _only_greeting(message: str) -> bool:
+def only_greeting(message: str) -> bool:
     """Whether the message says hello and nothing else."""
     return bool(message) and bool(_GREETING.match(message))
+
+
+_only_greeting = only_greeting
 
 
 def _from_a_sentence_start(body: str) -> str:

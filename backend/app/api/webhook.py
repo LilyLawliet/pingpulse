@@ -718,6 +718,9 @@ async def process_inbound_message(
 
     products: list = []
     outbound_media: list[str] = []
+    # Whether a picture could ever be offered: the agent may not offer
+    # something the business does not have.
+    photos_available = await product_search.has_photos(db, organization.id)
 
     # Product context is loaded for any product-shaped question, so a price
     # follow-up can be answered from real rows. Photos, though, are only
@@ -852,8 +855,10 @@ async def process_inbound_message(
         history,
         body,
         knowledge=knowledge,
-        memory_block=customer_memory.as_prompt_block(memory, contact),
-        policy_block=sales_policy.as_prompt_block(analysis),
+        memory_block=customer_memory.as_prompt_block(
+            memory, contact, greeting=sales_policy.only_greeting(body)
+        ),
+        policy_block=sales_policy.as_prompt_block(analysis, photos_available=photos_available),
         # What the reply is allowed to claim. A sentence announcing a booking,
         # a cancellation or a move survives only if one actually happened on
         # this turn - checked against these rather than against the prompt.
@@ -863,6 +868,7 @@ async def process_inbound_message(
         handoff_allowed=handed_to_a_person,
         # A reply may only mention pictures it is actually sending.
         photos_attached=bool(outbound_media),
+        photos_available=photos_available,
         known_prices=offer.prices if offer else (),
         known_quantities=offer.quote.quantities() if offer else (),
         # If both providers are down the customer still gets a real answer built

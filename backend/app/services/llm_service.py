@@ -289,6 +289,67 @@ _PHOTO_SENT = re.compile(
 )
 
 
+# "Shall I send you product images?", "I can share pictures of it" - an offer,
+# which is only honest when this business has any pictures to send.
+_PHOTO_OFFER = re.compile(
+    r"(?:"
+    r"\b(?:shall|should|can|may|could)\s+(?:I|we)\s+(?:also\s+)?(?:send|share|show|forward)\s+"
+    r"(?:you\s+)?(?:\w+\s+){0,4}?(?:photos?|pictures?|pics?|images?)\b"
+    r"|\b(?:I|we)(?:'ll|\s+will|\s+can|\s+could)\s+(?:also\s+)?(?:send|share|show|forward)\s+"
+    r"(?:you\s+)?(?:\w+\s+){0,4}?(?:photos?|pictures?|pics?|images?)\b"
+    r"|\bwould\s+you\s+like\s+(?:to\s+see\s+|me\s+to\s+send\s+(?:you\s+)?)?(?:\w+\s+){0,3}?"
+    r"(?:photos?|pictures?|pics?|images?)\b"
+    r"|\bwant\s+(?:to\s+see\s+)?(?:some\s+|the\s+)?(?:photos?|pictures?|pics?|images?)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def offers_photos(reply: str) -> str | None:
+    """The phrase in which this reply offers to send a picture, if any."""
+    found = _PHOTO_OFFER.search(reply or "")
+    return found.group(0) if found else None
+
+
+# Things only a person at the business can do, promised as if they will be
+# done: a document sent, a quotation or a price changed. Nothing in this
+# system issues an invoice or edits a quotation, so the sentence is untrue
+# unless a person really was told to (see `handoff_allowed`). "Understood,
+# the unit prices will be reduced" and "we will share a signed proforma
+# invoice" both reached a customer.
+_DOCUMENT = r"(?:pro[- ]?forma|invoices?|receipts?|contracts?|agreements?|pdfs?|revised\s+quot(?:e|ation)s?|quotation\s+documents?)"
+_CHANGE = r"(?:reduce[sd]?|lower(?:ed)?|adjust(?:ed)?|revise[sd]?|change[sd]?|update[sd]?|cut|amend(?:ed)?|edit(?:ed)?|remove[sd]?)"
+_UNBACKED = re.compile(
+    r"(?:"
+    rf"\b(?:I|we)(?:'ll|\s+will|\s+shall|\s+can|\s+would)\s+(?:\w+\s+){{0,2}}?"
+    rf"(?:send|share|email|e-mail|issue|prepare|generate|draw\s+up|provide|forward|raise)\s+"
+    rf"(?:you\s+)?(?:\w+\s+){{0,3}}?{_DOCUMENT}\b"
+    rf"|\b(?:shall|should|can|may)\s+I\s+(?:send|share|email|issue|prepare|raise)\s+(?:you\s+)?"
+    rf"(?:\w+\s+){{0,3}}?{_DOCUMENT}\b"
+    rf"|\b(?:unit\s+)?(?:prices?|rates?|quot(?:e|ation)s?|invoices?)\s+(?:will|shall|would)\s+be\s+"
+    rf"(?:\w+\s+)?{_CHANGE}\b"
+    rf"|\b(?:I|we)(?:'ll|\s+will|\s+shall|\s+have|'ve)\s+(?:\w+\s+)?{_CHANGE}\s+"
+    rf"(?:the\s+|your\s+|our\s+|each\s+)?(?:unit\s+)?(?:prices?|rates?|quot(?:e|ation)s?|invoices?)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def unbacked_commitments(reply: str) -> str | None:
+    """A promise to send a document or change a price, if the reply makes one."""
+    found = _UNBACKED.search(reply or "")
+    return found.group(0) if found else None
+
+
+# "Ji, 1 coil means 100 meters": one Urdu word is below what `is_roman_urdu`
+# counts, and still not English.
+_URDU_OPENING = re.compile(r"^\s*(?:ji|jee|haan|han|bilkul|zaroor|acha|theek)(?=[\s,!.]|$)", re.IGNORECASE)
+
+
+def opens_in_urdu(reply: str) -> bool:
+    return bool(_URDU_OPENING.match(reply or ""))
+
+
 def claims_photos(reply: str) -> str | None:
     """The phrase in which this reply says it is sending a picture, if any."""
     found = _PHOTO_SENT.search(reply or "")
@@ -800,6 +861,7 @@ async def generate_reply(
     known_prices: Iterable[Any] = (),
     known_quantities: Iterable[Any] = (),
     photos_attached: bool | None = None,
+    photos_available: bool | None = None,
 ) -> GenerationResult:
     """Build the prompt, try Groq, fall back to Gemini, and time both attempts.
 
@@ -941,6 +1003,26 @@ async def generate_reply(
                     "no photo of it to send"
                 )
 
+        # An offer of pictures from a business that has none to send.
+        if photos_available is False:
+            offered = offers_photos(text)
+            if offered:
+                problems.append(
+                    f'you wrote "{offered}", but this business has no product photos to send; '
+                    "do not offer pictures"
+                )
+
+        # A document sent or a price changed, which nothing here will do.
+        if not handoff_allowed:
+            committed = unbacked_commitments(text)
+            if committed:
+                problems.append(
+                    f'you wrote "{committed}"; nothing will send that document or change '
+                    "that price, so do not say it will happen. Say what the price list and "
+                    "terms above state, and if they asked for something those do not allow, "
+                    "say plainly that it is not offered"
+                )
+
         pretending = claims_to_be_human(text)
         if pretending:
             problems.append(
@@ -966,7 +1048,7 @@ async def generate_reply(
         # the prompt, but on a booking turn the catalogue is stripped out and
         # the model has drifted anyway, so the output is checked rather than
         # trusted.
-        if expects_english and is_roman_urdu(text):
+        if expects_english and (is_roman_urdu(text) or opens_in_urdu(text)):
             problems.append(
                 "you replied in Roman Urdu, but this customer wrote in English; "
                 "rewrite the same reply in English"
@@ -993,13 +1075,17 @@ async def generate_reply(
             raise RuntimeError("reply still claimed to be a person")
         if photos_attached is False and claims_photos(corrected):
             raise RuntimeError("reply still said a picture was sent when none was")
+        if photos_available is False and offers_photos(corrected):
+            raise RuntimeError("reply still offered pictures this business does not have")
+        if not handoff_allowed and unbacked_commitments(corrected):
+            raise RuntimeError("reply still promised a document or a price change")
         if not handoff_allowed and sales_policy.contains_handoff(corrected):
             raise RuntimeError("reply still promised a human follow-up")
         if booking.unverified_claims(
             corrected, appointment=appointment, cancelled=did_cancel, moved=did_move
         ):
             raise RuntimeError("reply still claimed an appointment that does not exist")
-        if expects_english and is_roman_urdu(corrected):
+        if expects_english and (is_roman_urdu(corrected) or opens_in_urdu(corrected)):
             raise RuntimeError("reply still came back in Roman Urdu")
         return corrected
 
