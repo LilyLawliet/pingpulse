@@ -234,8 +234,13 @@ export const api = {
 
   // ------------------------------- sandbox ------------------------------
   // Nothing leaves the building: no WhatsApp call, no contact, no message.
-  simulate: (message, history = []) =>
-    request('/agent/simulate', { method: 'POST', body: JSON.stringify({ message, history }) }),
+  // `bookingState` is what the previous turn offered, sent back so a pick
+  // like "the 3pm one" can be matched - the way a live contact remembers it.
+  simulate: (message, history = [], bookingState = {}) =>
+    request('/agent/simulate', {
+      method: 'POST',
+      body: JSON.stringify({ message, history, booking_state: bookingState }),
+    }),
 
   // ------------------------------ what broke ----------------------------
   listErrors: (days = 7) => request(`/errors?days=${days}`),

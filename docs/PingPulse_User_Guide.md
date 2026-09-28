@@ -166,6 +166,8 @@ politely, but that is a demo, not a working agent.
 photo column works). Each picture becomes that product's photo, and the agent
 can send it when a customer asks to see it. A product without one is described
 instead, and if none of your products has a picture, the agent never offers one.
+Photos are read when the file is uploaded, so a price list uploaded before
+version 1.5.5 needs uploading again for its pictures to count.
 
 **Worth knowing.** We show what we read back to you before it counts. If a
 document also states your opening hours, we offer to fill them in — as a
@@ -371,6 +373,19 @@ products matched, the sums, the discount and delivery worked out, and any of
 your own sentences about payment or returns that it quoted. If a line there is
 wrong, the document was read wrongly, and you will see it before a customer
 does.
+
+**Booking works here too.** Ask for a time and it offers real free times
+from your diary; reply with one and it books it. It's done exactly as on
+WhatsApp, then undone, so nothing is kept. If your hours aren't set, the page
+says what a live customer would have been told.
+
+**When it doesn't know.** If nothing you uploaded answers the question, the
+agent doesn't guess and doesn't stall. On WhatsApp you get an alert with the
+customer's question, and the customer is told it has gone to the team. That
+message is sent only if an alert address or a device is set up; otherwise the
+customer gets the email or phone number from your own documents. Test agent
+shows which of these would happen. Each of these questions is a gap in your
+documents, so add the answer and the agent will know it next time.
 
 If your message is one the agent would hand to a human, the sandbox shows you
 that rather than inventing a smooth answer. That *is* the behaviour, and

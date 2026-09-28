@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BellRing, FlaskConical, Loader2, RotateCcw, Send, ShieldAlert, TriangleAlert } from 'lucide-react'
+import { BellRing, CalendarCheck, FlaskConical, Loader2, RotateCcw, Send, ShieldAlert, TriangleAlert } from 'lucide-react'
 import { PageHeader } from './ui.jsx'
 import { api } from '../api.js'
 
@@ -48,7 +48,8 @@ export default function AgentSandbox() {
       ])
 
     try {
-      const result = await api.simulate(text, history)
+      const last = turns[turns.length - 1]
+      const result = await api.simulate(text, history, last?.booking_state || {})
       setTurns((was) => [...was, { message: text, ...result }])
       setMessage('')
       try {
@@ -128,6 +129,18 @@ export default function AgentSandbox() {
                 <div className="w-fit max-w-[85%] rounded-2xl rounded-bl-md bg-panel-2 px-4 py-2.5">
                   <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{turn.reply}</p>
                   <QuoteRead quote={turn.quote} />
+                  {turn.booking?.note && (
+                    <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-accent/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-accent">
+                      <CalendarCheck size={12} className="mt-0.5 shrink-0" />
+                      {turn.booking.note}
+                    </p>
+                  )}
+                  {turn.booking?.offered?.length > 0 && !turn.booking?.performed && (
+                    <p className="mt-2 text-[11px] leading-relaxed text-faint">
+                      Offered from your diary: {turn.booking.offered.length} time
+                      {turn.booking.offered.length === 1 ? '' : 's'}. Reply with one to see it booked.
+                    </p>
+                  )}
                   {turn.needs_team && (
                     <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-accent/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-accent">
                       <BellRing size={12} className="mt-0.5 shrink-0" />

@@ -256,3 +256,15 @@ more cache.
 around $50 for `e2-standard-2`. The $300 trial credit covers the full 90 days
 with room to spare. LLM usage is billed to each client's own keys under the
 BYOK model, so it never appears on this bill.
+
+## Checking the agent before and after a deploy
+
+`scripts/replay_eval.py` replays scripted conversations through a client's Test
+agent endpoint, with the real AI and nothing sent, and scores every reply.
+
+    python scripts/replay_eval.py evals/*.json --backend https://pingpulse.duckdns.org --token <client token>
+
+It prints each failing reply and why, how many replies came without the AI,
+and the median and slowest reply time. Run it against a staging client before
+a deploy and against each client after they upload new documents. Add a suite
+under `evals/` whenever a client finds a failure.

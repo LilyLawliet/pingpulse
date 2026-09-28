@@ -762,6 +762,64 @@ async def simulate(
             "knowledge_used": [chunk.title for chunk in chunks],
         }
 
+    # Booking, the way a live chat does it, against the real diary - inside a
+    # savepoint that is rolled back, so the times offered are real and a
+    # booking can be made, and nothing is kept. What was offered comes back
+    # to the page and is sent with the next message, the way a live contact
+    # remembers it, so "the 3pm one" can be picked in the next turn.
+    booking_note = None
+    booking_block = ""
+    appointment = None
+    performed = None
+    offered_slots: list[str] = []
+    state = payload.get("booking_state") if isinstance(payload.get("booking_state"), dict) else {}
+    if booking.wants_booking(message) and not booking.booking_enabled(organization):
+        reachable = await notifications.can_reach(db, organization)
+        booking_note = (
+            "Booking is off - no opening hours are set. On WhatsApp you would get an alert, "
+            "and the customer would be told a person will come back with times."
+            if reachable
+            else "Booking is off - no opening hours are set - and no alert address or device "
+            "is set up, so nobody would hear about this request."
+        )
+        if reachable:
+            booking_block = (
+                "A colleague has just been alerted about this booking request. You MAY tell "
+                "the customer that a team member will get back to them with available times. "
+                "Do NOT offer a time yourself, do NOT say anything is booked."
+            )
+    savepoint = await db.begin_nested()
+    try:
+        probe = CRMContact(
+            organization_id=tenant.id,
+            phone_number="+10000000001",
+            name=pretend.name,
+            pipeline_stage=pretend.pipeline_stage,
+            sales_stage="NEW",
+            tags=[],
+            qualification={},
+            contact_metadata=dict(state),
+        )
+        db.add(probe)
+        await db.flush()
+        turn = await booking.handle_turn(db, organization, probe, message)
+        performed = turn.performed
+        if turn.appointment is not None:
+            appointment = SimpleNamespace(when=booking.describe(turn.appointment))
+        if turn.prompt_block:
+            booking_block = "\n\n".join(filter(None, [booking_block, turn.prompt_block]))
+        state = dict(probe.contact_metadata or {})
+        offered_slots = [str(slot) for slot in (turn.offered or [])]
+        if performed:
+            booking_note = (
+                f"This would have {performed} {appointment.when if appointment else 'the appointment'} "
+                "for a real customer. Nothing was saved."
+            )
+    finally:
+        await savepoint.rollback()
+    if booking_block:
+        knowledge = "\n\n".join(filter(None, [knowledge, booking_block]))
+
     # The same price reading a real customer's message gets. A sandbox that
     # skipped it tested a different agent: this is where "20 m of cable" is
     # read against a 100 m coil, and where the totals come from.
@@ -775,6 +833,10 @@ async def simulate(
         history,
         message,
         knowledge=knowledge,
+        appointment=appointment,
+        did_cancel=performed == "cancelled",
+        did_move=performed == "moved",
+        handoff_allowed=bool(booking_block and "colleague has just been alerted" in booking_block),
         known_prices=offer.prices,
         known_quantities=offer.quote.quantities(),
         # The sandbox sends nothing, pictures included.
@@ -820,6 +882,9 @@ async def simulate(
         "why": generation.error if generation.fallback_used else None,
         # Set when the agent did not know: what a live chat would do about it.
         "needs_team": team,
+        # What booking did on this turn, and what to send back next turn.
+        "booking": {"note": booking_note, "offered": offered_slots, "performed": performed},
+        "booking_state": state,
         "sent": False,
     }
 
