@@ -1,11 +1,11 @@
 {
-  "version": "1.5.3",
-  "notes": "Your own discount and delivery rules are now worked out against the actual order instead of left to the AI to notice. An order a rupee short is told so, and told what it would get; where two discounts could apply the better one is used and the next one named. A customer's own figure can be repeated back to them, which is what used to send 'I have an order worth PKR 499,999' round both providers and out the other side. Asking about delivery no longer drags in a product from three turns ago.",
-  "pub_date": "2026-09-28T19:52:54+00:00",
+  "version": "1.5.4",
+  "notes": "It no longer says it is sending pictures it has not got: the product list it was given claimed photos were attached whenever anything matched, so it said 'here are the photos' and nothing went out. It is now told what is actually attached and stopped if it says otherwise. It also cannot promise an invoice or a price cut on your behalf unless a person was really alerted. Mixed orders are read a sentence at a time, so ten of one thing is no longer priced as ten of another.",
+  "pub_date": "2026-09-28T21:07:15+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMitYVjRYekpPUW9MQWJ6bjJIRW04L3Z3WGtXWlFUMzYzSlZBa3BHVE5wbTNuUHZzcDJnVE5PZTJuN1FVZ3NoVmliWi8zWVhPSWxTM3JwczJtUGtqNmd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjI1MTczCWZpbGU6UGluZ1B1bHNlXzEuNS4zX3g2NC1zZXR1cC5leGUKb05UcWp5RHV2K2NPODN3RmttTURZTW1rTFF1em9iMjlZOFIwcnZ6eE5xWTFYTS9FeHJ4Njd4bm5ycVRzZTZiMkc5OHNWc0liOFo5RmJmQkhPN1pOQ0E9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.3_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjhuRWlvc2tFeWlDQ0xFU0c2clZqZ0pDQW1FUVp1MTRHc29BWlNpUDNpUWVMQXRCKy93aGRhRFRkMmpsdjllZ0JPRGRlK0Z0T0NFSFZKVUk0cC91b1FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjI5NjM0CWZpbGU6UGluZ1B1bHNlXzEuNS40X3g2NC1zZXR1cC5leGUKbjdyM3N0NXhZaXdDNlFvNDVWWEt5N1NhMWFqRXRDbmpTV0k0eWo1NGplbVJyYU1TelIxdXg0SjlobnAyUlh0WDZXSnhMNzErRlZ5YmkxQWFHWHFZREE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.4_x64-setup.exe"
     }
   }
 }
