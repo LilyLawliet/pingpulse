@@ -12,6 +12,41 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.5.4',
+    date: '29 September 2026',
+    items: [
+      {
+        title: 'It no longer says it is sending pictures it has not got',
+        body:
+          'On a real conversation the agent said "here are the photos" and nothing was sent. '
+          + 'The list of products it was given carried a heading claiming photos were '
+          + 'attached, whenever any product matched — including when none were attached, and '
+          + 'when the products were rows of a price list, which never have photos. It is now '
+          + 'told what is actually going out, it is stopped if it says otherwise, and if you '
+          + 'have no product pictures at all it will not offer them. Asked for a photo it '
+          + 'does not have, it says so and describes the thing instead.',
+      },
+      {
+        title: 'It cannot promise an invoice or a price cut on your behalf',
+        body:
+          '"We will share a signed proforma invoice" and "the unit prices will be reduced" '
+          + 'both reached a customer, and nothing in PingPulse issues a document or changes '
+          + 'a price. Those sentences are now refused unless a person really was alerted. '
+          + 'Your own terms — "invoices are due within 14 days" — are unaffected.',
+      },
+      {
+        title: 'Mixed orders are read line by line',
+        body:
+          '"...and 10 MCBs. I am in Lahore ... 4mm cable" had priced ten cable coils. Each '
+          + 'sentence of an order is now matched on its own, a product is not counted twice, '
+          + 'and asking about 20 metres of something sold by the coil is answered with how '
+          + 'it is sold instead of silently added to the total. Payment and returns questions '
+          + 'are answered from your own terms, and a plain hello no longer drags up what the '
+          + 'customer bought last time.',
+      },
+    ],
+  },
+  {
     version: '1.5.3',
     date: '29 September 2026',
     items: [
