@@ -12,6 +12,41 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.5.3',
+    date: '29 September 2026',
+    items: [
+      {
+        title: 'Your discount and delivery rules are applied, not guessed at',
+        body:
+          'Write "orders of PKR 500,000 or more receive 2% off" or "delivery is free for '
+          + 'orders of PKR 250,000 or more within Lahore" and those rules are now worked out '
+          + 'against the actual order, rather than left to the AI to notice. An order one '
+          + 'rupee short is told it is one rupee short, and told what it would get. Where two '
+          + 'discounts could apply the better one is used, since they do not add up, and the '
+          + 'next one up is named with how far away it is. A sentence that is not definite — '
+          + '"we may be able to do something on large orders" — is quoted to the customer '
+          + 'rather than turned into a rule.',
+      },
+      {
+        title: 'It can repeat your customer’s own figure back to them',
+        body:
+          '"I have an order worth PKR 499,999, do I get the discount?" used to take half a '
+          + 'minute and come back with the wrong thing, because the check that stops invented '
+          + 'prices treated the customer’s own number as one. Saying it back is not quoting '
+          + 'a price, and it is allowed now.',
+      },
+      {
+        title: 'Asking about delivery no longer drags in the last product',
+        body:
+          '"What about delivery in Lahore?" was pulling in whatever product had been '
+          + 'discussed three turns earlier. Earlier messages are only used to pick the '
+          + 'product when this message asks for a price or an amount without naming one. '
+          + 'Test agent also now says why an AI reply was rejected, and shows the rules it '
+          + 'applied under each answer.',
+      },
+    ],
+  },
+  {
     version: '1.5.2',
     date: '29 September 2026',
     items: [
