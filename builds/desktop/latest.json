@@ -1,11 +1,11 @@
 {
-  "version": "1.4.9",
-  "notes": "A setup step is only ticked when it is really done. Prices and knowledge counted itself finished the moment What you sell had a single line in it, even with no price list and nothing to quote. It now follows the same judgement the panel shows, so removing your last document unticks the step - and a required step that is not done says plainly that your agent will not start until it is.",
-  "pub_date": "2026-09-27T23:39:25+00:00",
+  "version": "1.5.0",
+  "notes": "Type where you are in your own words - Karachi, Lahore, UAE, Miami, Texas, Asia/Dubai or UTC+5 - and it works out the timezone and saves it by itself, showing the time there so a wrong one is obvious. Setup steps now tick the moment a save is confirmed instead of a second or two later. And a conversation's Details ends with Delete contact, which asks once more and says exactly what goes.",
+  "pub_date": "2026-09-28T15:41:07+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMngyQ0hQWlNoR0l3YjdFTTIyZGdwUEYxR1M3cjl4ZC9PN2VsTm1vYWErMmVORnRUVGJwci85VHJNSy9ndnhyOFBqbXpPVUVkMk9ralpLczZMckhIb3drPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTUyMzY0CWZpbGU6UGluZ1B1bHNlXzEuNC45X3g2NC1zZXR1cC5leGUKSjhOWGlUYTBPVTgyak4zRStDSmZOUFpocnpmVE9jcSswMFNOdUlvaTlwbnFIV1ptTkpSWUUyRDNxQ1UrYTQ3U3ZVNHE2OEdpb3hFdEUvK3cxNzVFRFE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.4.9_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjdSVEJpRm5ZQ2xKcEx5SUV3Vzc2ZmRadkU4azYreFpNQk01ZjdkNUNzUTZnbmd6TUdGSDZhQ0NhOGhHT05NeXo1ajBsMEt2NkJxWm1iYzR2TjNBVndvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjEwMDY3CWZpbGU6UGluZ1B1bHNlXzEuNS4wX3g2NC1zZXR1cC5leGUKRnI0VVhUeEFkaEhKVW1IWloyMkpUSi9aQU15b3RSbHBveXY3NU9VS2wwNk5nd2IzNWRDWW5aNHRZMHpDeXdoaE1HZk5Oc2FJR1J6V3p1YlBBUzdtQkE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.0_x64-setup.exe"
     }
   }
 }
