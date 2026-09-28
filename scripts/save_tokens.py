@@ -7,8 +7,8 @@ a readable copy where they can be found.
 
 The production database is the source of truth, not an append-only log, so the
 file is rewritten from scratch every run. That means it tells the truth about
-what is revoked, what has expired and how many device seats are left, rather
-than accumulating tokens that stopped working months ago.
+what is revoked and what has expired, rather than accumulating tokens that
+stopped working months ago.
 
     python scripts/save_tokens.py
     python scripts/save_tokens.py --print     also show them in the terminal
@@ -56,8 +56,6 @@ SEPARATOR = "\t"
 # swallows stdin on the way to the VM and psql receives a stray keystroke.
 QUERY = (
     "select concat_ws(chr(9), t.token, t.client_name, t.expires_at, t.is_active,"
-    " t.max_devices,"
-    " (select count(*) from token_devices d where d.token = t.token),"
     " coalesce(o.name, chr(45)), t.created_at,"
     " coalesce(t.last_used_at::text, chr(45)))"
     " from access_tokens t"
@@ -69,8 +67,8 @@ QUERY = (
 
 class Token:
     def __init__(self, row: list[str]) -> None:
-        (self.token, self.client, self.expires, active, self.seats,
-         self.used, self.organization, self.created, self.last_used) = row
+        (self.token, self.client, self.expires, active,
+         self.organization, self.created, self.last_used) = row
         self.active = active == "t"
 
     @property
@@ -138,13 +136,13 @@ def render(tokens: list[Token]) -> str:
         "",
         "To revoke one: `update access_tokens set is_active = false where token = '…';`",
         "",
-        "| Client | Workspace | State | Expires | Seats | Last used |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Client | Workspace | State | Expires | Last used |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for t in tokens:
         lines.append(
-            f"| {t.client} | {t.organization or '—'} | {t.state} | {t.day(t.expires)} "
-            f"| {t.used}/{t.seats} | {t.day(t.last_used)} |"
+            f"| {t.client} | {t.organization or '—'} | {t.state} "
+            f"| {t.day(t.expires)} | {t.day(t.last_used)} |"
         )
 
     lines += ["", "---", ""]
@@ -159,7 +157,6 @@ def render(tokens: list[Token]) -> str:
             f"- Workspace: {t.organization or 'none'}",
             f"- State: **{t.state}**",
             f"- Issued: {t.day(t.created)}   Expires: {t.day(t.expires)}",
-            f"- Devices: {t.used} of {t.seats} seats used",
             "",
         ]
         if t.state != "active":

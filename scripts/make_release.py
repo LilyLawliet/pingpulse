@@ -276,9 +276,6 @@ def publish_web() -> bool:
 def confirm_web() -> bool:
     """Ask /app for its page and check it names this build's assets.
 
-    Deliberately not sending X-PingPulse-Device: this is a check, and a check
-    that claims a licence seat costs a client one every time a release goes
-    out.
     """
     import urllib.request
 

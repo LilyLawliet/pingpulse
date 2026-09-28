@@ -62,10 +62,11 @@ token; you paste it once and the app remembers it.
 
 **How you use it.** Paste and press **Connect**. That is the whole login.
 
-**Worth knowing.** A licence covers one person and their team, counted by
-device. If you replace a machine, or run out of seats, ask us to reset them.
-If the token ever stops working, contact us rather than trying another — a
-wrong token will not do any damage, but it will not get you in either.
+**Worth knowing.** Your licence is the token and the date it runs out. Use it
+on as many of your own machines as you like — a laptop, a phone browser, the
+desktop app — nothing counts them. If the token ever stops working, contact us
+rather than trying another; a wrong token will not do any damage, but it will
+not get you in either.
 
 ---
 
@@ -97,7 +98,7 @@ Click your name to open your **profile**: the name your access token was issued
 to, the token itself — hidden until you press the eye, with a button to copy it
 — and the date it is valid until. It is there for the day you sign in on
 another computer. Keep it private: anyone who has it can open your dashboard,
-and each computer uses one of your licence's seats.
+and there is nothing to stop them but the expiry date.
 
 ---
 

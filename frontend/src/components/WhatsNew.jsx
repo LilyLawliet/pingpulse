@@ -12,6 +12,23 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.5.1',
+    date: '28 September 2026',
+    items: [
+      {
+        title: 'Your licence is the token and the date, and nothing else',
+        body:
+          'It used to count machines too: each computer that signed in took one of a '
+          + 'fixed number of seats, and once they were gone the next one was refused. That '
+          + 'never stopped a token being passed around — it only ever refused you. A second '
+          + 'browser, a new laptop, or clearing your site data spent a seat that was never '
+          + 'given back, and the refusal looked, on screen, exactly like a business that had '
+          + 'never been set up. Seats are gone. Use your token on as many of your own '
+          + 'machines as you like; it stops working on its expiry date and not before.',
+      },
+    ],
+  },
+  {
     version: '1.5.0',
     date: '28 September 2026',
     items: [
@@ -72,7 +89,7 @@ const RELEASES = [
           + 'your access token is there — hidden until you press the eye, with a button to '
           + 'copy it, and the date it runs until. It is there for the day you need to sign in '
           + 'on another computer. Keep it to your own team: anyone holding it can open your '
-          + 'dashboard, and each computer uses one of your seats.',
+          + 'dashboard.',
       },
       {
         title: 'Set up in any order',

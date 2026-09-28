@@ -11,11 +11,11 @@ next call rather than whenever the token would have expired on its own.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import claim_seat, current_token, current_user, resolve_token
+from app.deps import current_token, current_user, resolve_token
 from app.models import AccessToken, User
 from app.schemas_tenancy import TokenLoginRequest, TokenSessionOut, UserOut
 
@@ -36,7 +36,6 @@ async def _session(token: AccessToken, db: AsyncSession) -> TokenSessionOut:
 @router.post("/login", response_model=TokenSessionOut)
 async def login(
     payload: TokenLoginRequest,
-    x_pingpulse_device: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """Exchange a raw access token for the session it represents.
@@ -45,12 +44,8 @@ async def login(
     valid and tells the app which organization it lands in, so the desktop
     client can show a real error at sign-in rather than failing later on a
     data call.
-
-    The seat is claimed here too, so a client on a machine too many is told at
-    sign-in rather than after the dashboard has already loaded.
     """
     token = await resolve_token(db, payload.token)
-    await claim_seat(db, token, (x_pingpulse_device or "").strip()[:64])
     return await _session(token, db)
 
 

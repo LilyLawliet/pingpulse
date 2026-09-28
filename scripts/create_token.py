@@ -37,14 +37,13 @@ BACKEND = Path(__file__).resolve().parents[1] / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from sqlalchemy import func, select  # noqa: E402
+from sqlalchemy import select  # noqa: E402
 
 from app.database import SessionLocal  # noqa: E402
 from app.models import (  # noqa: E402
     AccessToken,
     Organization,
     OrganizationMember,
-    TokenDevice,
     User,
 )
 from app.security import generate_token  # noqa: E402
@@ -135,7 +134,6 @@ async def create(args: argparse.Namespace) -> int:
                 expires_at=expires_at,
                 is_active=True,
                 user_id=user.id,
-                max_devices=args.seats,
             )
         )
         await session.commit()
@@ -170,14 +168,6 @@ async def list_tokens(_args: argparse.Namespace) -> int:
         # after it closes, and a lazy load there would raise rather than
         # quietly print nothing.
         reaches = {row.token: await _reaches(session, row) for row in rows}
-        # How much of each licence is actually spoken for. A token that looks
-        # fine and is quietly full fails on somebody's first morning, with a
-        # 403 that says nothing about seats.
-        counts = await session.execute(
-            select(TokenDevice.token, func.count())
-            .group_by(TokenDevice.token)
-        )
-        seats = dict(counts.all())
 
     if not rows:
         print("  no tokens issued yet")
@@ -208,9 +198,6 @@ async def list_tokens(_args: argparse.Namespace) -> int:
         # already happened once here.
         for line in reaches[row.token]:
             print(f"  {'':<24} {line}")
-        used = seats.get(row.token, 0)
-        note = "  FULL - a new machine will be refused" if used >= row.max_devices else ""
-        print(f"  {'':<24} seats: {used} of {row.max_devices} used{note}")
     return 0
 
 
@@ -274,14 +261,6 @@ def main() -> int:
     parser.add_argument("--days", type=int, default=30, help="Validity in days (default 30)")
     parser.add_argument("--months", type=int, help="Validity in months (overrides --days)")
     parser.add_argument("--org", help="Organization the client should land in")
-    # A licence is for one person and their team. Each machine that signs in
-    # claims a seat, and once they are gone a new machine is refused rather
-    # than quietly sharing the licence - so this is the size of the team, and
-    # getting it wrong locks somebody out on their first day.
-    parser.add_argument(
-        "--seats", type=int, default=3,
-        help="Machines allowed to use this token (default 3)",
-    )
     parser.add_argument("--list", action="store_true", help="List issued tokens")
     parser.add_argument("--revoke", metavar="TOKEN", help="Revoke a token immediately")
 

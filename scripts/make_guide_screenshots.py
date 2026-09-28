@@ -27,12 +27,6 @@ DASHBOARD = os.environ.get("GUIDE_DASHBOARD", "http://localhost:3010")
 OUT_DIR = pathlib.Path(r"D:\pingpulse\docs\images\guide")
 VIEWPORT = {"width": 1680, "height": 1050}
 
-# Pinned rather than generated per run. The dashboard mints a device id on
-# first load and every distinct one claims a licence seat, so a script that
-# starts from a clean profile each time burns a seat per run and starts
-# answering 403 around the ninth.
-DEVICE_ID = "guide-screenshots-fixed-device"
-
 # 'dark', 'light', or '' to leave it on the system setting. The redesign ships
 # both, and a screenshot of only one of them says nothing about the other.
 THEME = os.environ.get("GUIDE_THEME", "")
@@ -137,13 +131,13 @@ async def main() -> int:
         context = await browser.new_context(
             viewport=VIEWPORT, device_scale_factor=1
         )
-        # Set before the app's first script runs, so it never mints its own.
-        await context.add_init_script(
-            "try {"
-            f" localStorage.setItem('pingpulse.device', '{DEVICE_ID}');"
-            + (f" localStorage.setItem('pingpulse.theme', '{THEME}');" if THEME else "")
-            + " } catch (e) {}"
-        )
+        if THEME:
+            # Set before the app's first script runs, so the first paint is
+            # already in the theme being photographed.
+            await context.add_init_script(
+                "try { localStorage.setItem('pingpulse.theme', "
+                f"'{THEME}'); }} catch (e) {{}}"
+            )
         page = await context.new_page()
 
         print("sign in")

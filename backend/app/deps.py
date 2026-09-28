@@ -27,7 +27,6 @@ from app.models import (
     AccessToken,
     Organization,
     OrganizationMember,
-    TokenDevice,
     User,
 )
 
@@ -74,84 +73,21 @@ async def resolve_token(db: AsyncSession, raw: str | None) -> AccessToken:
     return record
 
 
-async def claim_seat(db: AsyncSession, token: AccessToken, device_id: str) -> None:
-    """Let this machine use the token, or refuse it.
-
-    A licence covers one person and their team, so each machine claims a seat.
-    A machine that already holds one keeps it; a new machine gets one only if
-    the licence has a seat spare. The refusal is explicit — 403 with a real
-    explanation — because the alternative is a client quietly wondering why the
-    app will not open.
-
-    Requests with no device id are allowed through so that scripts, curl and
-    the health checks keep working. Seats are about stopping a licence being
-    forwarded around, not about blocking every unidentified caller.
-    """
-    if not device_id:
-        return
-
-    existing = await db.scalar(
-        select(TokenDevice).where(
-            TokenDevice.token == token.token,
-            TokenDevice.device_id == device_id,
-        )
-    )
-    if existing is not None:
-        existing.last_seen_at = datetime.now(timezone.utc)
-        return
-
-    claimed = await db.scalar(
-        select(func.count())
-        .select_from(TokenDevice)
-        .where(TokenDevice.token == token.token)
-    ) or 0
-
-    if claimed >= token.max_devices:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                f"This licence is already in use on {token.max_devices} device"
-                f"{'s' if token.max_devices != 1 else ''}. It covers one team, "
-                "not unlimited machines — contact us to add seats or release one."
-            ),
-        )
-
-    try:
-        # A savepoint rather than a bare flush. Two requests from the same new
-        # machine race for this seat and both get past the check above, and
-        # that is the ordinary case rather than an edge one: the dashboard
-        # fires several calls in parallel the moment it loads, so every first
-        # visit from a new device runs this race and one of them used to come
-        # back as a 500.
-        #
-        # Rolling the whole session back instead would discard the caller's
-        # transaction and expire the objects already loaded on it - including
-        # the token being authenticated - so only this insert is undone.
-        async with db.begin_nested():
-            db.add(
-                TokenDevice(
-                    token=token.token,
-                    device_id=device_id,
-                    last_seen_at=datetime.now(timezone.utc),
-                )
-            )
-    except IntegrityError:
-        # The loser has nothing to fix: the seat it wanted now exists and
-        # belongs to this machine, so the claim is satisfied, not failed.
-        logger.debug("device %s claimed its seat on a parallel request", device_id[:8])
-
-
 async def current_token(
     authorization: str | None = Header(default=None),
-    x_pingpulse_device: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> AccessToken:
-    """The validated token behind this request, and its seat."""
+    """The validated token behind this request.
+
+    A licence is the token and the date it runs out. It used to also be a
+    count of machines, which cost a client an afternoon every time they opened
+    the dashboard somewhere new - and cost us the truth on screen, because a
+    refused machine looked exactly like a business that had not been set up.
+    """
     if not authorization or not authorization.lower().startswith("bearer "):
         raise _unauthorized("An access token is required")
 
     record = await resolve_token(db, authorization.split(" ", 1)[1])
-    await claim_seat(db, record, (x_pingpulse_device or "").strip()[:64])
     # Cheap operational signal: shows whether an issued token is in use.
     record.last_used_at = datetime.now(timezone.utc)
     return record

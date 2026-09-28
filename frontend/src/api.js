@@ -4,31 +4,6 @@ import { apiBase } from './backend'
 // desktop shell, overridable at build time with VITE_API_BASE_URL.
 const BASE = apiBase
 const TOKEN_KEY = 'pingpulse.token'
-const DEVICE_KEY = 'pingpulse.device'
-
-/**
- * A stable id for this installation.
- *
- * Generated once and kept locally, so the same machine keeps its licence seat
- * across restarts while a token pasted on a different machine asks for a new
- * one. A licence covers one team, not unlimited copies.
- */
-function deviceId() {
-  try {
-    let id = localStorage.getItem(DEVICE_KEY)
-    if (!id) {
-      id = (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`)
-        .replace(/-/g, '')
-        .slice(0, 32)
-      localStorage.setItem(DEVICE_KEY, id)
-    }
-    return id
-  } catch {
-    // Private mode or blocked storage: no id, so no seat is claimed. The
-    // request still works — seats stop sharing, they do not gate access.
-    return ''
-  }
-}
 
 /** The bearer token lives in localStorage so a refresh keeps you signed in. */
 export const auth = {
@@ -62,8 +37,6 @@ export class ApiError extends Error {
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
   if (auth.token) headers.Authorization = `Bearer ${auth.token}`
-  const device = deviceId()
-  if (device) headers['X-PingPulse-Device'] = device
 
   const response = await fetch(`${BASE}${path}`, { ...options, headers })
 
@@ -96,8 +69,6 @@ async function upload(path, file, fields = {}) {
 
   const headers = {}
   if (auth.token) headers.Authorization = `Bearer ${auth.token}`
-  const device = deviceId()
-  if (device) headers['X-PingPulse-Device'] = device
 
   const response = await fetch(`${BASE}${path}`, { method: 'POST', headers, body })
   if (!response.ok) {

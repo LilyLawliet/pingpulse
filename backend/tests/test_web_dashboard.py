@@ -100,10 +100,9 @@ async def test_a_browser_gets_no_data_without_a_token(client):
 async def test_the_same_token_works_regardless_of_what_is_asking(org_a):
     """There is no desktop-only or browser-only path into the API.
 
-    The desktop app sends a device header; a browser sends one too, from the
-    same code. Neither is a credential and neither changes what comes back —
-    if that stopped being true, the two clients would start behaving
-    differently for the same user.
+    Nothing but the token decides what comes back. A device header is sent by
+    desktop builds from before seats were removed, and it is ignored - kept
+    here so an older client on the same licence keeps working.
     """
     def as_(device: str) -> dict[str, str]:
         return {**org_a.headers, "X-PingPulse-Device": device}

@@ -42,9 +42,9 @@ Files with the same basename collide in `/tmp` when scp'd together — rename th
 - **Never tell a customer an action happened** unless the backend completed and
   verified it. Enforce this with deterministic backend state, not prompt wording.
 - No OAuth, no SaaS billing, no unrelated integrations, no speculative features.
-- Licences are per person and their team.
-- Verification requests must omit `X-PingPulse-Device` — otherwise the check eats a
-  client's licence seat.
+- A licence is an access token and the date it expires. Nothing counts machines:
+  seats were removed in 1.5.1 because they refused the client rather than anyone
+  else, and the refusal looked exactly like an unfinished setup.
 
 ## The UI is the user's
 

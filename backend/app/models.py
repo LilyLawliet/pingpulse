@@ -180,50 +180,7 @@ class AccessToken(Base):
     # Useful operationally: shows whether an issued token was ever picked up.
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # A licence is for one person and their team, not for passing around. Each
-    # machine that uses the token claims a seat; once they are all claimed, a
-    # new machine is refused rather than silently sharing the licence.
-    max_devices: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=3, server_default="3"
-    )
-
     user: Mapped["User | None"] = relationship()
-    devices: Mapped[list["TokenDevice"]] = relationship(
-        back_populates="access_token", cascade="all, delete-orphan"
-    )
-
-
-class TokenDevice(Base):
-    """One machine that has used a token.
-
-    The desktop app generates a random id on first run and stores it locally,
-    so the same installation keeps its seat across restarts while a copy of the
-    token pasted on another machine asks for a new one.
-
-    This is a licence control, not a security boundary: a determined user can
-    clear their local id. It stops casual sharing — a token forwarded to five
-    colleagues — which is what it is for.
-    """
-
-    __tablename__ = "token_devices"
-    __table_args__ = (
-        UniqueConstraint("token", "device_id", name="uq_token_device"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
-    token: Mapped[str] = mapped_column(
-        String(128),
-        ForeignKey("access_tokens.token", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    device_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    label: Mapped[str | None] = mapped_column(String(120))
-
-    first_seen_at: Mapped[datetime] = _now_column()
-    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    access_token: Mapped["AccessToken"] = relationship(back_populates="devices")
 
 
 class Organization(Base):

@@ -194,32 +194,34 @@ async def test_signup_endpoint_is_gone(client):
     assert response.status_code == 404
 
 
-# -------------------------------------------------------------- seat limits
+# ------------------------------------------------------- a licence is a date
 @pytest.mark.asyncio
-async def test_the_same_machine_keeps_its_seat_across_sign_ins(client, db_session):
-    """Reopening the app must not consume another seat."""
-    record = await _token(db_session)
-    headers = {"X-PingPulse-Device": "machine-one"}
+async def test_one_token_works_from_as_many_machines_as_you_like(client, db_session):
+    """Seats are gone. A licence is the token and the date it runs out.
 
-    for _ in range(3):
+    Counting machines never stopped a token being passed around - the device
+    id lived in the client's own storage and clearing it minted a new one -
+    and it did refuse the client themselves, on a second browser or a fresh
+    laptop, with a 403 the dashboard could not tell apart from an unfinished
+    setup.
+    """
+    record = await _token(db_session)
+
+    for _ in range(12):
         response = await client.post(
-            "/api/v1/auth/login", json={"token": record.token}, headers=headers
+            "/api/v1/auth/login", json={"token": record.token}
         )
         assert response.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_a_licence_refuses_more_machines_than_it_covers(client, db_session):
-    """The point of the feature: a token forwarded around stops working.
-
-    The message has to say why, or the client just sees the app refusing to
-    open with no explanation.
-    """
+async def test_an_old_client_still_sending_a_device_id_is_not_refused(
+    client, db_session
+):
+    """Desktop builds from before this send the header until they update."""
     record = await _token(db_session)
-    record.max_devices = 2
-    await db_session.flush()
 
-    for machine in ("laptop", "desktop"):
+    for machine in ("laptop", "desktop", "a-colleagues-laptop"):
         response = await client.post(
             "/api/v1/auth/login",
             json={"token": record.token},
@@ -227,44 +229,15 @@ async def test_a_licence_refuses_more_machines_than_it_covers(client, db_session
         )
         assert response.status_code == 200, f"{machine} should have been allowed"
 
-    third = await client.post(
-        "/api/v1/auth/login",
-        json={"token": record.token},
-        headers={"X-PingPulse-Device": "a-colleagues-laptop"},
-    )
-
-    assert third.status_code == 403
-    assert "already in use on 2 device" in third.json()["detail"]
-
 
 @pytest.mark.asyncio
-async def test_requests_without_a_device_id_still_work(client, db_session):
-    """Scripts, curl and health checks must not need to claim a seat."""
+async def test_expiry_is_still_what_ends_a_licence(client, db_session):
+    """The one thing a licence does say, and the only thing left enforcing it."""
     record = await _token(db_session)
+    record.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    await db_session.flush()
 
     response = await client.post("/api/v1/auth/login", json={"token": record.token})
 
-    assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_seats_are_per_token_not_global(client, db_session):
-    """One client filling their seats must not lock another client out."""
-    first = await _token(db_session)
-    first.max_devices = 1
-    second = await _token(db_session)
-    await db_session.flush()
-
-    await client.post(
-        "/api/v1/auth/login",
-        json={"token": first.token},
-        headers={"X-PingPulse-Device": "shared-machine-name"},
-    )
-
-    response = await client.post(
-        "/api/v1/auth/login",
-        json={"token": second.token},
-        headers={"X-PingPulse-Device": "shared-machine-name"},
-    )
-
-    assert response.status_code == 200
+    assert response.status_code == 401
+    assert "expired" in response.json()["detail"].lower()
