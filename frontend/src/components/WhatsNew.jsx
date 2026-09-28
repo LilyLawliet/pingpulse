@@ -12,6 +12,68 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.5.6',
+    date: '29 September 2026',
+    items: [
+      {
+        title: 'When it doesn’t know, it says so and tells you',
+        body:
+          'A customer asking something none of your documents cover — "do you ship to '
+          + 'Dubai?", "is this BPA-free?" — used to get a slow "could you tell me a little '
+          + 'more?". Now the agent stops guessing, you get an alert with their question, '
+          + 'and they are told it has gone to the team. That sentence is only sent if an '
+          + 'alert address or device is really set up; otherwise they get the email or '
+          + 'phone number written in your own documents. Every one of those alerts is a '
+          + 'gap in your documents worth filling.',
+      },
+      {
+        title: 'Replies come back faster',
+        body:
+          'The whole reply now has one deadline. The second AI provider is only tried if '
+          + 'there is time left for it, and past the deadline you get the answer worked out '
+          + 'from your documents rather than a longer wait. Reading the message and '
+          + 'searching your documents both give up early and fall back to the fast path, '
+          + 'which used to add over a minute on a slow connection.',
+      },
+      {
+        title: 'You are told when the AI stops answering',
+        body:
+          'If neither AI provider responds, customers still get an answer built from your '
+          + 'documents — and now you are told it is happening, once per cool-off rather '
+          + 'than once per message. Before this, nothing said so: the replies quietly got '
+          + 'worse and nobody knew why.',
+      },
+      {
+        title: 'Booking can be tried in Test agent',
+        body:
+          'Ask for a time in Test agent and it offers real free times from your diary; '
+          + 'reply with one and it books it — exactly as on WhatsApp, then undone, so '
+          + 'nothing is kept. Without opening hours it tells you what a live customer '
+          + 'would have been told, and whether anyone would have been alerted.',
+      },
+      {
+        title: 'Price lists from every trade read correctly',
+        body:
+          '"Rs. 2,500" is one price, not the end of a sentence. Leader dots in a salon '
+          + 'menu are not a full stop. Per-kilo and per-litre prices are rates, so half a '
+          + 'kilo is half the price. "From $9,500" stays a starting price and is said as '
+          + 'one. A line holding two services is read as two. Rules — "an extra Rs 2,000", '
+          + '"Otherwise Rs 150" — are no longer read as products.',
+      },
+      {
+        title: 'It follows how customers actually write',
+        body:
+          'Roman Urdu numbers ("do kg", "teen packets") count when a unit or product '
+          + 'follows, so "do you have" is still a question. "aur" joins two things in one '
+          + 'order. Ladies/women, guests/heads and one-letter typos still find the right '
+          + 'product. "Show me what you have" now shows the things you have pictures of, '
+          + 'nearest to whatever was mentioned, instead of asking them to say more. A '
+          + 'place none of your documents mention goes to the team rather than being '
+          + 'answered with another city’s rules.',
+      },
+    ],
+  },
+  {
     version: '1.5.5',
     date: '29 September 2026',
     items: [
