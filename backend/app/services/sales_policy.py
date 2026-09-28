@@ -252,6 +252,10 @@ _COMMON = {
     "please", "tell", "make", "anything", "everything", "was", "were", "only", "today",
     "now", "after", "before", "into", "over", "than", "when", "been", "some", "more", "i'll",
     "i'm", "don't", "it's", "fine", "okay", "yes", "sure", "thanks",
+    # Words every passage shares with every question: "What items do you
+    # have?" was answered with the returns policy because it says "items".
+    "item", "items", "thing", "things", "product", "products", "stuff", "you",
+    "your", "which", "who", "why", "where", "there", "their", "have", "has", "had",
 }
 
 

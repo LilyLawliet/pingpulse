@@ -664,6 +664,18 @@ async def process_inbound_message(
             "contact_id": str(contact.id),
         }
 
+    # It is decided: the agent answers this one. The customer sees their
+    # message read and "typing…" until the reply lands, instead of a grey
+    # tick and silence. In the background, so it costs the reply nothing.
+    asyncio.create_task(
+        whatsapp.show_typing(
+            channel,
+            phone_number,
+            (contact.contact_metadata or {}).get("wa_jid"),
+            payload.message_sid,
+        )
+    )
+
     # ---- Step 1: understand the message before answering it -------------
     analysis = await analyzer.analyse(history, body, contact.sales_stage)
 

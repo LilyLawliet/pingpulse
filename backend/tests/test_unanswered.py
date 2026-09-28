@@ -225,3 +225,37 @@ async def test_the_shop_is_told_when_the_ai_stops_answering(db_session, monkeypa
     )
     await process_inbound_message(db_session, payload)
     assert "ai_down" in raised
+
+
+# ---------------------------------------------------------------- one bad sentence
+@pytest.mark.asyncio
+async def test_one_bad_sentence_is_dropped_not_the_whole_reply(monkeypatch):
+    """The image offer used to cost a second call and, failing twice, the fallback."""
+    calls = []
+
+    async def groq(prompt):
+        calls.append(prompt)
+        return "10 HelioMax 550 W panels come to PKR 318,000. Shall I send over product images for your review?"
+
+    monkeypatch.setattr(llm_service, "_call_groq", groq)
+    result = await llm_service.generate_reply(
+        None, None, [], "10 of the 550W panels?", knowledge="Panel PKR 31,800",
+        known_quantities=[10], photos_available=False,
+    )
+    assert len(calls) == 1, "a retry was spent on one sentence"
+    assert result.text == "10 HelioMax 550 W panels come to PKR 318,000."
+
+
+@pytest.mark.asyncio
+async def test_a_reply_that_is_mostly_wrong_is_still_asked_again(monkeypatch):
+    replies = iter([
+        "It is PKR 999. Our team will get back to you.",
+        "The panel is PKR 31,800.",
+    ])
+
+    async def groq(prompt):
+        return next(replies)
+
+    monkeypatch.setattr(llm_service, "_call_groq", groq)
+    result = await llm_service.generate_reply(None, None, [], "price?", knowledge="Panel PKR 31,800")
+    assert result.text == "The panel is PKR 31,800."

@@ -87,6 +87,34 @@ async def _send_via_qr_session(
     return True, str(data.get("id") or "qr-session")
 
 
+async def show_typing(channel, to_number: str, to_jid: str | None, message_id: str | None) -> None:
+    """Blue ticks and "typing…" while the agent writes its reply. Never raises.
+
+    Only the WhatsApp Web bridge can show these; on Twilio this does nothing.
+    Called only once it is decided the agent will answer, so "typing…" never
+    promises a reply to somebody a person has taken over from. A slow bridge
+    costs the reply nothing: this gives up after two seconds.
+    """
+    if channel is None or provider_of(channel) != QR_SESSION:
+        return
+    payload = {
+        "sessionId": str(getattr(channel, "id", "") or ""),
+        "to": (to_number or "").replace("whatsapp:", "").strip(),
+        "toJid": to_jid or None,
+        "messageId": message_id or None,
+        "state": "composing",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=2) as client:
+            await client.post(
+                f"{settings.wa_qr_service_url.rstrip('/')}/presence",
+                json=payload,
+                headers={"X-PingPulse-Bridge": settings.wa_qr_shared_secret},
+            )
+    except Exception as exc:  # noqa: BLE001 - cosmetic, never at the cost of a reply
+        logger.debug("typing indicator not shown: %s", exc)
+
+
 async def send_message(
     channel,
     to_number: str,

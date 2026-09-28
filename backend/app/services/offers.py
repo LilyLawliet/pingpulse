@@ -217,10 +217,15 @@ def _stem(word: str) -> str:
         if word.endswith(suffix) and len(word) - len(suffix) >= 4:
             base = word[: -len(suffix)]
             return base[:-1] if len(base) > 4 and base[-1] == base[-2] else base
-    for suffix in ("ies", "es", "s"):
-        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
-            base = word[: -len(suffix)]
-            return base + "y" if suffix == "ies" else base
+    if word.endswith("ies") and len(word) >= 6:
+        return word[:-3] + "y"
+    # "boxes", "dishes", "tomatoes" drop "es"; "cakes", "services", "sponges"
+    # only drop the "s" - stripping "es" from those made "cak" and "servic",
+    # which matched nothing the business wrote in the singular.
+    if word.endswith("es") and len(word) >= 5 and re.search(r"(s|x|z|ch|sh|o)es$", word):
+        return word[:-2]
+    if word.endswith("s") and not word.endswith("ss") and len(word) >= 4:
+        return word[:-1]
     return word
 
 
@@ -268,6 +273,12 @@ class Item:
         detail = self.spec.split(",")[0].strip() if self.spec else ""
         name = self.name if not detail or detail.lower() in self.name.lower() else f"{self.name} {detail}"
         return f"{name} ({self.sku})" if self.sku else name
+
+    @property
+    def plain_label(self) -> str:
+        """The label without the stock code, for a customer to read."""
+        detail = self.spec.split(",")[0].strip() if self.spec else ""
+        return self.name if not detail or detail.lower() in self.name.lower() else f"{self.name} {detail}"
 
     @property
     def unit_word(self) -> str:
@@ -555,6 +566,10 @@ def read_items(documents: Iterable[tuple[str, str]], default_currency: str | Non
             else:
                 items += _text_items(block, currency, source)
 
+    # The same thing read twice - a table row, and a sentence that mentions its
+    # price ("Gift wrapping is PKR 150 per item") - is the table row.
+    tabled = {(i.name.lower(), i.price) for i in items if i.sku or i.spec}
+    items = [i for i in items if i.sku or i.spec or (i.name.lower(), i.price) not in tabled]
     unique: dict[tuple, Item] = {}
     for item in items:
         key = (
@@ -1270,6 +1285,9 @@ class Quote:
     # An order value the customer named themselves - "what if I make it PKR
     # 500,000?" - which the rules were applied to instead of the goods above.
     stated: Decimal | None = None
+    # "What items do you have?": nothing named, so a spread of what is sold.
+    overview: list[Item] = field(default_factory=list)
+    overview_total: int = 0
     # A place they asked about delivering to that nothing the business wrote
     # mentions: "do you ship to Dubai?" is for a person, not for the rules
     # about Karachi.
@@ -1291,7 +1309,7 @@ class Quote:
     def empty(self) -> bool:
         return (
             not self.lines and not self.options and not self.applied and not self.rules
-            and not self.unknown_place
+            and not self.unknown_place and not self.overview
         )
 
     @property
@@ -1361,6 +1379,18 @@ class Quote:
                 )
             out.append("- The order-size rules, already applied (use these exact figures):")
             out += [f"    {line}" for line in self.applied.lines()]
+        if self.overview:
+            more = self.overview_total - len(self.overview)
+            out.append(
+                f"- They asked what you sell. The price list has {self.overview_total} products; "
+                "a spread of them:"
+            )
+            out += [f"    * {item.plain_label}: {item.priced()}" for item in self.overview]
+            out.append(
+                "  Answer with a short overview of the kinds of things sold, name a few of "
+                "these with their prices, and ask what they are looking for."
+                + (f" There are {more} more not listed here; do not invent them." if more > 0 else "")
+            )
         if self.unknown_place:
             out.append(
                 f"- They asked about {self.unknown_place}, which none of this business's "
@@ -1399,6 +1429,14 @@ class Quote:
         if self.empty() or (self.unknown_place and not self.lines):
             return ""
         out: list[str] = []
+        if self.overview:
+            out.append("Here's some of what we have:")
+            out += [f"• {item.plain_label}: {item.priced()}" for item in self.overview]
+            more = self.overview_total - len(self.overview)
+            if more > 0:
+                out.append(f"…and {more} more.")
+            out.append("What are you looking for?")
+            return "\n".join(out)
         for line in self.lines:
             if line.differs:
                 out.append(f"We don't have {line.differs}. The closest we have:")
@@ -1596,6 +1634,51 @@ def _names_the_product(item: Item, wanted: Wanted) -> bool:
     return bool(typed) and f"{number} {typed.group(1)}" in _plain(item.name).lower()
 
 
+_EVERYTHING = re.compile(
+    r"\bwhat\b.{0,30}\b(items?|products?|things|stuff|options|services|do you (?:have|sell|offer|do|make)"
+    r"|(?:have|sell|offer) you got|you (?:have|sell|offer|got))\b"
+    r"|\b(catalogu?e|catalog|menu|price ?list|rate ?list|full list|your collection|your range|all (?:your )?(?:items|products))\b"
+    r"|\bkya kya\b|\bsab kuch\b|\bkya milta\b|\bkya bechte\b",
+    re.IGNORECASE,
+)
+
+
+_BROWSE_WORDS = {
+    "item", "product", "thing", "stuff", "option", "service", "catalogue", "catalog", "menu",
+    "range", "collection", "full", "rate", "what", "which", "do", "you", "kya", "sab", "kuch",
+    "bechte", "have", "sell", "offer", "got", "show", "see", "send", "list", "available", "right",
+    "now", "today", "currently", "kya", "hai", "milta", "hain", "aap", "apke", "ke", "pas",
+    "your", "shop", "store", "please", "everything", "all",
+}
+
+
+def _asks_for_everything(message: str) -> bool:
+    return bool(_EVERYTHING.search(_plain(message or "")))
+
+
+def _spread(items: list[Item], limit: int = 8) -> list[Item]:
+    """A few of everything rather than the first rows of the table.
+
+    Picked one per kind of thing, by the last word of the name ("Notebook",
+    "Pens", "Cake"), in the order the business listed them, then filled up.
+    """
+    chosen: list[Item] = []
+    kinds: set[str] = set()
+    for item in items:
+        kind = (re.findall(r"[a-z]+", _plain(item.name).lower()) or [""])[-1]
+        if kind not in kinds:
+            kinds.add(kind)
+            chosen.append(item)
+        if len(chosen) >= limit:
+            return chosen
+    for item in items:
+        if item not in chosen:
+            chosen.append(item)
+        if len(chosen) >= limit:
+            break
+    return chosen
+
+
 def _not_this(item: Item, text: str) -> str:
     """The kind they asked for, when this item is only the same sort of thing.
 
@@ -1699,6 +1782,18 @@ def quote(message: str, items: list[Item], context: str = "") -> Quote:
             result.lines.append(line)
         else:
             result.options.append((wanted, matches))
+
+    # "What items do you have?", "send me your menu", "kya kya milta hai":
+    # nothing named, so show a spread of what there is rather than nothing.
+    if not result.lines and not result.options and _asks_for_everything(message):
+        # "What do you have in pink?" - the rest of what they said narrows it.
+        narrowing = words(message) - {_stem(w) for w in _BROWSE_WORDS}
+        pool = items
+        if narrowing:
+            pool = [i for i in items if narrowing & i.haystack_words()]
+        if pool:
+            result.overview = _spread(pool)
+            result.overview_total = len(pool)
 
     # "Mani pedi dono ka kitna?", "price for both": each of the matches is
     # wanted, not a choice between them.

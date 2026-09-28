@@ -980,16 +980,9 @@ async def generate_reply(
         and not is_roman_urdu(customer_said)
     )
 
-    async def guard(text: str, call) -> str:
-        """Reject a reply quoting a price the business does not actually list.
-
-        One corrective retry, then give up rather than send a wrong number to
-        a customer — a made-up price is a commitment the shop has to honour.
-        """
+    def problems_in(text: str) -> list[str]:
+        """Everything in this reply the record does not support, said as a correction."""
         problems: list[str] = []
-
-        if needs_team(text) is not None:
-            return text
 
         # Only the price check is behind the price-guard flag. The handoff and
         # language checks are about what the agent is allowed to say at all,
@@ -1097,8 +1090,56 @@ async def generate_reply(
                 "rewrite the same reply in English"
             )
 
+        return problems
+
+    def repaired(text: str) -> str | None:
+        """The reply without the sentences that broke a rule, if the rest stands.
+
+        Most refusals are one sentence - "Shall I send you pictures?", "our
+        team will get back to you" - in an otherwise right answer. Asking the
+        model again cost seconds and, failing twice, sent the customer the
+        fallback instead of a good answer minus one line. A wrong language is
+        not one sentence, and is not repaired.
+        """
+        if expects_english and (is_roman_urdu(text) or opens_in_urdu(text)):
+            return None
+        bad_amounts = unexplained(text) if settings.price_guard_enabled else set()
+        parts = [p for p in re.split(offers.SENTENCE_END + r"|\n+", text) if p.strip()]
+        kept = []
+        for part in parts:
+            figures = {_normalise_amount(str(v)) for v in offers.amounts(part)}
+            if figures & bad_amounts:
+                continue
+            others = [
+                problem for problem in problems_in(part)
+                if not problem.startswith("you quoted ")
+            ]
+            if others:
+                continue
+            kept.append(part.strip())
+        dropped = len(parts) - len(kept)
+        candidate = " ".join(kept).strip()
+        if not kept or dropped > max(1, len(parts) // 2) or len(candidate) < 25:
+            return None
+        return candidate if not problems_in(candidate) else None
+
+    async def guard(text: str, call) -> str:
+        """Send a reply only if the record supports everything in it.
+
+        A reply with one unsupported sentence goes out without that sentence.
+        Otherwise one corrective retry, then give up rather than send a wrong
+        number to a customer - a made-up price is a commitment the shop has to
+        honour.
+        """
+        if needs_team(text) is not None:
+            return text
+        problems = problems_in(text)
         if not problems:
             return text
+        fixed = repaired(text)
+        if fixed:
+            logger.info("reply repaired by dropping what broke a rule (%s)", "; ".join(problems))
+            return fixed
 
         logger.warning("reply rejected (%s) — regenerating", "; ".join(problems))
         corrections.append("; also ".join(problems))
@@ -1107,7 +1148,11 @@ async def generate_reply(
         )
         if needs_team(corrected) is not None:
             return corrected
-
+        if not problems_in(corrected):
+            return corrected
+        fixed = repaired(corrected)
+        if fixed:
+            return fixed
         still = unexplained(corrected) if settings.price_guard_enabled else set()
         if still:
             raise RuntimeError(

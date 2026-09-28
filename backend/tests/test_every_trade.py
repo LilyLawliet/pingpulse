@@ -181,3 +181,36 @@ def test_aur_joins_two_lines_of_an_order():
     assert {(l.item.name, l.quantity) for l in result.lines} == {
         ("Chiffon Dupatta", 2), ("Khaddar Kurta", 1)
     }
+
+
+# ---------------------------------------------------------------- "what do you have?"
+@pytest.mark.parametrize(
+    "kind, message, includes, excludes",
+    [
+        ("salon", "what services do you offer?", "Keratin treatment", None),
+        ("bakery", "send me your menu", "Red velvet cake", None),
+        ("grocer", "kya kya milta hai?", "Tomatoes", None),
+        ("clothing", "What items do you have?", "Khaddar Kurta", None),
+        ("gym", "what do you have", "Monthly membership", None),
+    ],
+)
+def test_what_do_you_have_is_answered_from_the_list(kind, message, includes, excludes):
+    reply = offers.quote(message, _items(kind)).reply()
+    assert includes in reply, reply
+    assert "What are you looking for?" in reply
+
+
+def test_what_do_you_have_is_narrowed_by_the_rest_of_the_question():
+    reply = offers.quote("what cakes do you have?", _items("bakery")).reply()
+    assert "Chocolate fudge cake" in reply and "Red velvet cake" in reply
+    assert "Brownies" not in reply and "Cupcakes" not in reply
+    books = offers.quote("what books do you have?", _items("salon")).reply()
+    assert books == "", "a salon has no books, and none are listed"
+
+
+def test_a_generic_word_does_not_pick_an_unrelated_passage():
+    class Chunk:
+        content = "Unused items in their original packaging can be exchanged within 7 days of delivery."
+
+    reply = sales_policy.deterministic_reply({}, [Chunk()], None, message="What items do you have?")
+    assert "exchanged" not in reply

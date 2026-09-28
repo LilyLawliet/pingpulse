@@ -593,6 +593,62 @@ async function awaitReady(sessionId) {
   return null
 }
 
+// "typing…" while the agent works on a reply, kept up until the reply goes.
+// WhatsApp drops a composing state after roughly 25 seconds, so it is renewed;
+// it is also given up after a minute, so a reply that never comes does not
+// leave the customer watching "typing…" forever.
+const typing = new Map()
+
+function stopTyping(jid) {
+  const timer = typing.get(jid)
+  if (timer) clearInterval(timer)
+  typing.delete(jid)
+}
+
+/**
+ * Show the customer the message was read and a reply is being written.
+ *
+ * Called by the API only once it has decided the agent WILL answer - not for
+ * an opted-out customer or a chat a person has taken over, where "typing…"
+ * would promise a reply that is not coming. Never fails the caller.
+ */
+app.post('/presence', async (request, response) => {
+  const { sessionId, to, toJid, messageId, state } = request.body || {}
+  // Only an open connection: typing is not worth waiting for one.
+  const socket = ready.has(sessionId) ? sessions.get(sessionId) : null
+  if (!socket) return response.json({ ok: false, error: 'session not connected' })
+  const jid = toJid || `${String(to).replace(/[^0-9]/g, '')}@s.whatsapp.net`
+  try {
+    if (messageId) {
+      // Blue ticks: the shop has seen it.
+      await socket.readMessages([{ remoteJid: jid, id: messageId, fromMe: false }])
+    }
+    stopTyping(jid)
+    if (state === 'composing') {
+      await socket.presenceSubscribe(jid).catch(() => {})
+      await socket.sendPresenceUpdate('composing', jid)
+      const started = Date.now()
+      typing.set(
+        jid,
+        setInterval(() => {
+          if (Date.now() - started > 60000) {
+            stopTyping(jid)
+            socket.sendPresenceUpdate('paused', jid).catch(() => {})
+            return
+          }
+          socket.sendPresenceUpdate('composing', jid).catch(() => {})
+        }, 10000),
+      )
+    } else {
+      await socket.sendPresenceUpdate('paused', jid)
+    }
+    response.json({ ok: true })
+  } catch (error) {
+    log.warn({ error: error.message }, 'presence update failed')
+    response.json({ ok: false, error: error.message })
+  }
+})
+
 app.post('/send', async (request, response) => {
   const { sessionId, to, toJid, body, mediaUrls } = request.body || {}
   const socket = await awaitReady(sessionId)
@@ -607,6 +663,8 @@ app.post('/send', async (request, response) => {
     // only works for plain phone-number chats, and silently addresses nobody
     // for a @lid chat.
     const jid = toJid || `${String(to).replace(/[^0-9]/g, '')}@s.whatsapp.net`
+    // The reply is here: "typing…" ends with it.
+    stopTyping(jid)
     let sent
 
     if (mediaUrls?.length) {
