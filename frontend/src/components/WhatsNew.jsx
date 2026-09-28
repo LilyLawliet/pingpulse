@@ -12,6 +12,39 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.5.0',
+    date: '28 September 2026',
+    items: [
+      {
+        title: 'Type where you are, in your own words',
+        body:
+          'The timezone was a list of four hundred names spelt the way the timezone '
+          + 'database spells them, which is not how anyone thinks of where their shop is. '
+          + 'It is a box now: type Karachi, Lahore, UAE, Miami, Texas, Asia/Dubai or UTC+5 '
+          + 'and it works out which zone you mean and saves it by itself — there is no Save '
+          + 'button to forget. The time there is shown underneath, so a wrong one is obvious '
+          + 'before it books anybody. A slip like "Karachy" offers Asia/Karachi rather than '
+          + 'guessing, and something genuinely ambiguous is never guessed at all.',
+      },
+      {
+        title: 'A step ticks the moment it saves',
+        body:
+          'Saving a step used to leave it saying it was not done for a second or two while '
+          + 'everything was checked again from scratch. The tick, the banner, the count in '
+          + 'the sidebar and the lock now all move as soon as the save is confirmed, and the '
+          + 'check that follows settles it.',
+      },
+      {
+        title: 'Delete a contact',
+        body:
+          'Details on a conversation now ends with Delete contact. It asks once more, names '
+          + 'the person, and says exactly what goes: every message, their appointments and '
+          + 'their place on the board, with no undo. If they had asked not to be messaged it '
+          + 'says so first, because deleting them forgets that they asked.',
+      },
+    ],
+  },
+  {
     version: '1.4.9',
     date: '28 September 2026',
     items: [
