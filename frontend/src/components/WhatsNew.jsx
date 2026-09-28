@@ -12,6 +12,42 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.5.2',
+    date: '29 September 2026',
+    items: [
+      {
+        title: 'It quotes from your price list, and does the sums',
+        body:
+          'Upload a price list and ask it what ten of something costs, and you now get ten '
+          + 'of something costed. It reads every priced row of your table — by what the '
+          + 'column headings mean, not where they sit — along with the sale unit each '
+          + 'product comes in. Ask for 20 metres of a cable sold as a 100 m coil and it says '
+          + 'so, and prices the coil, rather than inventing a per-metre rate. Price lists you '
+          + 'uploaded before this are understood without uploading them again.',
+      },
+      {
+        title: 'Why a real price list used to get you nothing',
+        body:
+          'The check that stops the agent inventing prices only recognised amounts with a '
+          + 'currency written in front of them. A table headed "Unit Price (PKR)" writes each '
+          + 'row as a bare number, so none of its prices counted — and no total ever could, '
+          + 'because ten times a price is not written in any document. Correct answers were '
+          + 'being thrown away and replaced with "could you tell me a little more about what '
+          + 'you are looking for?". The check now follows the arithmetic instead of '
+          + 'forbidding it, and an invented figure is still refused.',
+      },
+      {
+        title: 'Test agent shows its working',
+        body:
+          'Under each reply it now lists the product it matched, the unit that product is '
+          + 'sold in, and the sums the answer was built from — so you can catch a row read '
+          + 'wrongly before a customer does. If neither AI provider answered it says '
+          + '"answered without AI" rather than just "fallback", and uploading a file now '
+          + 'reports how many priced products it found in it.',
+      },
+    ],
+  },
+  {
     version: '1.5.1',
     date: '28 September 2026',
     items: [
