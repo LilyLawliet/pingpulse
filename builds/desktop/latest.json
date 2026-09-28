@@ -1,11 +1,11 @@
 {
-  "version": "1.5.4",
-  "notes": "It no longer says it is sending pictures it has not got: the product list it was given claimed photos were attached whenever anything matched, so it said 'here are the photos' and nothing went out. It is now told what is actually attached and stopped if it says otherwise. It also cannot promise an invoice or a price cut on your behalf unless a person was really alerted. Mixed orders are read a sentence at a time, so ten of one thing is no longer priced as ten of another.",
-  "pub_date": "2026-09-28T21:07:15+00:00",
+  "version": "1.5.5",
+  "notes": "A picture in a row of your Word price list is now kept as that product's photo, and the agent can send it when a customer asks to see the thing. A photo column with nothing typed under it used to shift every row's prices one column left; that is fixed. Counting the pieces in a pack is priced in packs: 20 gel pens of a pack of 10 is 2 packs. Delivery charged by place uses the city the customer named, or gives each charge and asks. An advance-payment rule is no longer read as a discount. And it no longer loses a count because the product's name has a number in it, or says it does not stock something it does sell.",
+  "pub_date": "2026-09-28T22:10:24+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjhuRWlvc2tFeWlDQ0xFU0c2clZqZ0pDQW1FUVp1MTRHc29BWlNpUDNpUWVMQXRCKy93aGRhRFRkMmpsdjllZ0JPRGRlK0Z0T0NFSFZKVUk0cC91b1FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjI5NjM0CWZpbGU6UGluZ1B1bHNlXzEuNS40X3g2NC1zZXR1cC5leGUKbjdyM3N0NXhZaXdDNlFvNDVWWEt5N1NhMWFqRXRDbmpTV0k0eWo1NGplbVJyYU1TelIxdXg0SjlobnAyUlh0WDZXSnhMNzErRlZ5YmkxQWFHWHFZREE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.4_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMnlodmdFcGwxdFViQjA3d0QxdmE4SDNYTkFhaHJYZ1VYazlZWi9MWGRKZ0Rtc1lTc0lNdFM3NFY5MURPM01Tbm55WDR5dURpRXlLbHFacTRmcEJDTEEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjMzNDIzCWZpbGU6UGluZ1B1bHNlXzEuNS41X3g2NC1zZXR1cC5leGUKQnVtVUp0SHFhalNJaDdqN1Mzbi9UNXYwYkRqKzJnNnRGbmpibi9ZQm80cUpzdlhQcDZORmQ2cFErMzZ6OU5EUGJvRWEzR0FZQjNpT3BXUkVJOUlxREE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.5_x64-setup.exe"
     }
   }
 }
