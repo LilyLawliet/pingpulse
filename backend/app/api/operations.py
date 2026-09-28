@@ -36,9 +36,11 @@ from app.services import (
     booking,
     handover_signals,
     llm_service,
+    offers,
     oplog,
     pipelines,
     retrieval,
+    sales_policy,
     trade_defaults,
     whatsapp,
     ws_manager,
@@ -757,8 +759,23 @@ async def simulate(
             "knowledge_used": [chunk.title for chunk in chunks],
         }
 
+    # The same price reading a real customer's message gets. A sandbox that
+    # skipped it tested a different agent: this is where "20 m of cable" is
+    # read against a 100 m coil, and where the totals come from.
+    offer = await offers.for_turn(db, organization, message, history)
+    if offer.prompt_block():
+        knowledge = "\n\n".join(filter(None, [knowledge, offer.prompt_block()]))
+
     generation = await llm_service.generate_reply(
-        organization, pretend, history, message, knowledge=knowledge
+        organization,
+        pretend,
+        history,
+        message,
+        knowledge=knowledge,
+        known_prices=offer.prices,
+        known_quantities=offer.quote.quantities(),
+        last_resort=offer.reply()
+        or sales_policy.deterministic_reply({}, chunks, organization, message=message),
     )
     return {
         "reply": generation.text,
@@ -767,6 +784,9 @@ async def simulate(
         "latency_ms": generation.latency_ms,
         "fallback_used": generation.fallback_used,
         "knowledge_used": [chunk.title for chunk in chunks],
+        # How the price list was read for this message, so a shop can see
+        # which product and which sums the answer was built on.
+        "quote": offers.as_dict(offer.quote),
         "sent": False,
     }
 

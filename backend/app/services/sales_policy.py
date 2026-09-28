@@ -153,6 +153,7 @@ def deterministic_reply(
     organization: Any = None,
     products: list[Any] | None = None,
     booking_url: str | None = None,
+    message: str = "",
 ) -> str:
     """What to send when both providers are down.
 
@@ -170,6 +171,15 @@ def deterministic_reply(
         return (
             "Happy to set up a call. What day and time suit you, and I'll get it in "
             "the diary?"
+        )
+
+    # A greeting is answered with a greeting. With no model to phrase one,
+    # this used to read out whichever passage scored highest - for "Hello",
+    # half a returns policy starting in the middle of a word.
+    if _only_greeting(message):
+        name = getattr(organization, "name", None)
+        return (
+            f"Hello, and welcome{' to ' + name if name else ''}. What can I help you with today?"
         )
 
     # A product question is answered with products, not with whatever policy
@@ -192,7 +202,7 @@ def deterministic_reply(
 
     if knowledge_chunks:
         best = knowledge_chunks[0]
-        body = getattr(best, "content", "") or ""
+        body = _from_a_sentence_start(getattr(best, "content", "") or "")
         # Keep it to a WhatsApp-sized answer.
         sentences = re.split(r"(?<=[.!?])\s+", body.strip())
         answer = " ".join(sentences[:3]).strip()
@@ -212,3 +222,30 @@ def deterministic_reply(
         "Could you tell me a little more about what you're looking for, and I'll "
         "check exactly what we have?"
     )
+
+
+_GREETING = re.compile(
+    r"^\s*(?:hi+|hello+|hey+|hiya|salam|salaam|assalam(?:u|o)?\s*o?\s*alaikum|aoa|"
+    r"good\s+(?:morning|afternoon|evening|day)|greetings|yo|namaste|marhaba)"
+    r"(?:\s+(?:there|team|all|everyone|sir|madam|bro))?[\s!.,?]*$",
+    re.IGNORECASE,
+)
+
+
+def _only_greeting(message: str) -> bool:
+    """Whether the message says hello and nothing else."""
+    return bool(message) and bool(_GREETING.match(message))
+
+
+def _from_a_sentence_start(body: str) -> str:
+    """Drop the tail of a sentence a passage begins inside.
+
+    Passages overlap so that a fact on a boundary can be found from either
+    side, which means one can start part-way through a word.
+    """
+    text = body.strip()
+    if text and not (text[0].isupper() or text[0].isdigit()):
+        cut = re.search(r"\n\s*\n|(?<=[.!?])\s+(?=[A-Z0-9])", text)
+        if cut:
+            text = text[cut.end():].strip()
+    return text

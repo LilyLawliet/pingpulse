@@ -72,7 +72,13 @@ export default function KnowledgeSettings({ onChanged }) {
     for (const file of chosen) {
       try {
         const result = await api.uploadKnowledge(file)
-        done.push(`${result.filename}: ${result.passages_indexed} passage(s)`)
+        // Products with prices are what the agent can quote from, so the
+        // count is what says whether a price list was actually understood.
+        const products =
+          result.products_found > 0
+            ? `${result.products_found} product${result.products_found === 1 ? '' : 's'} with prices`
+            : 'no priced products found'
+        done.push(`${result.filename}: ${products}, ${result.passages_indexed} passage(s)`)
         indexed += result.passages_indexed || 0
         // What the file filled in - hours, services, areas - decides whether
         // the agent can book at all and what it says it does. Far too big to

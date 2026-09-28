@@ -19,6 +19,7 @@ from app.schemas_tenancy import (
     RetrievedChunk,
 )
 from app.services import (
+    offers,
     agent_config,
     catalogue,
     document_facts,
@@ -235,6 +236,10 @@ async def upload_document(
         "passages_indexed": len(stored),
         "characters": len(extracted.text),
         "from_document": facts,
+        # How many priced products were understood, so a shop can see at once
+        # whether its table was read - a price list that yields none is one
+        # the agent will not be able to quote from.
+        "products_found": len(offers.read_items([(file.filename or "document", extracted.text)])),
     }
 
 

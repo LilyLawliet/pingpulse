@@ -127,10 +127,22 @@ export default function AgentSandbox() {
               ) : (
                 <div className="w-fit max-w-[85%] rounded-2xl rounded-bl-md bg-panel-2 px-4 py-2.5">
                   <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{turn.reply}</p>
+                  <QuoteRead quote={turn.quote} />
                   <p className="mt-1.5 flex flex-wrap items-center gap-x-2 font-mono text-[11px] text-faint">
                     <span>{turn.provider}</span>
                     <span>{turn.latency_ms}ms</span>
-                    {turn.fallback_used && <span className="text-warn">fallback</span>}
+                    {turn.fallback_used && (
+                      <span
+                        className="text-warn"
+                        title={
+                          turn.provider === 'none'
+                            ? 'Neither AI provider answered, so this reply was put together directly from your setup and documents.'
+                            : 'The first AI provider failed; the second one answered.'
+                        }
+                      >
+                        {turn.provider === 'none' ? 'answered without AI' : 'fallback'}
+                      </span>
+                    )}
                     {turn.knowledge_used?.length > 0 && (
                       <span>read: {turn.knowledge_used.join(', ')}</span>
                     )}
@@ -166,6 +178,37 @@ export default function AgentSandbox() {
           </button>
         </footer>
       </div>
+    </div>
+  )
+}
+
+/**
+ * How the price list was read for this message: the product it matched, the
+ * unit it is sold in, and the sums the reply was allowed to use. Shown so a
+ * shop can see why the agent said what it said - and spot a row read wrongly
+ * before a customer does.
+ */
+function QuoteRead({ quote }) {
+  if (!quote || (!quote.lines?.length && !quote.options?.length)) return null
+  return (
+    <div className="mt-2 space-y-1 rounded-xl border border-edge bg-panel px-3 py-2 text-[11px] leading-relaxed text-dim">
+      <p className="font-semibold text-faint">From your price list</p>
+      {quote.lines.map((line) => (
+        <p key={line.item}>
+          <span className="text-ink">{line.item}</span> — sold as {line.sold_as} at {line.price}
+          {line.total && line.units ? `; ${line.units} = ${line.total}` : ''}
+        </p>
+      ))}
+      {quote.options.map((choices) => (
+        <p key={choices.join('|')}>
+          Could be any of: <span className="text-ink">{choices.join(', ')}</span>
+        </p>
+      ))}
+      {quote.subtotal && (
+        <p>
+          Subtotal <span className="text-ink">{quote.subtotal}</span> before tax and delivery
+        </p>
+      )}
     </div>
   )
 }

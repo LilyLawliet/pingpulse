@@ -18,6 +18,7 @@ from app.models import SENDER_CUSTOMER, SENDER_OPERATOR, Contact, Message, Organ
 from app.services import agent_config
 from app.schemas import GenerationResult
 from app.services import booking
+from app.services import offers
 from app.services import sales_policy
 
 logger = logging.getLogger(__name__)
@@ -379,7 +380,9 @@ def describe_state(
 def reply_rules(state_rules: list[str]) -> str:
     base = [
         "Write one WhatsApp message in plain text — no markdown, no bullet points, no headings.",
-        "One to three sentences. Under 45 words. Crisp, not chatty.",
+        "One to three sentences. Under 45 words. Crisp, not chatty. The one exception: when "
+        "PRICE FACTS lists several products or order lines, give each its own short line with "
+        "its figure, still with no markdown.",
         "Answer the question they actually asked in the FIRST sentence. Propose the next "
         "step after that, never before.",
         "No preamble and no filler — skip \"great question\", \"I'd be happy to help\", "
@@ -387,7 +390,8 @@ def reply_rules(state_rules: list[str]) -> str:
         "Never paste catalogue or website copy. Name the product, give its price, and say "
         "one useful thing about it in your own words.",
         "Sound like a real person who works here, not a script or a chatbot.",
-        "Never invent a product, price, size or promise that is not in the business rules.",
+        "Never invent a product, price, size or promise that is not in the business rules, "
+        "the knowledge or PRICE FACTS. Totals come from PRICE FACTS or from sums you show.",
         "End with one clear next step, unless they have already agreed to one.",
     ]
     lines = [f"- {rule}" for rule in state_rules + base]
@@ -770,8 +774,16 @@ async def generate_reply(
     did_cancel: bool = False,
     did_move: bool = False,
     handoff_allowed: bool = False,
+    known_prices: Iterable[Any] = (),
+    known_quantities: Iterable[Any] = (),
 ) -> GenerationResult:
-    """Build the prompt, try Groq, fall back to Gemini, and time both attempts."""
+    """Build the prompt, try Groq, fall back to Gemini, and time both attempts.
+
+    `known_prices` are the business's own prices read out of its documents,
+    and the sums worked out from them for this message (see `offers`);
+    `known_quantities` are the amounts the customer asked for. Together they
+    are what lets a reply show a total without the guard refusing it.
+    """
     prompt = build_prompt(
         organization, contact, history, latest_message, knowledge, memory_block, policy_block
     )
@@ -805,6 +817,31 @@ async def generate_reply(
             if str(getattr(message, "sender", "")).lower() == "user"
         ]
     )
+    # What the guard accepts, and what it can work a figure out from.
+    #
+    # It used to accept only amounts written with a currency in front of them,
+    # word for word. A price table whose header says "Unit Price (PKR)" writes
+    # every row as a bare "31,800", so none of its prices counted - and no
+    # total ever could, because 10 x PKR 31,800 is not written anywhere. Every
+    # catalogue answer was refused, retried, refused again, and replaced with
+    # "could you tell me a little more?".
+    listed = offers.amounts(price_corpus) | {
+        value for value in (offers.to_decimal(str(p)) for p in known_prices) if value
+    }
+    quantities = offers.asked_quantities([customer_said]) | {
+        value for value in (offers.to_decimal(str(q)) for q in known_quantities) if value
+    }
+    rates = offers.percentages(price_corpus)
+
+    def unexplained(text: str) -> set[str]:
+        if not listed:
+            # No price list at all: nothing to check against, as before.
+            return set()
+        return {
+            _normalise_amount(str(value))
+            for value in offers.unexplained(text, listed, quantities, rates)
+        }
+
     expects_english = (
         (getattr(organization, "default_language", None) or "en").split("-")[0].lower() == "en"
         and not is_roman_urdu(customer_said)
@@ -823,11 +860,12 @@ async def generate_reply(
         # not about price accuracy, and turning off price checking must not
         # quietly turn those off too.
         if settings.price_guard_enabled:
-            bad = unsupported_prices(text, price_corpus)
+            bad = unexplained(text)
             if bad:
                 problems.append(
                     "you quoted " + ", ".join(sorted(bad)) + " which is NOT in the price "
-                    "list; quote only exact figures from the price list above, or omit it"
+                    "list and does not follow from it; quote only the figures in PRICE "
+                    "FACTS and the knowledge above, and show the sum for any total"
                 )
 
         # Promises with no digits in them. Same rule as the prices above: the
@@ -900,7 +938,7 @@ async def generate_reply(
             prompt + "\n\nCORRECTION: " + "; also ".join(problems) + ". Rewrite the reply."
         )
 
-        if unsupported_prices(corrected, price_corpus):
+        if settings.price_guard_enabled and unexplained(corrected):
             raise RuntimeError("reply still quoted an unlisted price")
         if settings.price_guard_enabled and unsupported_promises(corrected, price_corpus):
             raise RuntimeError("reply still promised something the business has not offered")

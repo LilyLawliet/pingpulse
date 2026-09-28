@@ -41,6 +41,7 @@ from app.services import (
     customer_memory,
     llm_service,
     media_service,
+    offers,
     product_search,
     retrieval,
     sales_policy,
@@ -830,6 +831,16 @@ async def process_inbound_message(
         )
     knowledge = "\n\n".join(filter(None, [knowledge, *extra_blocks]))
 
+    # The price list, read and worked out for this message: which products,
+    # in which sale units, how many, and the sums. The model is handed the
+    # figures instead of being left to do the arithmetic, the guard accepts
+    # them, and if both providers are down they are the reply.
+    offer = (
+        None if booking_only else await offers.for_turn(db, organization, body, history)
+    )
+    if offer and offer.prompt_block():
+        knowledge = "\n\n".join(filter(None, [knowledge, offer.prompt_block()]))
+
     generation = await llm_service.generate_reply(
         organization,
         contact,
@@ -845,13 +856,18 @@ async def process_inbound_message(
         did_cancel=appointment_turn.cancelled,
         did_move=appointment_turn.moved,
         handoff_allowed=handed_to_a_person,
+        known_prices=offer.prices if offer else (),
+        known_quantities=offer.quote.quantities() if offer else (),
         # If both providers are down the customer still gets a real answer built
         # from retrieved facts — never a promise that a human will call back.
-        last_resort=sales_policy.deterministic_reply(
+        # A worked-out quote comes first: it is the answer to what they asked.
+        last_resort=(offer.reply() if offer and offer.reply() else None)
+        or sales_policy.deterministic_reply(
             analysis, chunks, organization, products,
             booking_url=scheduling.booking_link(
                 organization.name, contact.name, phone_number
             ),
+            message=body,
         ),
     )
 
