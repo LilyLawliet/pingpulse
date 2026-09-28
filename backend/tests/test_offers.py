@@ -528,3 +528,58 @@ async def test_rules_are_quoted_in_the_currency_they_are_written_in(org_a, monke
     )
     reply = response.json()["reply"]
     assert "PKR 381,600" in reply and "free" in reply and "USD" not in reply
+
+
+# ---------------------------------------------------------------- pictures
+def test_the_product_list_says_whether_photos_are_really_going():
+    from app.models import KnowledgeDocument
+    from app.services import product_search
+
+    product = KnowledgeDocument(title="Brogue", content="", attributes={"price": "15500"}, media_urls=[])
+    assert "NO photos" in product_search.as_prompt_block([product], photos_attached=False)
+    assert "ARE attached" in product_search.as_prompt_block([product], photos_attached=True)
+
+
+@pytest.mark.asyncio
+async def test_a_reply_may_not_say_it_is_sending_pictures_it_is_not(monkeypatch):
+    replies = iter(["Here are the photos of the 550 W panel.", "The 550 W panel is PKR 31,800."])
+
+    async def groq(prompt):
+        return next(replies)
+
+    monkeypatch.setattr(llm_service, "_call_groq", groq)
+    result = await llm_service.generate_reply(
+        Organization(name="Northstar", sales_prompt="Sell well."), None, [], "show me the panel",
+        photos_attached=False,
+    )
+    assert result.text == "The 550 W panel is PKR 31,800."
+
+
+@pytest.mark.asyncio
+async def test_a_reply_may_mention_pictures_that_are_going(monkeypatch):
+    async def groq(prompt):
+        return "Here are the photos of the brogue."
+
+    monkeypatch.setattr(llm_service, "_call_groq", groq)
+    result = await llm_service.generate_reply(
+        Organization(name="Shoes", sales_prompt="Sell well."), None, [], "show me", photos_attached=True
+    )
+    assert result.provider == "groq" and "photos" in result.text
+
+
+@pytest.mark.asyncio
+async def test_an_uploaded_price_list_is_not_offered_as_matching_products(org_a, db_session):
+    from app.services import product_search
+
+    await _upload_catalogue(org_a)
+    # Uploaded as "product" on purpose: that is what used to leak through.
+    data = _docx(["Solar panels in stock."], [["Product", "Price"], ["HelioMax Solar Panel", "PKR 31,800"]])
+    await org_a._client.post(
+        "/api/v1/knowledge/upload",
+        headers=org_a.headers,
+        files={"file": ("panels.docx", data, "application/octet-stream")},
+        data={"doc_type": "product"},
+    )
+    import uuid as _uuid
+    found = await product_search.find_products(db_session, _uuid.UUID(org_a.organization_id), "solar panel price")
+    assert found == [], [p.title for p in found]

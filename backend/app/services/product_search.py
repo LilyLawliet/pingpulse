@@ -168,7 +168,15 @@ async def find_products(
             KnowledgeDocument.doc_type == "product",
         )
     )
-    products = result.scalars().all()
+    # Catalogue entries only: an imported product has its price or pictures
+    # as fields. A price list uploaded as "product" is stored as passages of
+    # text, which offered as "matching products" read as a page of the
+    # document with a title like "Price List (3/7)". Those are read by
+    # offers.py instead, row by row.
+    products = [
+        p for p in result.scalars().all()
+        if (p.attributes or {}).get("price") or p.media_urls
+    ]
     if not products:
         return []
 
@@ -192,12 +200,23 @@ def media_for(products: list[KnowledgeDocument], per_product: int = 1) -> list[s
     return urls
 
 
-def as_prompt_block(products: list[KnowledgeDocument]) -> str:
-    """Describe the matches so the reply can name them and quote real prices."""
+def as_prompt_block(products: list[KnowledgeDocument], photos_attached: bool = False) -> str:
+    """Describe the matches so the reply can name them and quote real prices.
+
+    Whether photos go out with this reply is said as a fact, from what is
+    actually attached. The header used to say "these photos are attached to
+    your reply" whenever products matched - including when the customer had
+    not asked for pictures and when the products had none - so the agent told
+    people to look at pictures that were never sent.
+    """
     if not products:
         return ""
 
-    lines = ["=== MATCHING PRODUCTS (these photos are attached to your reply) ==="]
+    lines = [
+        "=== MATCHING PRODUCTS (photos of these ARE attached to your reply) ==="
+        if photos_attached
+        else "=== MATCHING PRODUCTS (NO photos are being sent with this reply) ==="
+    ]
     for product in products:
         attributes = product.attributes or {}
         bits = [product.title]

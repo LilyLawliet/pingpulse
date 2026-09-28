@@ -742,7 +742,12 @@ async def process_inbound_message(
         if products:
             if wants_images:
                 outbound_media = media_service.sendable(product_search.media_for(products))
-            extra = product_search.as_prompt_block(products)
+            extra = product_search.as_prompt_block(products, photos_attached=bool(outbound_media))
+            if wants_images and not outbound_media:
+                extra += (
+                    "\nThey asked to see it, and there is no photo of it to send. Say so in "
+                    "a few words and describe it instead. Never say a picture is attached."
+                )
         else:
             extra = product_search.no_match_note(
                 search_terms, product_search.wanted_attributes(search_terms)
@@ -856,6 +861,8 @@ async def process_inbound_message(
         did_cancel=appointment_turn.cancelled,
         did_move=appointment_turn.moved,
         handoff_allowed=handed_to_a_person,
+        # A reply may only mention pictures it is actually sending.
+        photos_attached=bool(outbound_media),
         known_prices=offer.prices if offer else (),
         known_quantities=offer.quote.quantities() if offer else (),
         # If both providers are down the customer still gets a real answer built

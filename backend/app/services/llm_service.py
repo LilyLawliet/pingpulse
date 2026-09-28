@@ -272,6 +272,29 @@ _NOT_HUMAN = re.compile(
 )
 
 
+# "Here are the pictures", "I've sent you the photos", "see the attached
+# image". Only a claim that a picture is going with this message; "do you
+# have a photo of it?" or "we don't have pictures of that" are fine.
+_PHOTO_SENT = re.compile(
+    r"(?:"
+    r"\bhere(?:'s|\s+is|\s+are)\s+(?:a\s+|the\s+|some\s+|our\s+)?(?:\w+\s+){0,2}"
+    r"(?:photos?|pictures?|pics?|images?|snaps?)\b"
+    r"|\b(?:I|we)(?:'ve|\s+have)?\s+(?:just\s+)?(?:sent|attached|shared)\s+(?:you\s+)?"
+    r"(?:a\s+|the\s+|some\s+)?(?:\w+\s+){0,2}(?:photos?|pictures?|pics?|images?)\b"
+    r"|\b(?:photos?|pictures?|pics?|images?)\s+(?:is|are)\s+(?:attached|above|below|included)\b"
+    r"|\b(?:see|check)\s+(?:the\s+)?(?:attached|photos?|pictures?|images?)\b"
+    r"|\battached\s+(?:photos?|pictures?|images?)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def claims_photos(reply: str) -> str | None:
+    """The phrase in which this reply says it is sending a picture, if any."""
+    found = _PHOTO_SENT.search(reply or "")
+    return found.group(0) if found else None
+
+
 def claims_to_be_human(reply: str) -> str | None:
     """The phrase in which this reply says it is a person, if any."""
     if not reply:
@@ -776,6 +799,7 @@ async def generate_reply(
     handoff_allowed: bool = False,
     known_prices: Iterable[Any] = (),
     known_quantities: Iterable[Any] = (),
+    photos_attached: bool | None = None,
 ) -> GenerationResult:
     """Build the prompt, try Groq, fall back to Gemini, and time both attempts.
 
@@ -906,6 +930,17 @@ async def generate_reply(
         # about. "I am a live team member here" reached a real customer, and
         # the booking guard above only objected to the other half of that
         # sentence.
+        # Pictures, like bookings, may only be announced if they are going
+        # out. None means the caller did not say, which leaves this unchecked.
+        if photos_attached is False:
+            shown = claims_photos(text)
+            if shown:
+                problems.append(
+                    f'you wrote "{shown}", but no picture is being sent with this reply; do '
+                    "not mention photos being sent, and if they asked for one say there is "
+                    "no photo of it to send"
+                )
+
         pretending = claims_to_be_human(text)
         if pretending:
             problems.append(
@@ -956,6 +991,8 @@ async def generate_reply(
             raise RuntimeError("reply still promised something the business has not offered")
         if claims_to_be_human(corrected):
             raise RuntimeError("reply still claimed to be a person")
+        if photos_attached is False and claims_photos(corrected):
+            raise RuntimeError("reply still said a picture was sent when none was")
         if not handoff_allowed and sales_policy.contains_handoff(corrected):
             raise RuntimeError("reply still promised a human follow-up")
         if booking.unverified_claims(

@@ -774,6 +774,8 @@ async def simulate(
         knowledge=knowledge,
         known_prices=offer.prices,
         known_quantities=offer.quote.quantities(),
+        # The sandbox sends nothing, pictures included.
+        photos_attached=False,
         last_resort=offer.reply()
         or sales_policy.deterministic_reply({}, chunks, organization, message=message),
     )
