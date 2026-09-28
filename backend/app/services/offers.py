@@ -1978,8 +1978,17 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
     # "I'm in Karachi" after "how much with delivery?" answers which city.
     if not topics and places & said_words and "delivery" in topics_in(earlier):
         topics = {"delivery"}
-    # "Do you ship to Dubai?" - a place none of the documents mention.
-    if "delivery" in topics_in(message):
+    # "Do you ship to Dubai?" - a place none of the documents mention. Only
+    # where delivery is charged by place and nothing covers the others: a
+    # business whose rule is the same everywhere, or one that wrote a rate
+    # for "the rest of Pakistan", has already answered, and handing that to a
+    # person leaves the commonest question of all unanswered.
+    delivery_rules = [t for t in tiers if t.topic == "delivery"]
+    covers_elsewhere = any(
+        re.search(r"\b(rest|other|others|outside|elsewhere|nationwide|anywhere)\b", t.condition, re.I)
+        for t in delivery_rules if t.condition
+    )
+    if delivery_rules and not covers_elsewhere and "delivery" in topics_in(message):
         everything = _plain(" ".join(text for _, text in texts)).lower()
         for place in re.findall(r"\b(?:to|in|into|at)\s+([A-Z][a-z]{2,})", _plain(message)):
             if place.lower() not in everything and place.lower() not in STOPWORDS:

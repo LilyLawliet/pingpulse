@@ -225,3 +225,73 @@ async def test_the_shop_is_told_when_the_ai_stops_answering(db_session, monkeypa
     )
     await process_inbound_message(db_session, payload)
     assert "ai_down" in raised
+
+
+# ---------------------------------------------- a place the rules do not name
+@pytest.mark.parametrize(
+    "label, rules, asked, expected",
+    [
+        # A flat rule applies wherever they are: it has already answered.
+        (
+            "no places named",
+            "Delivery is free on orders over USD 100, otherwise USD 5.",
+            "do you deliver to Lahore?",
+            None,
+        ),
+        # "the rest of Pakistan" is written for exactly this question.
+        (
+            "a rate for everywhere else",
+            "Delivery within Karachi is PKR 250 for orders below PKR 3,000, and free for "
+            "orders of PKR 3,000 or more. Delivery to the rest of Pakistan is PKR 350 for "
+            "orders below PKR 5,000, and free for orders of PKR 5,000 or more.",
+            "do you deliver to Lahore?",
+            None,
+        ),
+        # Charged by place, nothing covers the others: only a person knows.
+        (
+            "one city only",
+            "Delivery within Karachi is PKR 250 for orders below PKR 3,000, and free for "
+            "orders of PKR 3,000 or more.",
+            "do you ship to Dubai?",
+            "Dubai",
+        ),
+        (
+            "one city only, another city asked",
+            "Delivery within Karachi is PKR 250 for orders below PKR 3,000, and free for "
+            "orders of PKR 3,000 or more.",
+            "do you deliver to Lahore?",
+            "Lahore",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_place_goes_to_a_person_only_when_the_rules_do_not_reach_it(
+    org_a, label, rules, asked, expected
+):
+    """A shop with one delivery rule for everyone must still answer "to Lahore?".
+
+    Handing that to a person left the commonest delivery question of all
+    unanswered for two live businesses.
+    """
+    from app.database import get_db
+    from app.main import app
+    from app.models import KnowledgeDocument, Organization
+    from app.services import offers, retrieval
+    from sqlalchemy import select
+
+    async for db in app.dependency_overrides.get(get_db, get_db)():
+        org = (
+            await db.execute(select(Organization).where(Organization.id == org_a.organization_id))
+        ).scalars().first()
+        await db.execute(
+            KnowledgeDocument.__table__.delete().where(
+                KnowledgeDocument.organization_id == org.id
+            )
+        )
+        await retrieval.index_document(
+            db, organization_id=org.id, title="Delivery", content=rules, source="rules.txt"
+        )
+        await db.flush()
+        turn = await offers.for_turn(db, org, asked)
+        assert turn.quote.unknown_place == expected, label
+        break
