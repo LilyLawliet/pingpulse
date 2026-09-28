@@ -1,11 +1,11 @@
 {
-  "version": "1.5.2",
-  "notes": "Upload a price list and ask what ten of something costs, and you now get ten of something costed. It reads every priced row of your table along with the sale unit each product comes in, so 20 metres of a cable sold as a 100 m coil is priced as a coil rather than at an invented per-metre rate. The check that stops it inventing prices now follows the arithmetic instead of forbidding it - which is why a real price list used to get nothing but 'could you tell me a little more'. Test agent shows the product and the sums each reply was built on.",
-  "pub_date": "2026-09-28T19:15:14+00:00",
+  "version": "1.5.3",
+  "notes": "Your own discount and delivery rules are now worked out against the actual order instead of left to the AI to notice. An order a rupee short is told so, and told what it would get; where two discounts could apply the better one is used and the next one named. A customer's own figure can be repeated back to them, which is what used to send 'I have an order worth PKR 499,999' round both providers and out the other side. Asking about delivery no longer drags in a product from three turns ago.",
+  "pub_date": "2026-09-28T19:52:54+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjV4Q0NEY1FuZmZFWFpMWFhTZUxybTRwbmhlYnZxUzd6S2wrbVhnN0hzNzBROENsNVdIWDhOK2J4bVlVUmE4ZWdJbTdlSjFSWXBNUW9jWks3b1R1emdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjIyOTEzCWZpbGU6UGluZ1B1bHNlXzEuNS4yX3g2NC1zZXR1cC5leGUKYXNFS3hQckoyd3Y0eHJOT3BQdjJYVkE5OGtzZUp1dHJBWHo0WitwcFZTOXMxTzUySjIvcVhvU0xpc0xZazQxclV2YlQ3aldaaGRQRXAyZisvT3pCQXc9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.2_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMitYVjRYekpPUW9MQWJ6bjJIRW04L3Z3WGtXWlFUMzYzSlZBa3BHVE5wbTNuUHZzcDJnVE5PZTJuN1FVZ3NoVmliWi8zWVhPSWxTM3JwczJtUGtqNmd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjI1MTczCWZpbGU6UGluZ1B1bHNlXzEuNS4zX3g2NC1zZXR1cC5leGUKb05UcWp5RHV2K2NPODN3RmttTURZTW1rTFF1em9iMjlZOFIwcnZ6eE5xWTFYTS9FeHJ4Njd4bm5ycVRzZTZiMkc5OHNWc0liOFo5RmJmQkhPN1pOQ0E9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.3_x64-setup.exe"
     }
   }
 }
