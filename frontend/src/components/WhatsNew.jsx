@@ -12,6 +12,48 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.5.5',
+    date: '29 September 2026',
+    items: [
+      {
+        title: 'A photo in your price list becomes the product’s photo',
+        body:
+          'Put a picture in each row of the price table in a Word file and upload it: the '
+          + 'picture beside a product is now kept as that product’s photo, and the agent can '
+          + 'send it when a customer asks to see the thing. The price is still read once, '
+          + 'from the table. The upload tells you how many products got a photo. A photo '
+          + 'column that had nothing typed under it used to shift every row’s prices one '
+          + 'column left — that is fixed, so those price lists read correctly now.',
+      },
+      {
+        title: 'Counting the pieces in a pack is priced in packs',
+        body:
+          '"20 gel pens" where a pack holds ten is two packs, and 25 is three — with the '
+          + 'reason given, rather than a pack silently split. "3 packs of gel pens" still '
+          + 'counts packs. A measure written per piece — "5 m per roll" in a set of five '
+          + 'rolls — is no longer read as what the whole set holds.',
+      },
+      {
+        title: 'It does not lose a count, or deny something you do sell',
+        body:
+          'A number in a product’s name used to cancel the customer’s count: an order for '
+          + 'four coils of the 4 mm cable stopped being priced at all. And "standard gel '
+          + 'pens" was answered with "we don’t have standard gel", from a shop whose pens '
+          + 'are gel pens. Words about quality or size — regular, modern, thick — no longer '
+          + 'make it say it does not stock something. Asking for a kind you genuinely do not '
+          + 'have still gets a plain "we don’t have that", followed by the closest thing.',
+      },
+      {
+        title: 'Delivery charged by place asks which city',
+        body:
+          'Where your rules charge one rate within your own city and another for the rest of '
+          + 'the country, the agent uses the place the customer named. If they have not said, '
+          + 'it gives both charges and asks — instead of picking one. An advance-payment rule '
+          + '— "orders above PKR 15,000 need 50% advance" — is no longer read as 50% off.',
+      },
+    ],
+  },
+  {
     version: '1.5.4',
     date: '29 September 2026',
     items: [
