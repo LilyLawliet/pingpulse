@@ -65,13 +65,13 @@ def cosine_similarity(left: list[float] | None, right: list[float] | None) -> fl
     return max(-1.0, min(1.0, dot))
 
 
-async def _gemini_embed(text: str, api_key: str) -> list[float]:
+async def _gemini_embed(text: str, api_key: str, timeout: float | None = None) -> list[float]:
     url = GEMINI_EMBED_URL.format(model=settings.embedding_model)
     payload = {
         "model": f"models/{settings.embedding_model}",
         "content": {"parts": [{"text": text}]},
     }
-    async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
+    async with httpx.AsyncClient(timeout=timeout or settings.llm_timeout_seconds) as client:
         response = await client.post(url, json=payload, params={"key": api_key})
         response.raise_for_status()
         data = response.json()
@@ -82,17 +82,26 @@ async def _gemini_embed(text: str, api_key: str) -> list[float]:
     return normalise([float(v) for v in values])
 
 
-async def embed(text: str) -> tuple[list[float], str]:
-    """Return (vector, model_name). Rotates keys, then falls back locally."""
+async def embed(text: str, for_query: bool = False) -> tuple[list[float], str]:
+    """Return (vector, model_name). Rotates keys, then falls back locally.
+
+    A query is embedded while a customer waits, so it gets a short timeout
+    and only a quota error moves on to the next key: trying five keys at
+    twenty seconds each on a slow connection was over a minute and a half
+    before the reply had started.
+    """
     keys = settings.gemini_api_keys
+    timeout = settings.embed_timeout_seconds if for_query else None
     for index, api_key in enumerate(keys, start=1):
         try:
-            return await _gemini_embed(text, api_key), settings.embedding_model
+            return await _gemini_embed(text, api_key, timeout), settings.embedding_model
         except Exception as exc:  # noqa: BLE001
             last = exc
-            if index < len(keys):
+            quota = isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (429, 503)
+            if index < len(keys) and (quota or not for_query):
                 continue
             logger.warning("embedding failed (%s); using the offline fallback", last)
+            break
 
     if not keys:
         logger.debug("no Gemini key configured; using the offline embedding")

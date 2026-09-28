@@ -201,3 +201,6 @@ class GenerationResult(BaseModel):
     latency_ms: int
     fallback_used: bool = False
     error: str | None = None
+    # Set when the agent did not have the answer: what was asked, in a few
+    # words. The caller alerts a person and sends a reply that says so.
+    needs_team: str | None = None

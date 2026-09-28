@@ -32,6 +32,7 @@ from app.schemas import TwilioWebhookPayload
 from sqlalchemy.exc import IntegrityError
 
 from app.services import (
+    unanswered,
     booking,
     agent_config,
     analyzer,
@@ -734,6 +735,21 @@ async def process_inbound_message(
 
     if needs_products:
         products = await product_search.find_products(db, organization.id, search_terms)
+        if not products and wants_images:
+            # "Show me what you have": nothing named, so show a few of the
+            # things that have pictures, nearest to what was said before.
+            products = await product_search.browse(
+                db,
+                organization.id,
+                " ".join(
+                    [search_terms]
+                    + [
+                        getattr(m, "content", "") or ""
+                        for m in list(history)[-6:]
+                        if str(getattr(m, "sender", "")).lower() == "user"
+                    ]
+                ),
+            )
         # Anything they have turned down is dropped before it can be shown.
         products = [
             item
@@ -875,14 +891,23 @@ async def process_inbound_message(
         # from retrieved facts — never a promise that a human will call back.
         # A worked-out quote comes first: it is the answer to what they asked.
         last_resort=(offer.reply() if offer and offer.reply() else None)
-        or sales_policy.deterministic_reply(
-            analysis, chunks, organization, products,
-            booking_url=scheduling.booking_link(
-                organization.name, contact.name, phone_number
-            ),
-            message=body,
+        or sales_policy.without_filler(
+            sales_policy.deterministic_reply(
+                analysis, chunks, organization, products,
+                booking_url=scheduling.booking_link(
+                    organization.name, contact.name, phone_number
+                ),
+                message=body,
+            )
         ),
     )
+
+    # The agent did not have the answer. A person is alerted and the
+    # customer is told what actually happened, instead of a filler question.
+    if generation.needs_team is not None:
+        generation.text = await unanswered.handle(
+            db, organization, contact, generation.needs_team, body
+        )
 
     await manager.broadcast(
         ws_manager.EVENT_GENERATION,

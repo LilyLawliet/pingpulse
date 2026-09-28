@@ -87,7 +87,7 @@ async def search(
     if not documents:
         return []
 
-    query_vector, _ = await embed(query)
+    query_vector, _ = await embed(query, for_query=True)
 
     scored: list[RetrievedChunk] = []
     for document in documents:

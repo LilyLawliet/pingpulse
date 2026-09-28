@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import KnowledgeDocument
 from app.services.analyzer import COLOUR_WORDS
+from app.services.offers import words
 
 logger = logging.getLogger(__name__)
 
@@ -144,15 +145,56 @@ def score_product(document: KnowledgeDocument, wanted: dict[str, list[str]], que
     score += 1.0 * sum(1 for style in wanted["styles"] if _word_in(style, haystack))
     score += 1.0 * sum(1 for piece in wanted["pieces"] if piece in haystack)
 
-    # Any remaining meaningful word from the request is a weak signal.
-    for word in set(re.findall(r"[a-z]{4,}", (query or "").lower())):
-        if _word_in(word, haystack):
-            score += 0.15
+    # The words of the request, for any trade: "notebook", "drill", "bridal".
+    # A word in the product's own name counts most; one anywhere in its
+    # description still counts. Compared by stem, so "notebooks" finds
+    # "Notebook" and "wrapped" finds "wrapping".
+    asked = words(query)
+    named = words(document.title or "")
+    described = words(haystack) - named
+    score += 1.0 * len(asked & named) + 0.3 * len(asked & described)
 
-    # Prefer products that can actually be shown.
+    # Nothing of what they asked is in it: not a match, however showable.
+    if score <= 0:
+        return 0.0
+    # Prefer, among matches, the ones that can actually be shown.
     if document.media_urls:
         score += 0.5
     return score
+
+
+async def browse(
+    db: AsyncSession, organization_id: uuid.UUID, context: str = "", limit: int = 3
+) -> list[KnowledgeDocument]:
+    """Products to show when they asked to see "what you have".
+
+    "Can you show me the pic of what you have right now?" names nothing, so
+    nothing matched, and the reply asked them to say more - from a shop with
+    a dozen photos. Now it shows some: the ones nearest to anything said in
+    the conversation (a colour, a kind of thing), otherwise the first few that
+    have a picture. A colour they asked for is still never swapped for another.
+    """
+    rows = (
+        await db.execute(
+            select(KnowledgeDocument).where(
+                KnowledgeDocument.organization_id == organization_id,
+                KnowledgeDocument.doc_type == "product",
+            )
+        )
+    ).scalars().all()
+    pictured = [p for p in rows if p.media_urls]
+    if not pictured:
+        return []
+    wanted = wanted_attributes(context)
+    if wanted["colours"]:
+        coloured = [p for p in pictured if colour_match(p, wanted["colours"]) > 0]
+        # A colour nobody stocks is said, not substituted.
+        if not coloured:
+            return []
+        pictured = coloured
+    asked = words(context)
+    pictured.sort(key=lambda p: len(asked & words(_haystack(p))), reverse=True)
+    return pictured[:limit]
 
 
 async def find_products(

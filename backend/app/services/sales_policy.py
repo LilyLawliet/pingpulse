@@ -11,7 +11,10 @@ Two things live here that the model is not trusted to decide on its own:
 from __future__ import annotations
 
 import re
+
 from typing import Any
+
+from app.services import offers as offers_text
 
 # Phrases that hand the customer off to a human who is not coming. The agent
 # IS the team; promising a callback is the failure this system exists to fix.
@@ -226,6 +229,22 @@ def deterministic_reply(
     )
 
 
+_FILLER = (
+    "Could you tell me a little more about what you're looking for",
+    "Tell me a bit more about what you're after",
+)
+
+
+def without_filler(reply: str) -> str:
+    """The last resort, unless all it does is ask them to say more.
+
+    Asking a customer to rephrase a question nothing could answer only makes
+    them wait twice. Empty means "nothing was known": the caller alerts a
+    person and says so.
+    """
+    return "" if any((reply or "").startswith(f) for f in _FILLER) else reply
+
+
 _COMMON = {
     "the", "and", "for", "you", "your", "can", "what", "how", "much", "this", "that", "with",
     "have", "need", "want", "give", "will", "would", "about", "are", "did", "does", "any",
@@ -256,7 +275,7 @@ def relevant_sentences(message: str, knowledge_chunks: list[Any], limit: int = 2
     order = 0
     for chunk in knowledge_chunks:
         body = _from_a_sentence_start(getattr(chunk, "content", "") or "")
-        for sentence in re.split(r"(?<=[.!?])\s+|\n+", body):
+        for sentence in re.split(offers_text.SENTENCE_END + r"|\n+", body):
             sentence = sentence.strip()
             if len(sentence.split()) < 5 or "|" in sentence or not sentence[:1].isalnum():
                 continue

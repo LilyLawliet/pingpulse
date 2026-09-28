@@ -5,6 +5,8 @@ Final Prompt = Organization Prompt + Customer Metadata + Chat History + Latest M
 
 from __future__ import annotations
 
+import asyncio
+
 import json
 import re
 import logging
@@ -845,6 +847,39 @@ async def _gemini_once(prompt: str, api_key: str) -> str:
     return text
 
 
+# What the model writes when the answer is not in anything it was given. The
+# backend turns it into an alert to a person and a reply that says so, which
+# is the only honest version of "our team will get back to you".
+_NEEDS_TEAM = re.compile(r"^\W*NEEDS[_ ]TEAM\W*:?\s*(.*)$", re.IGNORECASE | re.DOTALL)
+
+NEEDS_TEAM_RULE = (
+    "IF YOU DO NOT HAVE THE ANSWER: when what they ask is not in the business "
+    "information above and nothing there comes close, do not guess and do not "
+    "promise that anyone will follow up. Reply with exactly one line:\n"
+    "NEEDS_TEAM: <their question in a few words>\n"
+    "and nothing else. The system will alert the team and tell the customer. "
+    "Use this only when you truly have nothing to answer with; a partial "
+    "answer from the information above is always better."
+)
+
+
+def needs_team(text: str) -> str | None:
+    """The question the model could not answer, if it said so."""
+    found = _NEEDS_TEAM.match(text or "")
+    if not found:
+        return None
+    return found.group(1).strip().splitlines()[0][:200] if found.group(1).strip() else ""
+
+
+# Said when nothing was known and nobody could be told. The caller replaces it
+# with "I've passed this to the team" once an alert has actually gone out.
+DONT_KNOW = "I'm sorry, I don't have that information."
+
+
+class _Unanswerable(Exception):
+    """The model asked for a person twice rather than answering."""
+
+
 async def generate_reply(
     organization: Organization | None,
     contact: Contact | None,
@@ -873,6 +908,11 @@ async def generate_reply(
     prompt = build_prompt(
         organization, contact, history, latest_message, knowledge, memory_block, policy_block
     )
+    if not handoff_allowed:
+        prompt = prompt.replace(
+            "=== YOUR REPLY (plain text only) ===",
+            NEEDS_TEAM_RULE + "\n\n=== YOUR REPLY (plain text only) ===",
+        )
 
     # Prices the agent is allowed to quote: the business rules AND whatever was
     # retrieved for this turn. Catalogue prices live in the knowledge base, so
@@ -947,6 +987,9 @@ async def generate_reply(
         a customer — a made-up price is a commitment the shop has to honour.
         """
         problems: list[str] = []
+
+        if needs_team(text) is not None:
+            return text
 
         # Only the price check is behind the price-guard flag. The handoff and
         # language checks are about what the agent is allowed to say at all,
@@ -1038,9 +1081,9 @@ async def generate_reply(
         handoff = None if handoff_allowed else sales_policy.contains_handoff(text)
         if handoff:
             problems.append(
-                f'you wrote "{handoff}"; never promise that a person will follow up, '
-                "answer using the facts above or say plainly what you do not know and "
-                "offer the closest thing you do have"
+                f'you wrote "{handoff}"; never promise that a person will follow up '
+                "yourself. Answer using the facts above; if they are not there, reply "
+                "only NEEDS_TEAM: <their question>"
             )
 
         # An English-speaking tenant whose customer wrote in English must not
@@ -1062,6 +1105,8 @@ async def generate_reply(
         corrected = await call(
             prompt + "\n\nCORRECTION: " + "; also ".join(problems) + ". Rewrite the reply."
         )
+        if needs_team(corrected) is not None:
+            return corrected
 
         still = unexplained(corrected) if settings.price_guard_enabled else set()
         if still:
@@ -1080,7 +1125,10 @@ async def generate_reply(
         if not handoff_allowed and unbacked_commitments(corrected):
             raise RuntimeError("reply still promised a document or a price change")
         if not handoff_allowed and sales_policy.contains_handoff(corrected):
-            raise RuntimeError("reply still promised a human follow-up")
+            # Asked twice for a person rather than answering: it does not
+            # have the answer. Handing to another provider for twenty more
+            # seconds gets the same sentence; a person is what is needed.
+            raise _Unanswerable(latest_message)
         if booking.unverified_claims(
             corrected, appointment=appointment, cancelled=did_cancel, moved=did_move
         ):
@@ -1094,19 +1142,54 @@ async def generate_reply(
     corrections: list[str] = []
 
     started = time.perf_counter()
-    try:
-        text = await guard(await _call_groq(prompt), _call_groq)
+    deadline = started + settings.reply_deadline_seconds
+
+    def left() -> float:
+        return deadline - time.perf_counter()
+
+    def finished(provider: str, text: str, fallback: bool, error: str | None = None) -> GenerationResult:
+        asked = needs_team(text)
         return GenerationResult(
-            provider="groq",
-            text=text,
+            provider=provider,
+            text=DONT_KNOW if asked is not None else text,
             prompt_used=prompt,
             latency_ms=int((time.perf_counter() - started) * 1000),
-            fallback_used=False,
+            fallback_used=fallback,
+            error=error,
+            needs_team=(asked or latest_message[:200]) if asked is not None else None,
         )
-    except Exception as groq_error:  # noqa: BLE001 - any Groq failure triggers fallback
-        logger.warning("Groq generation failed, falling back to Gemini: %s", groq_error)
 
-        fallback_started = time.perf_counter()
+    def gave_up(error: str) -> GenerationResult:
+        # The worked-out answer if there is one; otherwise nothing was known,
+        # and the caller alerts a person rather than sending a filler question.
+        return GenerationResult(
+            provider="none",
+            text=last_resort or DONT_KNOW,
+            prompt_used=prompt,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            fallback_used=True,
+            error=error,
+            needs_team=None if last_resort else latest_message[:200],
+        )
+
+    async def attempt(call, text_prompt: str) -> str:
+        return await guard(await call(text_prompt), call)
+
+    try:
+        text = await asyncio.wait_for(attempt(_call_groq, prompt), max(left(), 1))
+        return finished("groq", text, False)
+    except _Unanswerable:
+        return finished("groq", "NEEDS_TEAM: " + latest_message[:200], False, "asked for a person twice")
+    except Exception as groq_error:  # noqa: BLE001 - any Groq failure triggers fallback
+        groq_reason = str(groq_error) or type(groq_error).__name__
+        # The second provider only if there is time for it: a customer who
+        # has waited the whole budget gets an answer now, not in thirty
+        # seconds.
+        if left() < 5:
+            logger.warning("Groq failed (%s) with no time left for Gemini", groq_reason)
+            return gave_up(f"groq: {groq_reason} | gemini: skipped, out of time")
+        logger.warning("Groq generation failed, falling back to Gemini: %s", groq_reason)
+
         try:
             warned = (
                 prompt + "\n\nBEFORE YOU WRITE: an earlier draft was rejected because "
@@ -1114,27 +1197,14 @@ async def generate_reply(
                 if corrections
                 else prompt
             )
-            text = await guard(await _call_gemini(warned), _call_gemini)
-            return GenerationResult(
-                provider="gemini",
-                text=text,
-                prompt_used=prompt,
-                latency_ms=int((time.perf_counter() - fallback_started) * 1000),
-                fallback_used=True,
-                error=f"groq: {groq_error}",
-            )
+            text = await asyncio.wait_for(attempt(_call_gemini, warned), left())
+            return finished("gemini", text, True, f"groq: {groq_reason}")
+        except _Unanswerable:
+            return finished("gemini", "NEEDS_TEAM: " + latest_message[:200], True, "asked for a person twice")
         except Exception as gemini_error:  # noqa: BLE001 - both providers down
-            logger.error("Gemini fallback also failed: %s", gemini_error)
-            return GenerationResult(
-                provider="none",
-                # Never a handoff promise: the caller composes this from the
-                # knowledge actually retrieved for this question.
-                text=last_resort or sales_policy.deterministic_reply({}, [], organization),
-                prompt_used=prompt,
-                latency_ms=int((time.perf_counter() - started) * 1000),
-                fallback_used=True,
-                error=f"groq: {groq_error} | gemini: {gemini_error}",
-            )
+            reason = str(gemini_error) or type(gemini_error).__name__
+            logger.error("Gemini fallback also failed: %s", reason)
+            return gave_up(f"groq: {groq_reason} | gemini: {reason}")
 
 
 # --------------------------------------------------------------------------

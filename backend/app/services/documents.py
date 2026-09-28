@@ -27,7 +27,10 @@ from __future__ import annotations
 import io
 import logging
 import re
+
 from dataclasses import dataclass, field
+
+from app.services.offers import SENTENCE_END
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +245,7 @@ def chunk(text: str, target: int = TARGET_CHARS, overlap: int = OVERLAP_CHARS) -
 
         # An oversized paragraph is split on sentence ends.
         if len(block) > target:
-            for sentence in re.split(r"(?<=[.!?])\s+", block):
+            for sentence in re.split(SENTENCE_END, block):
                 if len(current) + len(sentence) + 1 > target and current:
                     chunks.append(current)
                     current = current[-overlap:] if overlap else ""

@@ -166,8 +166,11 @@ async def test_a_handoff_promise_is_refused_when_nobody_was_told(monkeypatch):
 
     result = await llm_service.generate_reply(org, contact, [], "can someone call me?")
 
+    # Never sent as written. Asked twice for a person, the model plainly has
+    # no answer: the caller is told so, alerts somebody, and says only that.
     assert "team will" not in result.text
-    assert result.provider == "none"
+    assert result.text == llm_service.DONT_KNOW
+    assert result.needs_team == "can someone call me?"
 
 
 @pytest.mark.asyncio

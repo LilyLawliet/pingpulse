@@ -89,7 +89,7 @@ async def offline_embeddings(monkeypatch):
     """Deterministic vectors — no network, no API keys, stable assertions."""
     from app.services import embeddings
 
-    async def fake_embed(text: str):
+    async def fake_embed(text: str, **_):
         return embeddings.hashed_embedding(text), embeddings.FALLBACK_MODEL
 
     monkeypatch.setattr(embeddings, "embed", fake_embed)

@@ -32,6 +32,8 @@ from app.models import (
     TenantPipeline,
 )
 from app.services import (
+    notifications,
+    unanswered,
     agent_config,
     booking,
     handover_signals,
@@ -779,8 +781,27 @@ async def simulate(
         photos_attached=False,
         photos_available=await product_search.has_photos(db, tenant.id),
         last_resort=offer.reply()
-        or sales_policy.deterministic_reply({}, chunks, organization, message=message),
+        or sales_policy.without_filler(
+            sales_policy.deterministic_reply({}, chunks, organization, message=message)
+        ),
     )
+    # What a real conversation would do when nothing answers the question:
+    # alert a person. The sandbox says so instead of alerting anybody.
+    team = None
+    if generation.needs_team is not None:
+        reachable = await notifications.can_reach(db, organization)
+        generation.text = (
+            unanswered.passed_on(organization)
+            if reachable
+            else unanswered.reach_us(await unanswered.contact_line(db, tenant.id))
+        )
+        team = (
+            "Nothing in your documents answers this. On WhatsApp, you would get an alert "
+            "and the customer would be told the team will reply."
+            if reachable
+            else "Nothing in your documents answers this, and no alert address or device "
+            "is set up - so the customer is not promised a reply. Add one under Alerts."
+        )
     return {
         "reply": generation.text,
         "escalated": False,
@@ -795,6 +816,8 @@ async def simulate(
         # conversation this is only in the logs; here the shop testing its
         # agent can see it.
         "why": generation.error if generation.fallback_used else None,
+        # Set when the agent did not know: what a live chat would do about it.
+        "needs_team": team,
         "sent": False,
     }
 

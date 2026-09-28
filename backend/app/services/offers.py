@@ -52,9 +52,23 @@ CURRENCIES = {
     "inr": "INR", "₹": "INR", "try": "TRY", "ngn": "NGN", "zar": "ZAR",
 }
 _CURRENCY_WORD = r"(?:PKR|Rs\.?|₨|USD|US\$|\$|AED|Dhs|SAR|QAR|OMR|KWD|BHD|GBP|£|EUR|€|INR|₹|TRY|NGN|ZAR)"
-_NUMBER = r"\d[\d,]*(?:\.\d+)?"
+# Thousands written with commas, western or lakh style ("1,000,000",
+# "1,04,999"), or no commas at all. "104999,1 year" in a comma-separated list
+# is 104,999 followed by the next cell, not one million.
+_NUMBER = r"(?:\d{1,3}(?:,\d{2,3})+(?!\d)|\d+)(?:\.\d+)?"
 MONEY_BEFORE = re.compile(rf"({_CURRENCY_WORD})\s*({_NUMBER})", re.IGNORECASE)
 MONEY_AFTER = re.compile(rf"({_NUMBER})\s*({_CURRENCY_WORD})(?![a-z])", re.IGNORECASE)
+
+
+# "Rs. 2,500" is one price, not the end of a sentence and the start of the
+# next. Every splitter keeps these together.
+NOT_A_STOP = (
+    r"(?<![Rr]s\.)(?<![Nn]o\.)(?<![Dd]r\.)(?<![Ss]t\.)(?<![Mm]r\.)(?<![Mm]s\.)(?<!vs\.)"
+    r"(?<!approx\.)(?<!incl\.)(?<!excl\.)(?<!e\.g\.)(?<!i\.e\.)(?<!Dhs\.)"
+    # Leader dots, "Keratin ........ Rs 18,000", do not end anything either.
+    r"(?<!\.\.)"
+)
+SENTENCE_END = NOT_A_STOP + r"(?<=[.!?])\s+"
 
 
 def to_decimal(raw: str) -> Decimal | None:
@@ -94,6 +108,9 @@ MEASURES: dict[str, tuple[str, Decimal]] = {
     "tonnes": ("kg", Decimal(1000)),
     "l": ("l", Decimal(1)), "ltr": ("l", Decimal(1)), "litre": ("l", Decimal(1)),
     "litres": ("l", Decimal(1)), "liter": ("l", Decimal(1)), "liters": ("l", Decimal(1)),
+    "g": ("kg", Decimal("0.001")), "gm": ("kg", Decimal("0.001")), "gms": ("kg", Decimal("0.001")),
+    "gram": ("kg", Decimal("0.001")), "grams": ("kg", Decimal("0.001")),
+    "ml": ("l", Decimal("0.001")),
     "sqm": ("m2", Decimal(1)), "sq m": ("m2", Decimal(1)), "m2": ("m2", Decimal(1)),
     "square meters": ("m2", Decimal(1)), "square metres": ("m2", Decimal(1)),
 }
@@ -118,6 +135,7 @@ WORD_NUMBERS = {
     "a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
     "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
     "fifteen": 15, "twenty": 20, "thirty": 30, "fifty": 50, "hundred": 100, "dozen": 12,
+    "half": Decimal("0.5"), "quarter": Decimal("0.25"),
 }
 
 # A number followed by one of these is a specification, not an amount: 4 mm²
@@ -167,7 +185,23 @@ STOPWORDS = {
 }
 
 
+# Words customers use for the same thing a business wrote differently. Kept to
+# the ones that are the same in every trade: who it is for, and people as a
+# count. Folded before stemming, so "ladies" finds "Haircut (women)" and
+# "120 guests" is counted against a price per head.
+SAME_WORD = {
+    "ladies": "woman", "lady": "woman", "women": "woman", "female": "woman", "females": "woman",
+    "girls": "woman", "gents": "man", "men": "man", "male": "man", "males": "man",
+    "boys": "man", "gentlemen": "man", "kids": "child", "kid": "child", "children": "child",
+    "people": "person", "persons": "person", "guests": "person", "guest": "person",
+    "pax": "person", "heads": "person", "head": "person", "attendees": "person",
+    "teeth": "tooth", "feet": "foot", "mice": "mouse",
+}
+
+
 def _stem(word: str) -> str:
+    if word in SAME_WORD:
+        return SAME_WORD[word]
     # "wrapped", "wrapping" and "wrap" are one word to a customer.
     for suffix in ("ing", "ed"):
         if word.endswith(suffix) and len(word) - len(suffix) >= 4:
@@ -210,6 +244,12 @@ class Item:
     # A count or size stated for the sale unit without saying of what.
     pack: Decimal | None = None
     source: str = ""
+    # Priced by the measure - "Rs 180/kg", "Rs 2,400 per kg" - so any amount
+    # can be bought: half a kilo is half the price, not a whole kilo.
+    by_measure: bool = False
+    # "From $9,500", "starting at Rs 8,000": the lowest it costs, not what it
+    # costs. Said that way, never as a fixed price or a total.
+    starting: bool = False
 
     @property
     def label(self) -> str:
@@ -233,6 +273,17 @@ class Item:
     def haystack_words(self) -> set[str]:
         return words(f"{self.name} {self.spec} {self.sale_unit or ''}")
 
+    def priced(self) -> str:
+        """"PKR 2,500", "PKR 180 per kg", "from USD 9,500": the price as written.
+
+        "Per unit" is said only when the business named a unit; a haircut
+        is not sold "per unit". A starting price is always said as one.
+        """
+        text = money(self.price, self.currency)
+        if self.sale_unit:
+            text += f" per {self.sale_unit}"
+        return f"from {text}" if self.starting else text
+
 
 def _num(value: Decimal) -> str:
     return f"{value.normalize():f}".rstrip("0").rstrip(".") if "." in f"{value:f}" else f"{value:f}"
@@ -247,9 +298,15 @@ def _article_word(word: str) -> str:
     return "an" if word[:1].lower() in "aeiou" else "a"
 
 
+_IRREGULAR = {"tooth": "teeth", "person": "people", "child": "children", "man": "men",
+              "woman": "women", "foot": "feet"}
+
+
 def _plural(word: str, count: Decimal | int) -> str:
     if Decimal(count) == 1:
         return word
+    if word in _IRREGULAR:
+        return _IRREGULAR[word]
     if word.endswith(("s", "x", "ch", "sh")):
         return word + "es"
     if word.endswith("y") and word[-2:-1] not in "aeiou":
@@ -376,18 +433,43 @@ def _table_items(lines: list[str], currency: str | None, source: str) -> list[It
 # A priced phrase in running text: "Classic manicure: AED 90", "Haircut AED 120",
 # "Colour from AED 350 per session".
 _PRICED_PHRASE = re.compile(
-    rf"(?P<name>[A-Za-z][^:\n;|]{{1,80}}?)\s*(?:[:\-–—=]|\bis\b|\bat\b|\bfor\b|\bfrom\b)?\s*"
+    rf"(?P<name>[A-Za-z][^:\n;|]{{1,80}}?)"
+    rf"(?P<lead>(?:\s*(?:[:\-–—=.…]+|\bis\b|\bat\b|\bfor\b|\bfrom\b|\bstarting\b|\bstarts\b|\bonly\b|\bjust\b))*)\s*"
     rf"(?P<money>{_CURRENCY_WORD}\s*{_NUMBER}|{_NUMBER}\s*{_CURRENCY_WORD})"
     rf"(?:\s*(?:/|per|a|an)\s*(?P<unit>[a-z]{{2,12}}))?",
     re.IGNORECASE,
 )
 
 
+# Words a rule is written in, which a product's name is not: "Home service is
+# available in DHA for an extra Rs 2,000", "Otherwise Rs 150".
+_RULE_WORDS = re.compile(
+    r"\b(order|orders|above|below|over|under|minimum|discount|delivery|shipping|"
+    r"extra|additional|otherwise|surcharge|available|advance|deposit|refund|cancell?ation|"
+    r"penalty|late|if|when|unless)\b",
+    re.IGNORECASE,
+)
+# "Hair colour — starting from", "Full bathroom remodel starts at".
+_STARTING_TAIL = re.compile(
+    r"[\s—–\-:.,]*\b(?:starting|starts|start|from|at|only|just|approx|approximately|price|rate|cost)\b[\s.]*$",
+    re.IGNORECASE,
+)
+# "Basmati rice (5 kg bag)", "Milk 1 litre": what one of it holds.
+_SIZE_IN_NAME = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(kg|kgs|g|gm|gms|grams?|l|ltrs?|litres?|liters?|ml)\b"
+    r"\s*(bag|pack|packet|box|bottle|tin|jar|can|sack|pouch|carton|tub)?",
+    re.IGNORECASE,
+)
+
+
 def _text_items(text: str, currency: str | None, source: str) -> list[Item]:
     items = []
-    for segment in re.split(r"[\n;•]|(?<=[.!?])\s+", text or ""):
+    # A line can hold two services side by side: "Manicure - Rs 1,500 |
+    # Pedicure - Rs 2,000". Tables are read before this, so a bar here
+    # separates items.
+    for segment in re.split(r"[\n;•|]|" + SENTENCE_END, text or ""):
         segment = segment.strip(" -*\t")
-        if not segment or "|" in segment:
+        if not segment:
             continue
         found = list(_PRICED_PHRASE.finditer(segment))
         # Several prices in one sentence are usually a rule ("PKR 2,500 below
@@ -395,8 +477,13 @@ def _text_items(text: str, currency: str | None, source: str) -> list[Item]:
         if len(found) != 1:
             continue
         match = found[0]
-        name = re.sub(r"^(?:and|or|the|our|a)\s+", "", match.group("name").strip(" :-–—,."), flags=re.I)
-        if len(words(name)) == 0 or re.search(r"\b(order|orders|above|below|over|under|minimum|fee|charge|discount|delivery)\b", name, re.I):
+        name = re.sub(r"^(?:and|or|the|our|a)\s+", "", match.group("name").strip(" :-–—,.…"), flags=re.I)
+        starting = bool(re.search(r"\b(from|starting|starts|start)\b", match.group("lead") or "", re.I))
+        while (tail := _STARTING_TAIL.search(name)):
+            starting = starting or bool(re.search(r"\b(starting|starts|start|from)\b", tail.group(0), re.I))
+            name = name[: tail.start()].strip(" :-–—,.…")
+        # A sentence is not a product name; a product name is a few words.
+        if len(words(name)) == 0 or _RULE_WORDS.search(name) or len(name.split()) > 7:
             continue
         amount = re.search(_NUMBER, match.group("money"))
         price = to_decimal(amount.group(0)) if amount else None
@@ -404,9 +491,17 @@ def _text_items(text: str, currency: str | None, source: str) -> list[Item]:
             continue
         unit = (match.group("unit") or "").lower() or None
         content = None
+        by_measure = False
         if unit in MEASURES:
             family, factor = MEASURES[unit]
             content, unit = (Decimal(1) * factor, family), MEASURE_NAME.get(family, family)
+            by_measure = True
+        elif unit is None:
+            size = _SIZE_IN_NAME.search(name)
+            if size and size.group(2).lower() in MEASURES:
+                family, factor = MEASURES[size.group(2).lower()]
+                content = (to_decimal(size.group(1)) * factor, family)
+                unit = (size.group(3) or "").lower() or "pack"
         items.append(
             Item(
                 name=name,
@@ -415,6 +510,8 @@ def _text_items(text: str, currency: str | None, source: str) -> list[Item]:
                 sale_unit=unit,
                 content=content,
                 source=source,
+                by_measure=by_measure,
+                starting=starting,
             )
         )
     return items
@@ -491,7 +588,8 @@ def read_request(message: str, nouns: set[str]) -> list[Wanted]:
     clauses = [
         c.strip()
         for c in re.split(
-            r"[;\n]|(?<=[a-z0-9)][.!?])\s+|,\s*(?=\d|a\b|an\b|one\b)|\band\s+(?=\d|a\b|an\b|the\b|one\b)", text, flags=re.I
+            NOT_A_STOP + r"(?<=[a-z0-9)][.!?])\s+"
+            r"|[;\n]|,\s*(?=\d|a\b|an\b|one\b)|\band\s+(?=\d|a\b|an\b|the\b|one\b)", text, flags=re.I
         )
         if c and c.strip()
     ]
@@ -560,11 +658,27 @@ def read_request(message: str, nouns: set[str]) -> list[Wanted]:
 
 
 # ------------------------------------------------------------------ matching
-def score(item: Item, text: str) -> float:
+def _asked_forms(text: str) -> tuple[set[str], set[str], set[str]]:
+    """What the customer typed, three ways: its words, words run together, initials.
+
+    "hair cut" is "Haircut"; "mani pedi" is short for "Manicure" and
+    "Pedicure"; "PT" is "Personal training". People type the way they talk.
+    """
+    plain = _plain(text or "")
+    raw = [w for w in re.findall(r"[a-z][a-z0-9\-]*", plain.lower())]
+    joined = {_stem(a + b) for a, b in zip(raw, raw[1:])}
+    short = {w for w in raw if len(w) >= 4 and w not in STOPWORDS}
+    initials = {w.lower() for w in re.findall(r"\b[A-Z]{2,4}\b", plain)}
+    return joined, short, initials
+
+
+def score(item: Item, text: str, rarity: dict[str, float] | None = None) -> float:
     """How well one item answers one piece of what the customer wrote.
 
     A specification the customer named is decisive both ways: asking for
     550 W and finding 550 W is strong, finding 585 W instead rules it out.
+    A word few products share counts for more than one they all do: in
+    "half kg vanilla cake", "vanilla" says which cake.
     """
     asked_specs = spec_tokens(text)
     item_specs = spec_tokens(f"{item.name} {item.spec}")
@@ -578,9 +692,18 @@ def score(item: Item, text: str) -> float:
         elif same_unit:
             return 0.0
     asked = words(text)
-    name_hits = asked & words(item.name)
+    name_words = words(item.name)
+    joined, short, initials = _asked_forms(text)
+    name_hits = (asked | joined) & name_words
+    # "mani" for "manicure": a start of a name word, four letters or more.
+    name_hits |= {w for w in name_words if w not in name_hits and any(w.startswith(p) and w != p for p in short)}
     detail_hits = (asked & item.haystack_words()) - name_hits
-    total += 1.5 * len(name_hits) + 0.5 * len(detail_hits)
+    weight = lambda w: (rarity or {}).get(w, 1.0)  # noqa: E731
+    total += 1.5 * sum(weight(w) for w in name_hits) + 0.5 * len(detail_hits)
+    acronym = "".join(w[0] for w in re.findall(r"[a-z]+", _plain(item.name).lower()) if w not in STOPWORDS)
+    if initials and any(len(i) >= 2 and acronym.startswith(i) for i in initials):
+        total += 2.0
+        name_hits.add("acronym")
     if not name_hits and total < 10:
         return 0.0
     return total
@@ -588,7 +711,16 @@ def score(item: Item, text: str) -> float:
 
 def best(items: list[Item], text: str) -> list[Item]:
     """The items this text is about: one when it is clear, several when not."""
-    scored = sorted(((score(item, text), item) for item in items), key=lambda p: p[0], reverse=True)
+    # How rare each word is among these items' names: 1 for a word only one
+    # product has, less the more of them share it.
+    counts: dict[str, int] = {}
+    for item in items:
+        for w in words(item.name):
+            counts[w] = counts.get(w, 0) + 1
+    rarity = {w: 1.0 + 1.0 / n for w, n in counts.items()}
+    scored = sorted(
+        ((score(item, text, rarity), item) for item in items), key=lambda p: p[0], reverse=True
+    )
     scored = [(s, item) for s, item in scored if s > 0]
     if not scored:
         return []
@@ -613,9 +745,11 @@ RULE_TOPICS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "payment": (
         ("pay", "payment", "paid", "credit", "advance", "cash on delivery", "cod", "deposit",
          "installment", "instalment", "upfront", "up front", "next month", "net 15", "net 30",
-         "cash", "cheque", "bank transfer"),
+         "cash", "cheque", "bank transfer", "insurance", "card", "visa", "mastercard",
+         "jazzcash", "easypaisa", "installments", "emi"),
         ("payment", "advance", "credit", "deposit", "cash", "installment", "instalment",
-         "upfront", "net 15", "net 30", "net 7", "net 60", "cheque", "bank transfer"),
+         "upfront", "net 15", "net 30", "net 7", "net 60", "cheque", "bank transfer",
+         "insurance", "accept", "card", "jazzcash", "easypaisa"),
     ),
     "returns": (
         ("return", "refund", "exchange", "damaged", "defective", "faulty", "broken",
@@ -683,7 +817,7 @@ _STOP = {
 def _sentences(text: str) -> list[str]:
     return [
         s.strip()
-        for s in re.split(r"(?<=[.!?])\s+|\n+", text or "")
+        for s in re.split(SENTENCE_END + r"|\n+", text or "")
         if len(s.strip()) > 12 and "|" not in s
     ]
 
@@ -1161,7 +1295,7 @@ class Quote:
             asked = f" for {_num(wanted.quantity)} {wanted.counted_as or ''}".rstrip() if wanted.quantity else ""
             out.append(f"- Several products match \"{wanted.text}\"{asked}; list them and ask which one:")
             for item in items:
-                each = f"{money(item.price, item.currency)} per {item.unit_word}"
+                each = item.priced()
                 extra = ""
                 if wanted.quantity and not wanted.measure:
                     extra = f"; {_num(wanted.quantity)} × {money(item.price, item.currency)} = {money(item.price * wanted.quantity, item.currency)}"
@@ -1219,7 +1353,7 @@ class Quote:
         for wanted, items in self.options:
             out.append("We have these:")
             for item in items:
-                bit = f"• {item.label}: {money(item.price, item.currency)} per {item.unit_word}"
+                bit = f"• {item.label}: {item.priced()}"
                 if wanted.quantity and not wanted.measure:
                     bit += f" ({_num(wanted.quantity)} = {money(item.price * wanted.quantity, item.currency)})"
                 out.append(bit)
@@ -1247,21 +1381,70 @@ class Quote:
 def _describe_line(line: Line, for_customer: bool = False) -> str:
     item = line.item
     each = money(item.price, item.currency)
-    head = f"{item.label}: {each} per {item.unit_word}"
-    if item.content:
+    head = f"{item.label}: {item.priced()}"
+    if item.content and not item.by_measure:
         head = f"{item.label}: sold as {item.sold_as()} at {each}"
     if line.note and for_customer:
         return f"{line.note}"
     if line.note:
         return f"{head}. {line.note}"
     if line.quantity and line.total is not None:
-        count = _num(line.units or line.quantity)
-        return f"{head}. {count} {_plural(item.unit_word, line.units or line.quantity)} × {each} = {money(line.total, item.currency)}."
+        count = line.units or line.quantity
+        what = _plural(item.sale_unit, count) if item.sale_unit else ""
+        sum_ = f"{_num(count)} {what}".strip() + f" × {each} = {money(line.total, item.currency)}"
+        if item.starting:
+            # A starting price times a count is where the total starts too.
+            return f"{head}. {sum_} at the least; the final price depends on the job."
+        return f"{head}. {sum_}."
+    if item.starting:
+        return f"{head} (a starting price; the final price depends on the job)."
     return f"{head}."
+
+
+# Periods a plan or membership can be priced by, in days. A year of a monthly
+# plan is twelve months of it.
+PERIODS = {"day": 1, "week": 7, "month": 30, "quarter": 90, "year": 365}
+_PERIOD_MONTHS = {"month": 1, "quarter": 3, "year": 12}
+
+
+def _periods(asked: str, sold: str, quantity: Decimal) -> Decimal | None:
+    """How many of `sold` make `quantity` of `asked`: 1 year of "month" is 12."""
+    a, b = _stem(asked), _stem(sold)
+    if a == b or a not in PERIODS or b not in PERIODS:
+        return None
+    if a in _PERIOD_MONTHS and b in _PERIOD_MONTHS:
+        return quantity * _PERIOD_MONTHS[a] / _PERIOD_MONTHS[b]
+    if {a, b} <= {"day", "week"}:
+        return quantity * PERIODS[a] / PERIODS[b]
+    return None
 
 
 def _line_for(item: Item, wanted: Wanted) -> Line:
     each = money(item.price, item.currency)
+    if wanted.measure and item.by_measure and item.content and item.content[1] == wanted.measure[1]:
+        # Priced by the kilo, the litre, the metre: any amount, at the rate.
+        asked_amount, family = wanted.measure
+        units = asked_amount / item.content[0]
+        total = (units * item.price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        name = MEASURE_NAME.get(family, family)
+        asked_text = f"{_num(wanted.quantity)} {_unit_as_typed(wanted)}".strip()
+        note = f"{item.label} is {each} per {name}: {asked_text} × {each} = {money(total, item.currency)}."
+        if asked_amount != wanted.quantity:
+            note = (
+                f"{item.label} is {each} per {name}: {asked_text} is {_num(units)} {name}, "
+                f"{_num(units)} × {each} = {money(total, item.currency)}."
+            )
+        return Line(item, wanted.quantity, units, total, note)
+    if wanted.quantity and wanted.counted_as and item.sale_unit:
+        periods = _periods(wanted.counted_as, item.sale_unit, wanted.quantity)
+        if periods is not None and periods == periods.to_integral():
+            total = periods * item.price
+            asked = f"{_num(wanted.quantity)} {_plural(_stem(wanted.counted_as), wanted.quantity)}"
+            note = (
+                f"{item.label} is {each} per {item.sale_unit}; {asked} is {_num(periods)} "
+                f"{_plural(item.sale_unit, periods)}: {_num(periods)} × {each} = {money(total, item.currency)}."
+            )
+            return Line(item, wanted.quantity, periods, total, note)
     if wanted.measure:
         asked_amount, family = wanted.measure
         asked_text = f"{_num(wanted.quantity)} {_unit_as_typed(wanted)}"
@@ -1378,6 +1561,8 @@ def _not_this(item: Item, text: str) -> str:
             and _stem(before) not in known
             and before not in STOPWORDS
             and before not in _NOT_A_KIND
+            and before not in MEASURES
+            and before not in WORD_NUMBERS
             and _stem(before) not in set(SALE_UNITS)
         ):
             return f"{before} {noun}"
@@ -1456,6 +1641,15 @@ def quote(message: str, items: list[Item], context: str = "") -> Quote:
             result.lines.append(line)
         else:
             result.options.append((wanted, matches))
+
+    # "Mani pedi dono ka kitna?", "price for both": each of the matches is
+    # wanted, not a choice between them.
+    if result.options and re.search(r"\b(both|dono|donon|all of them|all three|each of them|sab)\b", message or "", re.I):
+        for wanted, matches in result.options:
+            if len(matches) <= 3:
+                for item in matches:
+                    result.lines.append(_line_for(item, wanted))
+        result.options = [(w, m) for w, m in result.options if len(m) > 3]
 
     # In an order that counts things, one named without a number is one of
     # it: "2 notebooks, 25 pens and The Little Cat Café" includes the book.

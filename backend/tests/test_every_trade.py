@@ -1,0 +1,152 @@
+"""Every kind of business we sell to, asked the way its customers ask.
+
+The documents in tests/corpus are written the way owners write them - a table,
+"Item - Rs. 500" lines, a menu, a comma-separated export - and the questions
+the way customers type: shorthand, typos, Roman Urdu, "per head for 60
+people", "half kg". Each expected figure is the owner's own, worked out.
+
+When a client's documents or customers surprise the reader, the fix goes in
+the reader and the case goes here, so every other trade is checked against it
+from then on.
+"""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+import pytest
+
+from app.services import offers, sales_policy
+
+from .corpus.businesses import BUSINESSES
+
+
+def _items(kind):
+    return offers.read_items([(kind, BUSINESSES[kind])])
+
+
+# ---------------------------------------------------------------- reading what they wrote
+@pytest.mark.parametrize(
+    "kind, name, price",
+    [
+        ("salon", "Haircut (women)", "2500"),   # "Rs." with a full stop
+        ("salon", "Keratin treatment", "18000"),  # leader dots
+        ("salon", "Pedicure", "2000"),          # two services on one line
+        ("gym", "Monthly membership", "6000"),
+        ("gym", "Admission fee (one time)", "3000"),
+        ("electronics", "Samsung Galaxy A55 128GB", "104999"),  # comma-separated export
+        ("dentist", "Filling", "150"),          # "Filling: from $150 per tooth"
+        ("grocer", "Basmati rice (5 kg bag)", "2150"),
+    ],
+)
+def test_every_price_is_read_however_it_is_written(kind, name, price):
+    found = {i.name: i.price for i in _items(kind)}
+    assert found.get(name) == Decimal(price), sorted(found)
+
+
+@pytest.mark.parametrize(
+    "kind, not_a_product",
+    [("salon", "Home service"), ("grocer", "Otherwise"), ("bakery", "Minimum order")],
+)
+def test_a_rule_is_not_read_as_a_product(kind, not_a_product):
+    assert not any(i.name.startswith(not_a_product) for i in _items(kind))
+
+
+def test_a_starting_price_stays_a_starting_price():
+    remodel = {i.name: i for i in _items("remodel")}
+    assert remodel["Wet room conversion"].starting
+    assert remodel["Full bathroom remodel"].starting, "'starts at' is a starting price too"
+    assert not remodel["Vanity replacement"].starting
+    reply = offers.quote("how much for a walk-in shower?", _items("remodel")).reply()
+    assert "from USD 6,800" in reply
+
+
+# ---------------------------------------------------------------- asking the way people ask
+@pytest.mark.parametrize(
+    "kind, message, total",
+    [
+        ("bakery", "2 kg chocolate fudge cake price", "4800"),
+        ("bakery", "1.5kg red velvet?", "4200"),         # priced per kg: any amount
+        ("bakery", "half kg vanilla cake", "950"),        # the rare word picks the cake
+        ("bakery", "can I get 500g chocolate cake", "1200"),
+        ("bakery", "2 dozen cupcakes", "3600"),
+        ("grocer", "half kg onions", "70"),
+        ("grocer", "10 kg basmati rice", "4300"),         # 5 kg bags
+        ("grocer", "2 litres milk", "440"),
+        ("catering", "silver menu for 60 people", "108000"),
+        ("catering", "gold menu 120 guests total?", "312000"),  # guests are heads
+        ("saas", "starter for a year?", "348"),           # 12 months
+        ("gym", "5 PT sessions price", "12500"),          # PT is personal training
+        ("dentist", "filling price for 3 teeth", "450"),  # teeth are tooths
+        ("clothing", "2 kurtas how much", "6900"),
+        ("electronics", "2 anker chargers", "6998"),
+    ],
+)
+def test_the_amount_asked_for_is_worked_out(kind, message, total):
+    result = offers.quote(message, _items(kind))
+    assert result.options == [], [i.label for _, m in result.options for i in m]
+    assert [line.total for line in result.lines] == [Decimal(total)], result.reply()
+
+
+@pytest.mark.parametrize(
+    "kind, message, name",
+    [
+        ("salon", "hair cut price for ladies", "Haircut (women)"),   # two words, a synonym
+        ("salon", "kitne ka hai keratin?", "Keratin treatment"),      # Roman Urdu
+        ("salon", "bridal makeup rate plz", "Bridal makeup package"),
+        ("electronics", "redmi note 13 kitne ka", "Xiaomi Redmi Note 13 256GB"),
+        ("electronics", "galaxy a55 price", "Samsung Galaxy A55 128GB"),
+        ("dentist", "root canal $$?", "Root canal (molar)"),
+        ("clothing", "dupatta ki price?", "Chiffon Dupatta"),
+        ("remodel", "2 vanities installed", "Vanity replacement"),
+    ],
+)
+def test_the_product_is_found_however_it_is_asked_for(kind, message, name):
+    result = offers.quote(message, _items(kind))
+    assert [line.item.name for line in result.lines] == [name], result.reply()
+
+
+def test_both_means_both():
+    result = offers.quote("mani pedi dono ka kitna?", _items("salon"))
+    assert {line.item.name for line in result.lines} == {"Manicure", "Pedicure"}
+
+
+def test_a_service_is_not_priced_per_unit():
+    reply = offers.quote("how much is a cleaning", _items("dentist")).reply()
+    assert "USD 95" in reply and "per unit" not in reply
+
+
+def test_a_measure_word_is_not_a_kind_of_product():
+    assert offers.quote("2 litres milk", _items("grocer")).lines[0].differs == ""
+
+
+# ---------------------------------------------------------------- the rules around the goods
+@pytest.mark.parametrize(
+    "kind, message, expected",
+    [
+        ("bakery", "delivery charges?", "Rs 300 within Karachi"),
+        ("clothing", "COD available?", "Cash on delivery available"),
+        ("dentist", "do you accept insurance?", "Cigna"),
+        ("salon", "advance for bridal?", "50% advance"),
+        ("catering", "how much advance to book?", "30% advance"),
+    ],
+)
+def test_the_terms_are_quoted_from_what_they_wrote(kind, message, expected):
+    rules = offers.rules_for(message, [(kind, BUSINESSES[kind])])
+    assert any(expected in rule for rule in rules), rules
+
+
+@pytest.mark.parametrize(
+    "kind, message, expected",
+    [
+        ("salon", "do u do home service", "Home service"),
+        ("remodel", "is the estimate free?", "Free in-home estimate"),
+        ("saas", "free trial?", "free trial"),
+    ],
+)
+def test_with_no_model_the_answer_is_the_sentence_that_answers(kind, message, expected):
+    class Chunk:
+        content = BUSINESSES[kind]
+
+    reply = sales_policy.deterministic_reply({}, [Chunk()], None, message=message)
+    assert expected.lower() in reply.lower(), reply

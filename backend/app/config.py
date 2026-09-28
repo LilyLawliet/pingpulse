@@ -39,8 +39,21 @@ class Settings(BaseSettings):
 
     embedding_model: str = "gemini-embedding-001"
     groq_model: str = "llama-3.3-70b-versatile"
-    gemini_model: str = "gemini-1.5-pro"
+    # The 1.5 models are being retired; a retired name 404s on every call and
+    # turns every fallback into a failure. Flash, because the fallback only
+    # runs when a customer is already waiting.
+    gemini_model: str = "gemini-3.8-flash"
     llm_timeout_seconds: int = 20
+    # The whole reply, from the first provider call to the text: past this the
+    # customer gets the worked-out answer or an honest "passed to the team"
+    # rather than a longer wait for a second provider.
+    reply_deadline_seconds: int = 14
+    # Reading the message before answering. Past this, the keyword reading is
+    # used - it is nearly as good and costs nothing.
+    analyzer_timeout_seconds: int = 5
+    # Turning the question into a vector for retrieval. Past this, keyword
+    # scoring alone finds the passages.
+    embed_timeout_seconds: int = 4
 
     # Reject a reply that quotes a price absent from the business's price list.
     price_guard_enabled: bool = True
