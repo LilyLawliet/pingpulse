@@ -1,11 +1,11 @@
 {
-  "version": "1.5.1",
-  "notes": "Your licence is now the access token and the date it expires, and nothing else. It used to count machines as well: each computer that signed in took one of a fixed number of seats, and once they were gone the next was refused - which never stopped a token being passed around, it only ever refused you. Use your token on as many of your own machines as you like.",
-  "pub_date": "2026-09-28T16:05:32+00:00",
+  "version": "1.5.2",
+  "notes": "Upload a price list and ask what ten of something costs, and you now get ten of something costed. It reads every priced row of your table along with the sale unit each product comes in, so 20 metres of a cable sold as a 100 m coil is priced as a coil rather than at an invented per-metre rate. The check that stops it inventing prices now follows the arithmetic instead of forbidding it - which is why a real price list used to get nothing but 'could you tell me a little more'. Test agent shows the product and the sums each reply was built on.",
+  "pub_date": "2026-09-28T19:15:14+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjY1MnFhckF4Wm91NjBlOGZUMENuTzZRWW5pWWdiMlN2MDV1cUdwaFlkWE45dnFzTU82U21SdG14dmpaY0QrUS9icmxmQkhzS1BhcmtwaEdrd1ZwR1F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjExNTMxCWZpbGU6UGluZ1B1bHNlXzEuNS4xX3g2NC1zZXR1cC5leGUKdTMweE9rTTFyVnlMdlhzSmtxM2VGL0tTdUtZY2lYMnJYN21oekZhZHlMdk1pUXV5dUt2Y2hTZGhJbWh0N0g2QWQ4NWUyeFNzTjVma3VlU2l5SDliQXc9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjV4Q0NEY1FuZmZFWFpMWFhTZUxybTRwbmhlYnZxUzd6S2wrbVhnN0hzNzBROENsNVdIWDhOK2J4bVlVUmE4ZWdJbTdlSjFSWXBNUW9jWks3b1R1emdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjIyOTEzCWZpbGU6UGluZ1B1bHNlXzEuNS4yX3g2NC1zZXR1cC5leGUKYXNFS3hQckoyd3Y0eHJOT3BQdjJYVkE5OGtzZUp1dHJBWHo0WitwcFZTOXMxTzUySjIvcVhvU0xpc0xZazQxclV2YlQ3aldaaGRQRXAyZisvT3pCQXc9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.2_x64-setup.exe"
     }
   }
 }
