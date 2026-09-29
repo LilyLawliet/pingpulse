@@ -1434,11 +1434,22 @@ class TurnResult:
         return self.performed == "moved"
 
 
+# What a meeting is called. Trade words are deliberately absent: "wholesale",
+# "distributor", "b2b" and "partnership" are what a trade supplier sells, not a
+# request to talk about it, and a wholesaler's customers say them all day. Read
+# as meeting requests they turned "can I get the wholesale price list" into a
+# video call and skipped the questions the shop asks before sending anybody
+# out. They count when the customer attaches them to a conversation - "a
+# wholesale call", "a partnership chat". "Teams" is the same problem with a
+# capital T nobody types: it is Microsoft's product only where it is used like
+# one, never "we supply 3 teams".
 _MEETING = re.compile(
     r"\b(meetings?|meet (up|with|you|your team)|demos?|walk-?through|discovery call|sales call|"
-    r"intro(ductory)? call|video call|zoom|google meet|teams|"
+    r"intro(ductory)? call|video call|zoom|google meet|"
+    r"(ms |microsoft )?teams (call|meeting|link)|(on|over|via) (ms |microsoft )?teams|"
     r"(have|set up|arrange|jump on|hop on|get on|book|schedule) a (quick |short )?(phone |video )?call|phone call|"
-    r"partnership|wholesale|distributor|reseller|b2b|pricing call|onboarding)\b",
+    r"(partnership|wholesale|distribution|distributor|reseller|b2b|pricing|onboarding) "
+    r"(call|chat|meeting|discussion))\b",
     re.IGNORECASE,
 )
 _VIDEO = re.compile(r"\b(video|zoom|google meet|meet link|teams|online|screen ?share|demo)\b", re.IGNORECASE)

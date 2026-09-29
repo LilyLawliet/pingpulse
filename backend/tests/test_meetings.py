@@ -333,3 +333,41 @@ async def test_a_calendar_that_cannot_be_read_is_not_saved(org_a, monkeypatch):
         "/api/v1/calendar/connection", json={"busy_calendar_url": "http://example.com/cal.ics"}
     )
     assert plain.status_code == 422
+
+
+# --------------------------------------------- what counts as a meeting
+@pytest.mark.parametrize(
+    "text",
+    [
+        "do you do wholesale pricing?",
+        "what is your wholesale rate for 500 units",
+        "I am a distributor, what are your terms",
+        "are you open to b2b orders",
+        "do you have a partnership with ABC brand?",
+        "can I get the wholesale price list",
+        "we supply 3 teams, can you quote",
+    ],
+)
+def test_the_trade_a_supplier_is_in_is_not_a_request_to_meet(text):
+    """A wholesaler's customers say these all day. They are asking to buy."""
+    assert not booking.is_meeting(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "can we set up a call?",
+        "can I get a demo",
+        "lets meet up next week",
+        "can we do a zoom call",
+        "book a discovery call",
+        "schedule a short video call",
+        # the trade words do mean a meeting, attached to one
+        "can we have a wholesale call",
+        "set up a partnership chat",
+        "send me a teams link",
+        "can we do it over teams",
+    ],
+)
+def test_asking_to_talk_is_a_meeting(text):
+    assert booking.is_meeting(text)
