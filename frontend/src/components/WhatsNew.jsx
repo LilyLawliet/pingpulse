@@ -12,6 +12,47 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.9.0',
+    date: '30 September 2026',
+    items: [
+      {
+        title: 'Your live feed is yours alone',
+        body:
+          'A dashboard open on one business was receiving every business’s live '
+          + 'events — another shop’s customer messages — and the inbox '
+          + 'jumped to conversations that were not its own. Each open dashboard now '
+          + 'watches one business, checked against your account when it connects, and is '
+          + 'sent nothing else. Live updates also used to stop for good after the 300th '
+          + 'event; they no longer do.',
+      },
+      {
+        title: 'Two businesses, two tabs, no crossing over',
+        body:
+          'Every request now names the business the tab is showing, so switching in one '
+          + 'tab no longer makes the other read — or save into — the business '
+          + 'it was not showing. Leaving a business clears its list, numbers, board, '
+          + 'conversation and filters, and a switch that fails says so instead of '
+          + 'spinning.',
+      },
+      {
+        title: 'Saves show up without a reload',
+        body:
+          'Board column changes appear at once, alert changes clear the sidebar warning, '
+          + 'undoing hours updates the tick, and opening a conversation marks it read so '
+          + '“Unread” means unread. A new message no longer takes over the '
+          + 'conversation you are reading, and the customer drawer keeps your unsaved '
+          + 'notes when the list refreshes.',
+      },
+      {
+        title: 'Alerts for every business on the same browser',
+        body:
+          'Saying yes to browser alerts for a second business used to move the device off '
+          + 'the first, and its alerts stopped arriving. Each business keeps its own, and '
+          + 'turning a device off is per business.',
+      },
+    ],
+  },
+  {
     version: '1.8.2',
     date: '30 September 2026',
     items: [
