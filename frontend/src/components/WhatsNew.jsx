@@ -12,6 +12,42 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.7.0',
+    date: '29 September 2026',
+    items: [
+      {
+        title: 'Your own calendar decides what is free',
+        body:
+          'In Setup › Calendar, paste the private address of your own calendar '
+          + '— Google, Outlook or iCloud all give you one. PingPulse reads it for '
+          + 'busy times, repeating meetings and all-day events included, and never offers '
+          + 'a time you are already booked. It is read once before it is saved, so a link '
+          + 'that does not work is refused rather than quietly stopping every booking. '
+          + 'There is no sign-in and no account access: it is a link you paste, and one '
+          + 'you can remove.',
+      },
+      {
+        title: 'If it cannot be read, nothing is offered',
+        body:
+          'When your calendar cannot be reached, the agent offers no times, confirms '
+          + 'nothing and tells you — it asks the customer which days suit them '
+          + 'instead. It never guesses at a time it could not check, because the cost of '
+          + 'guessing is you double-booked. Cancelling still works, since that needs no '
+          + 'calendar.',
+      },
+      {
+        title: 'A demo or a call is booked as one',
+        body:
+          'Somebody asking for a demo, a discovery call or a meeting is booked as a phone '
+          + 'or video call of the length you set, with your own meeting room link and what '
+          + 'they wanted it about in the notes. The questions you ask before sending '
+          + 'somebody out do not hold up a conversation, and each booking, move or '
+          + 'cancellation is emailed to you as a calendar invitation, so it is in your '
+          + 'calendar the moment it happens.',
+      },
+    ],
+  },
+  {
     version: '1.6.0',
     date: '29 September 2026',
     items: [
