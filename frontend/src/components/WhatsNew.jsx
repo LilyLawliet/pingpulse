@@ -12,6 +12,40 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.6.0',
+    date: '29 September 2026',
+    items: [
+      {
+        title: 'A calendar you can actually work from',
+        body:
+          'Calendar shows your week in your own opening hours, in your own time zone. '
+          + 'Book somebody in, move them or cancel by hand, through the same checks the '
+          + 'agent books by — so you cannot double-book a slot or put someone in '
+          + 'while you are shut. Each one can tell the customer, in a message written '
+          + 'from the booking itself.',
+      },
+      {
+        title: 'Customers can name their own time',
+        body:
+          '“9 October at 3pm”, “tomorrow 15:30”, and a plain '
+          + '“at 3” read against your hours — 3am is shut, so it means '
+          + 'three in the afternoon. “Is Friday at 4 free?” is answered, not '
+          + 'booked; a “yes” after it takes the slot. Asking to reschedule and '
+          + 'then picking a time now moves the appointment instead of making a second one, '
+          + 'and a refusal says that day’s hours and offers that day’s free times.',
+      },
+      {
+        title: 'You hear when the diary changes',
+        body:
+          'An alert when an appointment is booked, moved (with the old time and the new '
+          + 'one) or cancelled — the diary changing, not somebody merely asking. A '
+          + 'request you cannot answer because no opening hours are set is raised '
+          + 'separately, as something nobody answered. And if both AI providers are down, '
+          + 'the confirmation still goes out, written from the booking’s own row.',
+      },
+    ],
+  },
+  {
     version: '1.5.9',
     date: '29 September 2026',
     items: [
