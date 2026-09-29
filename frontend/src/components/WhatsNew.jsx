@@ -12,6 +12,39 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.5.9',
+    date: '29 September 2026',
+    items: [
+      {
+        title: 'Scanning the code actually links the phone',
+        body:
+          'WhatsApp closes the connection once the instant a code is scanned, and expects '
+          + 'the app straight back with the new phone’s identity. PingPulse read that '
+          + 'close as a failure and threw away the very keys the scan had just made, so a '
+          + 'successful scan came back as another QR code. It now recognises that moment, '
+          + 'shows “Phone scanned” and finishes the link.',
+      },
+      {
+        title: 'The code stops jumping about while you fetch your phone',
+        body:
+          'Every code expires after a minute or so, and PingPulse dropped back to a spinner '
+          + 'and “attempt 2 of 5” each time — which looked like something '
+          + 'going wrong while you were still walking to the kitchen. The last code now '
+          + 'stays on screen, dimmed, while the next one comes. After three rounds with '
+          + 'nobody scanning it stops and waits, with “Get a new code”.',
+      },
+      {
+        title: 'Disconnect a phone without losing the connection',
+        body:
+          'Unlinking a handset used to mean deleting the whole WhatsApp connection and '
+          + 'setting it up again from nothing. A linked phone now has Disconnect beside it: '
+          + 'the phone is logged out, and the same Show QR links it — or a different '
+          + 'phone — back. The bin still removes the connection altogether, and now '
+          + 'asks before it does.',
+      },
+    ],
+  },
+  {
     version: '1.5.8',
     date: '29 September 2026',
     items: [
