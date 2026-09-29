@@ -12,6 +12,37 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.8.1',
+    date: '30 September 2026',
+    items: [
+      {
+        title: 'Nobody is asked where to deliver a subscription',
+        body:
+          'An order made only of plans, seats or one-off services is no longer asked for '
+          + 'an address and is charged no delivery — the Orders page says '
+          + '“Nothing to deliver”. Anything that comes in a box still is, '
+          + 'whatever it happens to be called: an Annual Planner, a Support Bracket and a '
+          + 'Training Whiteboard are all things somebody has to post.',
+      },
+      {
+        title: 'The confirmation gives your real account details',
+        body:
+          'When your documents write out an IBAN or a JazzCash number, the customer gets '
+          + 'it in the confirmation for the method they chose, instead of being told '
+          + 'you’ll send it on. Ways to pay are read only from sentences about '
+          + 'paying — including “we also take card” — and never '
+          + 'where you rule one out, so “no card needed” on a free trial is '
+          + 'not an offer to take cards.',
+      },
+      {
+        title: '“Cancel my demo” and “move the meeting”',
+        body:
+          'Both are now understood as what they are, rather than only the word '
+          + '“appointment”.',
+      },
+    ],
+  },
+  {
     version: '1.8.0',
     date: '30 September 2026',
     items: [
