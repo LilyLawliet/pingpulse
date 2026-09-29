@@ -20,6 +20,7 @@ from sqlalchemy import text
 from app import __version__
 from app.api.auth import router as auth_router
 from app.api.appointments import router as appointments_router
+from app.api.orders import router as orders_router
 from app.api.calendar import router as calendar_router
 from app.api.crm import router as crm_router
 from app.api.knowledge import router as knowledge_router
@@ -192,6 +193,7 @@ app.include_router(operations_router)
 app.include_router(analytics_router)
 app.include_router(calendar_router)
 app.include_router(appointments_router)
+app.include_router(orders_router)
 app.include_router(notifications_router)
 
 

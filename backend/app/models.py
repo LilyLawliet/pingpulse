@@ -677,6 +677,77 @@ class Catalogue(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+# What an order can be. Placed is where every order starts: the customer said
+# yes to a summary worked out from the price list. Everything after that is a
+# person at the shop moving it along.
+ORDER_PLACED = "placed"
+ORDER_CONFIRMED = "confirmed"
+ORDER_DISPATCHED = "dispatched"
+ORDER_DELIVERED = "delivered"
+ORDER_CANCELLED = "cancelled"
+ORDER_STATUSES = (ORDER_PLACED, ORDER_CONFIRMED, ORDER_DISPATCHED, ORDER_DELIVERED, ORDER_CANCELLED)
+PAYMENT_UNPAID = "unpaid"
+PAYMENT_PAID = "paid"
+
+
+class Order(Base):
+    """One order, and the only thing allowed to say one was placed.
+
+    The agent used to answer "pink dotted, deliver to Bahria Town, pay online"
+    with "Great! I've noted the notebook" - and nothing had been noted
+    anywhere. A customer believed they had ordered; the shop had no idea.
+
+    So an order exists only as a row here, written when the customer says yes
+    to a summary that was worked out from the price list, and every
+    confirmation they read is rendered from the row. Prices are copied onto it
+    at that moment: a price list changed next week must not change what
+    somebody already agreed to pay.
+    """
+
+    __tablename__ = "orders"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "number", name="uq_order_org_number"),
+        Index("ix_orders_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("crm_contacts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Per shop, from 1001: what the customer quotes back ("order 1004").
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=ORDER_PLACED)
+
+    # [{name, details, quantity, sold_as, unit_price, total}] - figures as
+    # strings, exactly as they were quoted.
+    lines: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    currency: Mapped[str | None] = mapped_column(String(8))
+    goods_total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    discount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # None when the delivery charge could not be worked out from the rules.
+    delivery_fee: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+
+    delivery_place: Mapped[str | None] = mapped_column(String(120))
+    address: Mapped[str | None] = mapped_column(Text)
+    payment_method: Mapped[str | None] = mapped_column(String(60))
+    payment_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=PAYMENT_UNPAID
+    )
+    # What the customer asked for that the shop should see: "gift wrap it".
+    customer_note: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="agent")
+
+    created_at: Mapped[datetime] = _now_column()
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    contact: Mapped["CRMContact"] = relationship()
+
+
 # ============================== Operations ================================
 class AuditLog(Base):
     """Who changed what, and to what.
@@ -1017,5 +1088,7 @@ NOTIFY_EVENTS: tuple[tuple[str, str, bool], ...] = (
     # alone. Nothing else says so: the customer still gets an answer, which
     # is the point, and nobody would notice they were getting worse ones.
     ("ai_down", "The AI stopped answering, so replies are coming from your documents alone", True),
+    # A row in the orders table, never a conversation that sounded like one.
+    ("order", "A customer placed an order", True),
 )
 NOTIFY_KEYS = tuple(key for key, _, _ in NOTIFY_EVENTS)

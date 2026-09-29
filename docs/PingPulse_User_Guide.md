@@ -353,6 +353,40 @@ Drag a card to move someone, or use the menu on the card. Both work, which
 matters because drag-and-drop does not fire on a phone at all, and a phone is
 the main device for most people running this.
 
+### Orders
+
+A customer orders in the chat, and the agent does the rest:
+
+1. **What they want.** Products are matched to your price list only, and a
+   choice like "pink dotted or mint lined" is asked, never guessed.
+2. **Where it goes.** If delivery costs depend on the city, the agent asks the
+   city, then the full address.
+3. **How they'll pay.** The agent offers only the methods your documents
+   name (cash on delivery, bank transfer, JazzCash, Easypaisa…), with your
+   own wording about them. "Online" gets asked which one.
+4. **The summary.** Items, delivery, total, address and payment, worked out
+   from your price list, then *Reply YES to place the order*.
+5. **The yes.** Only the customer's YES places it. They get **order #1001**
+   with the total, your payment wording and your delivery time. You get an
+   alert (*A customer placed an order* in Alerts), and it appears here.
+
+Until that yes, the agent can't say anything is "noted", "placed" or
+"confirmed". Replies are checked, and one that claims an order nobody placed
+is not sent. If the AI is down, nothing is taken automatically: you get an
+alert to take the order yourself.
+
+On the **Orders** page, tap an order to **Confirm**, **Mark as sent**, **Mark
+delivered**, **Mark paid** or **Cancel**. Tick *Tell the customer* and they get
+a WhatsApp message written from the order, for example "Your order #1001 is
+on its way!".
+
+For online payments, the customer is told you'll send the account details,
+unless your documents include them. Put your JazzCash number or bank account
+in your documents and they'll get it straight away.
+
+**Try it** on the Test agent page. The whole flow works there, and the order
+is undone afterwards.
+
 ### Calendar
 
 Every appointment in one week, in your own timezone, with each day's opening

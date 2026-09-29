@@ -156,3 +156,14 @@ goes to a team member. Use the **Test agent** page, or a phone.
 
 On WhatsApp, each booking, move and cancel sends an alert: *New appointment
 booked*, *Appointment moved* (old and new time), *Appointment cancelled*.
+
+### 13. Placing an order
+| Send | Right answer |
+|---|---|
+| `I want the mochi bunny notebook` | PKR 1,250, and it asks pink dotted or mint lined. Nothing is "noted". |
+| `pink dotted, and I want it delivered in lahore` | Delivery to Lahore PKR 350, total PKR 1,600. It asks for the address and how they'll pay, naming **only** cash on delivery, bank transfer, JazzCash or Easypaisa. |
+| `Preferred payment method is online and delivery address is lahore bahria town.` | It asks which one: bank transfer, JazzCash or Easypaisa. It must **not** say "noted" or "placed". |
+| `JazzCash` | The summary: notebook × 1 PKR 1,250, delivery (Lahore) PKR 350, total PKR 1,600, address, JazzCash, then *Reply YES to place the order*. |
+| `yes` | *Your order #1001 is placed ✅*, with the total, the JazzCash line from the document, "We'll send you the JazzCash details", and 3–5 working days. The Orders page shows #1001; an alert arrives. |
+| `when will I receive it?` | 3–5 working days for Lahore (1–2 in Karachi). **Not** the delivery charges. |
+| At the summary: `no` | Nothing placed; it asks what to change. |

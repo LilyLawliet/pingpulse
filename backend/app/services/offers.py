@@ -801,8 +801,11 @@ def best(items: list[Item], text: str) -> list[Item]:
 # when it writes the rule down.
 RULE_TOPICS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "delivery": (
-        ("deliver", "delivery", "shipping", "ship", "courier", "freight", "dispatch", "postage"),
-        ("deliver", "shipping", "courier", "freight", "postage"),
+        ("deliver", "delivery", "shipping", "ship", "courier", "freight", "dispatch", "postage",
+         # When it comes, which is a delivery question too.
+         "receive", "arrive", "reach me", "how long", "how many days", "eta", "get it by"),
+        ("deliver", "shipping", "courier", "freight", "postage", "arrive", "dispatch",
+         "working days", "business days"),
     ),
     "discount": (
         ("discount", "offer", "deal", "bulk", "wholesale", "trade price", "cheaper", "% off"),
@@ -895,6 +898,17 @@ def _sentences(text: str) -> list[str]:
 RULE_ELSEWHERE = ("refund", "return", "restocking", "warranty", "exchange", "cancel")
 
 
+# A sentence that says how long delivery takes, and a question asking it.
+_TAKES_TIME = re.compile(
+    r"\b\d+\s*(?:[-\u2013\u2014]|to)?\s*\d*\s*(?:working |business )?(?:days?|hours?|weeks?)\b"
+    r"|\bsame[- ]day\b|\bnext[- ]day\b|\bovernight\b"
+)
+_ASKS_WHEN = re.compile(
+    r"\b(when|how long|how many days|how soon|receive|arrive|reach|eta|get it by|by (?:when|monday|"
+    r"tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|today)|same[- ]day|today|tomorrow)\b"
+)
+
+
 def _is_rule(topic: str, sentence: str, low: str) -> bool:
     """Whether this sentence states the rule, rather than mentioning the subject."""
     if topic == "returns":
@@ -904,7 +918,12 @@ def _is_rule(topic: str, sentence: str, low: str) -> bool:
     if topic == "payment":
         return True
     if topic == "delivery":
-        return bool(amounts(sentence)) or re.search(r"\bfree\b", low) is not None
+        return (
+            bool(amounts(sentence))
+            or re.search(r"\bfree\b", low) is not None
+            # "Karachi orders arrive in 1-2 working days" is the rule for when.
+            or _TAKES_TIME.search(low) is not None
+        )
     if topic == "discount":
         return "%" in sentence or "percent" in low
     return bool(amounts(sentence)) or "%" in sentence
@@ -953,9 +972,14 @@ def rules_for(
             if (count := sum(1 for c in candidates if _shares(stem, stems[c])))
         }
 
+        asks_when = topic == "delivery" and bool(_ASKS_WHEN.search(message.lower()))
+
         def closeness(sentence: str) -> tuple[float, int]:
             low = sentence.lower()
             said = sum(weight for stem, weight in rare.items() if _shares(stem, stems[sentence]))
+            # "When will I get it?" is answered by how long it takes, not what it costs.
+            if asks_when and _TAKES_TIME.search(low):
+                said += 10
             states = 1 if re.search(r"\d", sentence) else 0
             return (round(said, 3), sum(1 for w in written if w in low) + states)
 

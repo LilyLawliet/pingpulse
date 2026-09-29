@@ -270,6 +270,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ starts_at: startsAt, tell_customer: tellCustomer }),
     }),
+  // ------------------------------ orders --------------------------------
+  // Placed by a customer's yes in the chat; moved along here by a person.
+  listOrders: (status) => request(`/orders${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  changeOrder: (id, body) =>
+    request(`/orders/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
   // Time the owner is busy. Undone with cancelAppointment, which frees it.
   blockTime: (body) =>
     request('/appointments/block', { method: 'POST', body: JSON.stringify(body) }),

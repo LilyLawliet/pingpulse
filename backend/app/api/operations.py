@@ -34,7 +34,9 @@ from app.models import (
     SystemError,
     TenantPipeline,
 )
+from app.schemas import GenerationResult
 from app.services import (
+    orders,
     languages,
     notifications,
     unanswered,
@@ -780,6 +782,8 @@ async def simulate(
     performed = None
     offered_slots: list[str] = []
     booking_reply = None
+    order_reply = None
+    order_note = None
     state = payload.get("booking_state") if isinstance(payload.get("booking_state"), dict) else {}
     if booking.wants_booking(message) and not booking.booking_enabled(organization):
         reachable = await notifications.can_reach(db, organization)
@@ -841,6 +845,25 @@ async def simulate(
             appointment = SimpleNamespace(when=booking.describe(turn.appointment))
         if turn.prompt_block:
             booking_block = "\n\n".join(filter(None, [booking_block, turn.prompt_block]))
+        # Orders, the way a live chat takes them: the draft travels in the
+        # state like the booking offer does, and a placed order is rolled
+        # back with everything else.
+        if not performed:
+            order_turn = await orders.handle_turn(
+                db, organization, probe, message, history, await offers.prepare(db, organization)
+            )
+            order_reply = order_turn.reply
+            if order_turn.prompt_block and not order_turn.reply:
+                booking_block = "\n\n".join(filter(None, [booking_block, order_turn.prompt_block]))
+            if order_turn.placed:
+                order_note = (
+                    f"This would have placed order #{order_turn.order.number} for a real customer, "
+                    "and alerted you. Nothing was saved."
+                )
+            elif order_turn.reply:
+                order_note = "The customer is asked to confirm this summary. Reply yes to place it."
+            elif order_turn.needs_person:
+                order_note = "The AI couldn't read this order; on WhatsApp you'd get an alert to take it."
         state = dict(probe.contact_metadata or {})
         state.pop(SANDBOX_APPOINTMENT_KEY, None)
         kept = await booking.upcoming_for(db, probe.id)
@@ -869,31 +892,39 @@ async def simulate(
     if offer.prompt_block():
         knowledge = "\n\n".join(filter(None, [knowledge, offer.prompt_block()]))
 
-    generation = await llm_service.generate_reply(
-        organization,
-        pretend,
-        history,
-        message,
-        knowledge=knowledge,
-        appointment=appointment,
-        did_cancel=performed == "cancelled",
-        did_move=performed == "moved",
-        handoff_allowed=bool(booking_block and "colleague has just been alerted" in booking_block),
-        known_prices=offer.prices,
-        known_quantities=offer.quote.quantities(),
-        # The sandbox sends nothing, pictures included.
-        photos_attached=False,
-        photos_available=await product_search.has_photos(db, tenant.id),
-        last_resort=booking_reply
-        or (
-            ""
-            if offer.quote.unknown_place
-            else offer.reply()
-            or sales_policy.without_filler(
-                sales_policy.deterministic_reply({}, chunks, organization, message=message)
-            )
-        ),
-    )
+    if order_reply:
+        generation = GenerationResult(
+            provider="order",
+            text=await languages.in_customer_language(order_reply, message),
+            prompt_used="",
+            latency_ms=0,
+        )
+    else:
+        generation = await llm_service.generate_reply(
+            organization,
+            pretend,
+            history,
+            message,
+            knowledge=knowledge,
+            appointment=appointment,
+            did_cancel=performed == "cancelled",
+            did_move=performed == "moved",
+            handoff_allowed=bool(booking_block and "colleague has just been alerted" in booking_block),
+            known_prices=offer.prices,
+            known_quantities=offer.quote.quantities(),
+            # The sandbox sends nothing, pictures included.
+            photos_attached=False,
+            photos_available=await product_search.has_photos(db, tenant.id),
+            last_resort=booking_reply
+            or (
+                ""
+                if offer.quote.unknown_place
+                else offer.reply()
+                or sales_policy.without_filler(
+                    sales_policy.deterministic_reply({}, chunks, organization, message=message)
+                )
+            ),
+        )
     # What a real conversation would do when nothing answers the question:
     # alert a person. The sandbox says so instead of alerting anybody.
     team = None
@@ -931,6 +962,7 @@ async def simulate(
         "needs_team": team,
         # What booking did on this turn, and what to send back next turn.
         "booking": {"note": booking_note, "offered": offered_slots, "performed": performed},
+        "order": {"note": order_note},
         "booking_state": state,
         "sent": False,
     }

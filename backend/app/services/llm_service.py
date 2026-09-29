@@ -22,6 +22,7 @@ from app.schemas import GenerationResult
 from app.services import booking
 from app.services import languages
 from app.services import offers
+from app.services import orders
 from app.services import sales_policy
 
 logger = logging.getLogger(__name__)
@@ -896,6 +897,7 @@ async def generate_reply(
     appointment=None,
     did_cancel: bool = False,
     did_move: bool = False,
+    order_placed: bool = False,
     handoff_allowed: bool = False,
     known_prices: Iterable[Any] = (),
     known_quantities: Iterable[Any] = (),
@@ -1026,6 +1028,11 @@ async def generate_reply(
                 moved=did_move,
             )
         )
+        # The same for orders: "Great! I've noted the notebook" was said
+        # about an order nothing had recorded.
+        order_claim = orders.claims_order(text, order_placed)
+        if order_claim:
+            problems.append(order_claim)
 
         # Saying it is a person. Judged without consulting anything, because
         # it is false every time regardless of what the conversation was
@@ -1190,6 +1197,8 @@ async def generate_reply(
             corrected, appointment=appointment, cancelled=did_cancel, moved=did_move
         ):
             raise RuntimeError("reply still claimed an appointment that does not exist")
+        if orders.claims_order(corrected, order_placed):
+            raise RuntimeError("reply still claimed an order that was not placed")
         if languages.wrong_script(latest_message, corrected):
             raise RuntimeError("reply still came back in the wrong script")
         if expects_english and (is_roman_urdu(corrected) or opens_in_urdu(corrected)):

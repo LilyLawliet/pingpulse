@@ -52,7 +52,8 @@ from app.services import (
     vision,
     ws_manager,
 )
-from app.services import analytics, invites, notifications, oplog, outbox, pipelines, whatsapp
+from app.schemas import GenerationResult
+from app.services import analytics, invites, notifications, oplog, orders, outbox, pipelines, whatsapp
 from app.services.twilio_service import (
     Sender,
     signature_url,
@@ -684,12 +685,21 @@ async def process_inbound_message(
     # (which products, how many, which terms) - so the second model call costs
     # no extra waiting.
     prepared = await offers.prepare(db, organization)
-    analysis, reading = await asyncio.gather(
+
+    async def _no_order():
+        return None
+
+    # A third reading, at the same time, when an order may be under way: the
+    # whole conversation read into what is being bought, where and how paid.
+    analysis, reading, order_reading = await asyncio.gather(
         analyzer.analyse(history, body, contact.sales_stage),
         understanding.read_message(
             body, prepared.items, offers.conversation(history),
             terms=offers.delivery_terms(prepared),
         ),
+        orders.read_order(prepared, history, body)
+        if orders.may_read(contact, body)
+        else _no_order(),
     )
 
     memory = customer_memory.apply_analysis(contact.memory, analysis)
@@ -909,49 +919,74 @@ async def process_inbound_message(
     if offer and offer.prompt_block():
         knowledge = "\n\n".join(filter(None, [knowledge, offer.prompt_block()]))
 
-    generation = await llm_service.generate_reply(
-        organization,
-        contact,
-        history,
-        body,
-        knowledge=knowledge,
-        memory_block=customer_memory.as_prompt_block(
-            memory, contact, greeting=sales_policy.only_greeting(body)
-        ),
-        policy_block=sales_policy.as_prompt_block(analysis, photos_available=photos_available),
-        # What the reply is allowed to claim. A sentence announcing a booking,
-        # a cancellation or a move survives only if one actually happened on
-        # this turn - checked against these rather than against the prompt.
-        appointment=appointment_turn.appointment,
-        did_cancel=appointment_turn.cancelled,
-        did_move=appointment_turn.moved,
-        handoff_allowed=handed_to_a_person,
-        # A reply may only mention pictures it is actually sending.
-        photos_attached=bool(outbound_media),
-        photos_available=photos_available,
-        known_prices=offer.prices if offer else (),
-        known_quantities=offer.quote.quantities() if offer else (),
-        # If both providers are down the customer still gets a real answer built
-        # from retrieved facts — never a promise that a human will call back.
-        # A worked-out quote comes first: it is the answer to what they asked.
-        # What the diary did this turn comes first: a booking made while the
-        # models are down is confirmed from its row, not buried under a quote.
-        last_resort=appointment_turn.plain_reply(organization)
-        or (
-            ""
-            if offer and offer.quote.unknown_place
-            else (offer.reply() if offer and offer.reply() else None)
-            or sales_policy.without_filler(
-                sales_policy.deterministic_reply(
-                    analysis, chunks, organization, products,
-                    booking_url=scheduling.booking_link(
-                        organization.name, contact.name, phone_number
-                    ),
-                    message=body,
+    # An order being put together. Only a yes to a worked-out summary writes
+    # one, and what the customer reads about it - the summary, the order
+    # number, the total - is rendered from the record, not by the model.
+    order_turn = orders.OrderTurn()
+    if not appointment_turn.performed and not booking_only:
+        order_turn = await orders.handle_turn(
+            db, organization, contact, body, history, prepared, reading=order_reading
+        )
+    if order_turn.needs_person and await notifications.can_reach(db, organization):
+        handed_to_a_person = True
+        order_turn.prompt_block += (
+            "\nA colleague is being alerted to take this order. You MAY say a team member "
+            "will confirm it with them shortly."
+        )
+    if order_turn.prompt_block and not order_turn.reply:
+        knowledge = "\n\n".join(filter(None, [knowledge, order_turn.prompt_block]))
+
+    if order_turn.reply:
+        generation = GenerationResult(
+            provider="order",
+            text=await languages.in_customer_language(order_turn.reply, body),
+            prompt_used=order_turn.prompt_block,
+            latency_ms=0,
+        )
+    else:
+        generation = await llm_service.generate_reply(
+            organization,
+            contact,
+            history,
+            body,
+            knowledge=knowledge,
+            memory_block=customer_memory.as_prompt_block(
+                memory, contact, greeting=sales_policy.only_greeting(body)
+            ),
+            policy_block=sales_policy.as_prompt_block(analysis, photos_available=photos_available),
+            # What the reply is allowed to claim. A sentence announcing a booking,
+            # a cancellation or a move survives only if one actually happened on
+            # this turn - checked against these rather than against the prompt.
+            appointment=appointment_turn.appointment,
+            did_cancel=appointment_turn.cancelled,
+            did_move=appointment_turn.moved,
+            handoff_allowed=handed_to_a_person,
+            # A reply may only mention pictures it is actually sending.
+            photos_attached=bool(outbound_media),
+            photos_available=photos_available,
+            known_prices=offer.prices if offer else (),
+            known_quantities=offer.quote.quantities() if offer else (),
+            # If both providers are down the customer still gets a real answer built
+            # from retrieved facts — never a promise that a human will call back.
+            # A worked-out quote comes first: it is the answer to what they asked.
+            # What the diary did this turn comes first: a booking made while the
+            # models are down is confirmed from its row, not buried under a quote.
+            last_resort=appointment_turn.plain_reply(organization)
+            or (
+                ""
+                if offer and offer.quote.unknown_place
+                else (offer.reply() if offer and offer.reply() else None)
+                or sales_policy.without_filler(
+                    sales_policy.deterministic_reply(
+                        analysis, chunks, organization, products,
+                        booking_url=scheduling.booking_link(
+                            organization.name, contact.name, phone_number
+                        ),
+                        message=body,
+                    )
                 )
-            )
-        ),
-    )
+            ),
+        )
 
     # Neither provider answered. The customer still got the worked-out reply;
     # whoever runs this business should know the AI is down, once per
@@ -1206,6 +1241,33 @@ async def process_inbound_message(
             f"{who} messaged for the first time: {body.strip()[:200]}",
             contact_id=contact.id,
         )
+    # A placed order, from its row. A request the agent couldn't take goes
+    # to a person instead of being "noted".
+    if order_turn.placed and order_turn.order is not None:
+        placed = order_turn.order
+        items = "\n".join(
+            f"- {line['name']} x {line['quantity']}: {line['total']}" for line in placed.lines
+        )
+        money = offers.money(placed.total, placed.currency)
+        await notifications.raise_and_send(
+            db, organization, "order", f"New order #{placed.number} - {money}",
+            f"{who} placed order #{placed.number}:\n{items}\nTotal: {money}\n"
+            f"Deliver to: {placed.address}\nPayment: {placed.payment_method or 'to arrange'}"
+            + (
+                f"\n\nThey were told you'll send the {placed.payment_method} details."
+                if placed.payment_method in orders.ONLINE_METHODS
+                else ""
+            ),
+            contact_id=contact.id,
+        )
+    elif order_turn.needs_person:
+        await notifications.raise_and_send(
+            db, organization, "unanswered", "Someone wants to order and the agent couldn't take it",
+            f"{who} is ordering: {body.strip()[:200]}\n\nThe AI couldn't read the order, so "
+            "nothing was placed. Please reply to them.",
+            contact_id=contact.id,
+        )
+
     # What happened to the diary, from the rows written this turn. A request
     # alone raises nothing here: with hours set, the agent answered it with
     # real times; without them, it was raised above as unanswered.

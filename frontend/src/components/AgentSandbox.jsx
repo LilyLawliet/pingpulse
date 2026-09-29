@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BellRing, CalendarCheck, FlaskConical, Loader2, RotateCcw, Send, ShieldAlert, TriangleAlert } from 'lucide-react'
+import { BellRing, CalendarCheck, FlaskConical, ShoppingBag, Loader2, RotateCcw, Send, ShieldAlert, TriangleAlert } from 'lucide-react'
 import { PageHeader } from './ui.jsx'
 import { api } from '../api.js'
 
@@ -133,6 +133,12 @@ export default function AgentSandbox() {
                     <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-accent/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-accent">
                       <CalendarCheck size={12} className="mt-0.5 shrink-0" />
                       {turn.booking.note}
+                    </p>
+                  )}
+                  {turn.order?.note && (
+                    <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-accent/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-accent">
+                      <ShoppingBag size={12} className="mt-0.5 shrink-0" />
+                      {turn.order.note}
                     </p>
                   )}
                   {turn.booking?.offered?.length > 0 && !turn.booking?.performed && (

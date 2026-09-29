@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BellOff,
   CalendarDays,
+  ShoppingBag,
   ChartNoAxesColumn,
   ChevronRight,
   CircleAlert,
@@ -51,6 +52,7 @@ import AgentSandbox from './components/AgentSandbox.jsx'
 import Analytics from './components/Analytics.jsx'
 import KanbanBoard from './components/KanbanBoard.jsx'
 import Calendar from './components/Calendar.jsx'
+import Orders from './components/Orders.jsx'
 import { PageBoundary } from './components/ui.jsx'
 import Profile, { ProfileButton } from './components/Profile.jsx'
 
@@ -65,6 +67,7 @@ import Profile, { ProfileButton } from './components/Profile.jsx'
 const VIEWS = [
   { id: 'inbox', label: 'Inbox', short: 'Inbox', icon: MessagesSquare },
   { id: 'board', label: 'Board', short: 'Board', icon: Columns3 },
+  { id: 'orders', label: 'Orders', short: 'Orders', icon: ShoppingBag },
   { id: 'calendar', label: 'Calendar', short: 'Calendar', icon: CalendarDays },
   { id: 'analytics', label: 'Analytics', short: 'Stats', icon: ChartNoAxesColumn },
   { id: 'test', label: 'Test agent', short: 'Test', icon: FlaskConical },
@@ -1016,6 +1019,7 @@ function Dashboard({ onSignedOut }) {
               onOpen={openConversation}
             />
           )}
+          {view === 'orders' && <Orders onOpenConversation={openConversation} />}
           {view === 'calendar' && (
             <Calendar
               contacts={contacts}
@@ -1048,7 +1052,7 @@ function Dashboard({ onSignedOut }) {
         {/* Phone tab bar. A conversation gets the whole screen. */}
         <nav
           aria-label="Main"
-          className={`${inThread ? 'hidden' : 'grid'} shrink-0 grid-cols-6 border-t border-edge bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden`}
+          className={`${inThread ? 'hidden' : 'grid'} shrink-0 grid-cols-7 border-t border-edge bg-panel pb-[env(safe-area-inset-bottom)] lg:hidden`}
         >
           {VIEWS.map((item) => {
             const current = view === item.id
