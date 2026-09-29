@@ -51,3 +51,30 @@ async def test_the_bridge_s_reason_reaches_the_screen(org_a, monkeypatch):
     monkeypatch.setattr("app.api.organizations.httpx.AsyncClient", Bridge)
     body = (await org_a.get(f"/api/v1/organizations/active/channels/{channel.id}/qr")).json()
     assert body["reason"] == "unreachable" and body["gave_up"] is True and body["tries"] == 5
+
+
+@pytest.mark.asyncio
+async def test_disconnect_unlinks_the_phone_and_keeps_the_connection(org_a, monkeypatch):
+    session = _session_for(org_a._client)
+    channel = ChannelConfig(
+        organization_id=uuid.UUID(org_a.organization_id),
+        channel="whatsapp",
+        provider="twilio",
+        whatsapp_provider="QR_SESSION",
+        phone_number="+923001112222",
+        session_status="AUTHENTICATED",
+    )
+    session.add(channel)
+    await session.flush()
+    unpaired = []
+
+    async def fake_unpair(channel_id):
+        unpaired.append(channel_id)
+
+    monkeypatch.setattr("app.api.organizations._unpair", fake_unpair)
+    response = await org_a.post(f"/api/v1/organizations/active/channels/{channel.id}/unpair")
+    assert response.status_code == 200
+    assert unpaired == [channel.id]
+    await session.refresh(channel)
+    assert channel.session_status == "DISCONNECTED" and channel.phone_number is None
+    assert await session.get(ChannelConfig, channel.id) is not None, "the connection was deleted"

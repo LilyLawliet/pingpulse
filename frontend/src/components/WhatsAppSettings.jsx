@@ -128,7 +128,17 @@ export default function WhatsAppSettings({ onChanged }) {
             ? {
                 ...current,
                 status: state.status,
-                qr: state.qr,
+                // Between one round of codes and the next there is a moment
+                // with no code. The last one stays on screen, dimmed, rather
+                // than the panel dropping back to a spinner and jumping.
+                qr:
+                  state.qr ||
+                  (['GENERATING_QR', 'QR_REFRESHING', 'DISCONNECTED'].includes(state.status) &&
+                  state.reason !== 'unreachable' &&
+                  !state.gave_up
+                    ? current.qr
+                    : null),
+                refreshing: !state.qr && Boolean(current.qr) && state.status !== 'QR_EXPIRED',
                 reason: state.reason,
                 code: state.code,
                 tries: state.tries,
@@ -174,6 +184,9 @@ export default function WhatsAppSettings({ onChanged }) {
   }
 
   const disconnect = async (id) => {
+    // Removing is the whole connection, not just the phone: said before it
+    // happens, since "Disconnect" beside it only unlinks.
+    if (!window.confirm('Remove this WhatsApp connection? The phone is unlinked and the connection is deleted.')) return
     setBusy(true)
     try {
       await api.removeChannel(id)
@@ -181,6 +194,23 @@ export default function WhatsAppSettings({ onChanged }) {
       await load()
     } catch (err) {
       setError(err.message || 'Could not disconnect that number.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Unlink the phone, keep the connection: the same "Show QR" links it again,
+  // this phone or another one.
+  const unpair = async (id) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.unpairChannel(id)
+      setPairing(null)
+      onChanged?.()
+      await load()
+    } catch (err) {
+      setError(err.message || 'Could not disconnect that phone.')
     } finally {
       setBusy(false)
     }
@@ -301,6 +331,17 @@ export default function WhatsAppSettings({ onChanged }) {
 
               <div className="ml-auto flex items-center gap-1.5">
                 {channel.whatsapp_provider === 'QR_SESSION' &&
+                  channel.session_status === 'AUTHENTICATED' && (
+                    <button
+                      type="button"
+                      onClick={() => unpair(channel.id)}
+                      disabled={busy}
+                      className="flex items-center gap-1.5 rounded-lg border border-edge px-2.5 py-1.5 text-2xs font-semibold text-dim transition-colors hover:border-edge-hi hover:text-ink disabled:opacity-40"
+                    >
+                      <Plug size={12} /> Disconnect
+                    </button>
+                  )}
+                {channel.whatsapp_provider === 'QR_SESSION' &&
                   channel.session_status !== 'AUTHENTICATED' && (
                     <button
                       type="button"
@@ -315,7 +356,7 @@ export default function WhatsAppSettings({ onChanged }) {
                   onClick={() => disconnect(channel.id)}
                   disabled={busy}
                   className="rounded-lg p-1.5 text-faint transition-colors hover:bg-panel-2 hover:text-crit disabled:opacity-40"
-                  aria-label={`Disconnect ${channel.phone_number || 'this connection'}`}
+                  aria-label={`Remove ${channel.phone_number || 'this connection'}`}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -334,7 +375,7 @@ export default function WhatsAppSettings({ onChanged }) {
                     <p className="flex items-center gap-2 text-xs text-accent">
                       <Check size={14} /> Linked. This phone now sends and receives.
                     </p>
-                  ) : pairing.status === 'AUTHENTICATED' ? (
+                  ) : pairing.status === 'AUTHENTICATED' || pairing.status === 'SCANNED' ? (
                     /* The bridge has the session; PingPulse has not recorded
                        it yet. Normally a second or two. If it stays here, the
                        callback is failing and nothing will route - which is
@@ -347,11 +388,21 @@ export default function WhatsAppSettings({ onChanged }) {
                   ) : pairing.qr ? (
                     <div className="flex items-start gap-4">
                       {/* A white plate: QR readers struggle against a dark UI. */}
-                      <img
-                        src={pairing.qr}
-                        alt="WhatsApp pairing QR code"
-                        className="h-40 w-40 shrink-0 rounded-lg bg-white p-2"
-                      />
+                      <div className="relative h-40 w-40 shrink-0">
+                        <img
+                          src={pairing.qr}
+                          alt="WhatsApp pairing QR code"
+                          className={`h-40 w-40 rounded-lg bg-white p-2 transition-opacity ${
+                            pairing.refreshing ? 'opacity-30' : ''
+                          }`}
+                        />
+                        {pairing.refreshing && (
+                          <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-2xs font-semibold text-ink">
+                            <Loader2 size={16} className="animate-spin" />
+                            New code…
+                          </span>
+                        )}
+                      </div>
                       <ol className="space-y-1 text-2xs leading-relaxed text-dim">
                         <li>1. Open WhatsApp on the phone</li>
                         <li>2. Settings → Linked devices</li>
@@ -582,7 +633,11 @@ function PairingWait({ pairing, onRetry }) {
   const waited = Math.round((now - (pairing.startedAt || now)) / 1000)
 
   let problem = null
-  if ((pairing.unreachable || 0) >= 3) {
+  let action = 'Try again'
+  if (pairing.status === 'QR_EXPIRED') {
+    problem = 'The code expired before it was scanned. Get a new one when the phone is ready.'
+    action = 'Get a new code'
+  } else if ((pairing.unreachable || 0) >= 3) {
     problem =
       'PingPulse cannot reach its WhatsApp connection service right now. Nothing is wrong with your phone. Try again in a minute.'
   } else if ((pairing.gaveUp || pairing.reason === 'unreachable') && pairing.code === 405) {
@@ -612,7 +667,7 @@ function PairingWait({ pairing, onRetry }) {
           onClick={onRetry}
           className="flex items-center gap-1.5 rounded-lg border border-accent/40 px-2.5 py-1.5 text-2xs font-semibold text-accent transition-colors hover:bg-accent/10"
         >
-          <QrCode size={12} /> Try again
+          <QrCode size={12} /> {action}
         </button>
       </div>
     )
@@ -620,11 +675,6 @@ function PairingWait({ pairing, onRetry }) {
   return (
     <p className="flex items-center gap-2 text-xs text-faint">
       <Loader2 size={13} className="animate-spin" /> Asking WhatsApp for a code…
-      {pairing.tries > 0 && (
-        <span className="text-2xs">
-          (attempt {pairing.tries + 1} of 5)
-        </span>
-      )}
     </p>
   )
 }

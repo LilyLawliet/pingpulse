@@ -510,6 +510,30 @@ async def start_pairing(
     return {"ok": True, "status": "GENERATING_QR"}
 
 
+@router.post("/active/channels/{channel_id}/unpair")
+async def unpair_channel(
+    channel_id: uuid.UUID,
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unlink the phone, keep the connection: "Show QR" links it again.
+
+    Deleting the channel was the only way to disconnect, and reconnecting then
+    meant setting it up from nothing. The phone is logged out on the bridge and
+    its stored keys are removed; the number goes too, since it arrives with the
+    next scan and may be a different phone.
+    """
+    tenant.require_role(ADMIN_ROLES)
+    channel = await _own_channel(db, tenant, channel_id)
+    if whatsapp.provider_of(channel) != whatsapp.QR_SESSION:
+        raise HTTPException(status_code=422, detail="Only a scanned phone can be unlinked")
+    await _unpair(channel.id)
+    channel.session_status = "DISCONNECTED"
+    channel.phone_number = None
+    await db.flush()
+    return {"ok": True, "status": "DISCONNECTED"}
+
+
 @router.get("/active/channels/{channel_id}/qr")
 async def pairing_state(
     channel_id: uuid.UUID,

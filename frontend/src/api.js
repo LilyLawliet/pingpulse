@@ -115,6 +115,9 @@ export const api = {
   startPairing: (id, fresh = false) =>
     request(`/organizations/active/channels/${id}/pair${fresh ? '?fresh=true' : ''}`, { method: 'POST' }),
   pairingState: (id) => request(`/organizations/active/channels/${id}/qr`),
+  // Unlink the phone but keep the connection, so "Show QR" links it again.
+  unpairChannel: (id) =>
+    request(`/organizations/active/channels/${id}/unpair`, { method: 'POST' }),
 
   // -------------------------------- CRM ---------------------------------
   // The inbox, filtered. Empty values are dropped rather than sent as blanks,

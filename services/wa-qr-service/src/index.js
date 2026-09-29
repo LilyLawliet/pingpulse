@@ -97,6 +97,11 @@ const attempts = new Map()
 const MAX_PAIRING_ATTEMPTS = 5
 // How long a brand-new pairing may take to offer its first code.
 const NO_CODE_TIMEOUT_MS = 30000
+// Rounds of codes offered without a scan before stopping to ask. One round is
+// the few codes WhatsApp gives a connection, about a minute and a half.
+const MAX_QR_CYCLES = 3
+/** Rounds of unscanned codes so far, per session. */
+const qrCycles = new Map()
 
 // Ceiling on the wait between reconnects of an already-paired phone. Five
 // minutes is slow enough to be invisible to WhatsApp during a long outage and
@@ -276,6 +281,7 @@ function forget(sessionId) {
   }
   opened.delete(sessionId)
   attempts.delete(sessionId)
+  qrCycles.delete(sessionId)
   latest.delete(sessionId)
 }
 
@@ -344,7 +350,7 @@ async function startSession(sessionId) {
   // silent spinner. Past this, it is ended and counted as a failed attempt,
   // which the retry below and the screen both hear about.
   let noCode = null
-  if (!wasPaired) {
+  if (!wasPaired && !scannedBefore(sessionId)) {
     noCode = setTimeout(() => {
       if (sessions.get(sessionId) !== socket || ready.has(sessionId)) return
       log.warn({ sessionId }, 'no code offered in time; ending this attempt')
@@ -376,22 +382,26 @@ async function startSession(sessionId) {
   socket.ev.on('contacts.upsert', (contacts) => contacts.forEach(rememberContact))
   socket.ev.on('contacts.update', (contacts) => contacts.forEach(rememberContact))
 
+  // Whether this connection has offered a code. A connection that has, and then
+  // closes without a scan, is a code that expired - not a failure.
+  let shownCode = false
+
   socket.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update
+    // A connection replaced by a newer one ("Show QR" pressed again) has no
+    // say over the session any more.
+    if (sessions.get(sessionId) !== socket) return
 
     if (qr) {
       clearTimeout(noCode)
+      shownCode = true
       // Sent as a data URL so the desktop app can render it directly in an
       // <img>, with no QR library of its own.
       const dataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 320 })
-
-      // Notified once, deliberately. Calling reportStatus as well would run
-      // notifyWatchers a second time without the QR attached and overwrite the
-      // stored copy, so a client polling for it would see QR_READY and an
-      // empty payload forever.
+      // Notified once, deliberately: the stored copy must carry the image, or
+      // a client polling for it sees QR_READY and an empty payload.
       notifyWatchers(sessionId, { type: 'status', status: 'QR_READY', qr: dataUrl })
-      // The API only needs the state; sending it a 7 KB image on every
-      // twenty-second rotation would be waste.
+      // The API only needs the state, not a 7 KB image on every rotation.
       callApi('/api/v1/whatsapp/qr-status', { sessionId, status: 'QR_READY' })
     }
 
@@ -402,19 +412,32 @@ async function startSession(sessionId) {
       // This pairing works, so later drops are worth retrying indefinitely.
       opened.add(sessionId)
       attempts.delete(sessionId)
+      qrCycles.delete(sessionId)
       latest.delete(sessionId)
       reportStatus(sessionId, 'AUTHENTICATED', { phoneNumber })
     }
 
     if (connection === 'close') {
       clearTimeout(noCode)
-      // A socket that was replaced - "Show QR" pressed again on a pairing that
-      // had stalled - closing late must not tear down, or retry over, the
-      // fresh one that replaced it.
-      if (sessions.get(sessionId) !== socket) return
       const status = lastDisconnect?.error?.output?.statusCode
       sessions.delete(sessionId)
       ready.delete(sessionId)
+
+      // The phone has just scanned the code. WhatsApp always closes the
+      // connection once at this point and expects the client to come straight
+      // back with the new identity: the most important moment of the pairing,
+      // and never a failure. Treating it as one wiped the keys the scan had
+      // just made.
+      if (status === DisconnectReason.restartRequired) {
+        log.info({ sessionId }, 'code scanned; finishing the link')
+        notifyWatchers(sessionId, { type: 'status', status: 'SCANNED' })
+        // The identity is written before coming back, so the new connection
+        // resumes it instead of asking for another code.
+        Promise.resolve(saveCreds())
+          .catch(() => {})
+          .finally(() => setTimeout(() => startSession(sessionId).catch(() => {}), 300))
+        return
+      }
 
       // Logged out from the phone: the credentials are dead and a re-scan is
       // the only way back. Anything else is a dropped connection worth retrying.
@@ -467,7 +490,7 @@ async function startSession(sessionId) {
       // restarted, failed five reconnects, marked a live client's WhatsApp as
       // unreachable and - once giving up became permanent - stayed that way
       // until somebody scanned a QR that was never needed.
-      if (opened.has(sessionId) || wasPaired) {
+      if (opened.has(sessionId) || wasPaired || scannedBefore(sessionId)) {
         // Backed off rather than every three seconds forever. This path never
         // gives up, which is right for a paired phone - but retrying at three
         // seconds for hours is exactly the hammering that got this host
@@ -479,6 +502,29 @@ async function startSession(sessionId) {
         log.info({ sessionId, status, tries, wait }, 'connection dropped, reconnecting')
         reportStatus(sessionId, 'DISCONNECTED', { reason: 'reconnecting' })
         setTimeout(() => startSession(sessionId).catch(() => {}), wait)
+        return
+      }
+
+      // The code was on screen and nobody scanned it. WhatsApp offers a handful
+      // of codes per connection and then closes; a fresh connection offers
+      // more. The screen keeps the last code (dimmed) while the next one comes,
+      // so nothing flickers - and after a few rounds it stops and asks, rather
+      // than cycling codes at an empty room for ever.
+      if (shownCode) {
+        const cycles = (qrCycles.get(sessionId) || 0) + 1
+        qrCycles.set(sessionId, cycles)
+        if (cycles >= MAX_QR_CYCLES) {
+          qrCycles.delete(sessionId)
+          attempts.delete(sessionId)
+          // Stays stopped until somebody asks for a new code.
+          gaveUp.add(sessionId)
+          log.info({ sessionId }, 'codes expired unscanned; waiting to be asked again')
+          reportStatus(sessionId, 'QR_EXPIRED')
+          return
+        }
+        const last = latest.get(sessionId)
+        notifyWatchers(sessionId, { type: 'status', status: 'QR_REFRESHING', qr: last?.qr || null })
+        setTimeout(() => startSession(sessionId).catch(() => {}), 1000)
         return
       }
 
@@ -629,6 +675,7 @@ app.post('/pair', async (request, response) => {
     // Otherwise a pairing that gave up earlier would refuse on the first
     // attempt of every later try, and clicking again would do nothing.
     attempts.delete(sessionId)
+    qrCycles.delete(sessionId)
     // A person is at the screen asking, which is the only thing that earns a
     // dead pairing another go.
     gaveUp.delete(sessionId)
