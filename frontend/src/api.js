@@ -112,8 +112,8 @@ export const api = {
     request('/organizations/active/channels', { method: 'POST', body: JSON.stringify(body) }),
   removeChannel: (id) =>
     request(`/organizations/active/channels/${id}`, { method: 'DELETE' }),
-  startPairing: (id) =>
-    request(`/organizations/active/channels/${id}/pair`, { method: 'POST' }),
+  startPairing: (id, fresh = false) =>
+    request(`/organizations/active/channels/${id}/pair${fresh ? '?fresh=true' : ''}`, { method: 'POST' }),
   pairingState: (id) => request(`/organizations/active/channels/${id}/qr`),
 
   // -------------------------------- CRM ---------------------------------

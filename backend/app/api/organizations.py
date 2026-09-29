@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -479,10 +479,16 @@ async def _unpair(channel_id: uuid.UUID) -> None:
 @router.post("/active/channels/{channel_id}/pair", status_code=202)
 async def start_pairing(
     channel_id: uuid.UUID,
+    fresh: bool = Query(default=False),
     tenant: Tenant = Depends(current_org),
     db: AsyncSession = Depends(get_db),
 ):
-    """Ask the bridge to begin a WhatsApp Web pairing for this channel."""
+    """Ask the bridge to begin a WhatsApp Web pairing for this channel.
+
+    `fresh` throws away whatever keys the bridge holds for it first - what
+    "Try again" sends after WhatsApp refused every attempt, because refused
+    keys are refused again.
+    """
     tenant.require_role(ADMIN_ROLES)
     channel = await _own_channel(db, tenant, channel_id)
 
@@ -490,7 +496,7 @@ async def start_pairing(
         try:
             response = await client.post(
                 f"{settings.wa_qr_service_url.rstrip('/')}/pair",
-                json={"sessionId": str(channel.id)},
+                json={"sessionId": str(channel.id), "fresh": bool(fresh)},
                 headers={"X-PingPulse-Bridge": settings.wa_qr_shared_secret},
             )
             response.raise_for_status()
@@ -540,6 +546,7 @@ async def pairing_state(
         # Why no code is showing, when none is: the screen says this instead
         # of a spinner that never ends.
         "reason": state.get("reason"),
+        "code": state.get("code"),
         "tries": state.get("tries") or 0,
         "gave_up": bool(state.get("gaveUp")),
     }

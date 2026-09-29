@@ -130,6 +130,7 @@ export default function WhatsAppSettings({ onChanged }) {
                 status: state.status,
                 qr: state.qr,
                 reason: state.reason,
+                code: state.code,
                 tries: state.tries,
                 gaveUp: state.gave_up,
                 unreachable: 0,
@@ -161,11 +162,11 @@ export default function WhatsAppSettings({ onChanged }) {
     }
   }, [pairing?.channelId, connected?.session_status, load, onChanged])
 
-  const beginPairing = async (channelId) => {
+  const beginPairing = async (channelId, fresh = false) => {
     setError(null)
     setPairing({ channelId, status: 'GENERATING_QR', qr: null, startedAt: Date.now() })
     try {
-      await api.startPairing(channelId)
+      await api.startPairing(channelId, fresh)
     } catch (err) {
       setError(err.message || 'Could not start pairing.')
       setPairing(null)
@@ -362,7 +363,7 @@ export default function WhatsAppSettings({ onChanged }) {
                       </ol>
                     </div>
                   ) : (
-                    <PairingWait pairing={pairing} onRetry={() => beginPairing(channel.id)} />
+                    <PairingWait pairing={pairing} onRetry={() => beginPairing(channel.id, true)} />
                   )}
                 </div>
               )}
@@ -584,9 +585,14 @@ function PairingWait({ pairing, onRetry }) {
   if ((pairing.unreachable || 0) >= 3) {
     problem =
       'PingPulse cannot reach its WhatsApp connection service right now. Nothing is wrong with your phone. Try again in a minute.'
+  } else if ((pairing.gaveUp || pairing.reason === 'unreachable') && pairing.code === 405) {
+    problem =
+      'WhatsApp refused the version of WhatsApp Web this connection announces (code 405). Try again: it asks WhatsApp for the current version. If it keeps happening, the connection service needs updating.'
   } else if (pairing.gaveUp || pairing.reason === 'unreachable') {
     problem =
-      'WhatsApp turned down every attempt to start a pairing. This usually passes within a few minutes. If this phone is linked to another PingPulse business, disconnect it there first.'
+      'WhatsApp turned down every attempt to start a pairing' +
+      (pairing.code ? ` (code ${pairing.code})` : '') +
+      '. Try again: it starts from a clean slate, without anything stored from earlier attempts. If it keeps happening, wait a few minutes; WhatsApp limits how often a new device can be linked.'
   } else if (pairing.reason === 'logged_out') {
     problem = 'This phone was logged out of WhatsApp Web. Start again to get a fresh code.'
   } else if (waited >= 45) {

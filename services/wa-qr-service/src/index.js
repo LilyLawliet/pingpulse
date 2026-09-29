@@ -19,7 +19,7 @@
  * official API access is in place rather than a permanent transport.
  */
 
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
 
@@ -260,6 +260,35 @@ function reportStatus(sessionId, status, extra = {}) {
   callApi('/api/v1/whatsapp/qr-status', { sessionId, status, ...extra })
 }
 
+/**
+ * Throw away everything stored for one session: keys, state, counts.
+ *
+ * Keys WhatsApp no longer accepts make every later attempt fail before a code
+ * is offered, so a pairing that is not working has to start from nothing.
+ * Nothing here is worth keeping for a session that is not connected: the only
+ * thing on disk is the identity from a scan, and a new scan makes a new one.
+ */
+function forget(sessionId) {
+  try {
+    rmSync(path.join(SESSIONS_DIR, sessionId), { recursive: true, force: true })
+  } catch (error) {
+    log.error({ sessionId, err: error?.message }, 'could not clear the stored keys')
+  }
+  opened.delete(sessionId)
+  attempts.delete(sessionId)
+  latest.delete(sessionId)
+}
+
+/** Whether keys from a real scan are on disk for this session. */
+function scannedBefore(sessionId) {
+  try {
+    const creds = JSON.parse(readFileSync(path.join(SESSIONS_DIR, sessionId, 'creds.json'), 'utf8'))
+    return Boolean(creds?.me?.id)
+  } catch {
+    return false
+  }
+}
+
 // ---------------------------------------------------------------- session
 /**
  * Start (or resume) a session for one channel.
@@ -389,7 +418,11 @@ async function startSession(sessionId) {
 
       // Logged out from the phone: the credentials are dead and a re-scan is
       // the only way back. Anything else is a dropped connection worth retrying.
-      if (status === DisconnectReason.loggedOut) {
+      if (
+        status === DisconnectReason.loggedOut ||
+        status === DisconnectReason.forbidden ||
+        (status === 401 && !opened.has(sessionId))
+      ) {
         log.warn({ sessionId }, 'logged out on the phone — re-pairing required')
 
         // Throw the dead credentials away, which is the part that was missing.
@@ -456,6 +489,18 @@ async function startSession(sessionId) {
       // showed the operator a spinner the whole time.
       const tries = (attempts.get(sessionId) || 0) + 1
       attempts.set(sessionId, tries)
+      // Keys from a handshake that never reached a code are worth nothing and
+      // may be why it failed: the next attempt starts from fresh ones.
+      try {
+        rmSync(folder, { recursive: true, force: true })
+      } catch {
+        /* nothing there */
+      }
+      // 405 is WhatsApp refusing the client version: ask for the current one
+      // again rather than retrying with the one it just refused.
+      if (status === 405) {
+        waVersion = null
+      }
 
       if (tries >= MAX_PAIRING_ATTEMPTS) {
         // Deliberately not cleared here. Resetting the count on the way out
@@ -465,12 +510,12 @@ async function startSession(sessionId) {
           { sessionId, status, tries },
           'giving up on this pairing — WhatsApp closed every attempt before offering a code',
         )
-        reportStatus(sessionId, 'DISCONNECTED', { reason: 'unreachable' })
+        reportStatus(sessionId, 'DISCONNECTED', { reason: 'unreachable', code: status || null })
         return
       }
 
       log.info({ sessionId, status, tries }, 'pairing attempt failed, trying again')
-      reportStatus(sessionId, 'DISCONNECTED', { reason: 'reconnecting' })
+      reportStatus(sessionId, 'DISCONNECTED', { reason: 'reconnecting', code: status || null })
       setTimeout(() => startSession(sessionId).catch(() => {}), 3000)
     }
   })
@@ -567,6 +612,9 @@ app.get('/session/:id', (request, response) => {
     // Why it is where it is, so the screen can say so instead of spinning:
     // "reconnecting", "unreachable" (given up), "logged_out".
     reason: state?.reason || null,
+    // WhatsApp's own reason for closing, when it gave one: 405 is the client
+    // version, 403 a refused account, 428/408 the connection itself.
+    code: state?.code || null,
     tries: attempts.get(sessionId) || 0,
     gaveUp: gaveUp.has(sessionId),
     since: state?.at || null,
@@ -574,7 +622,7 @@ app.get('/session/:id', (request, response) => {
 })
 
 app.post('/pair', async (request, response) => {
-  const { sessionId } = request.body || {}
+  const { sessionId, fresh } = request.body || {}
   if (!sessionId) return response.status(400).json({ ok: false, error: 'sessionId required' })
   try {
     // Somebody asked again, so the count of failures before this starts over.
@@ -596,6 +644,13 @@ app.post('/pair', async (request, response) => {
       } catch {
         /* already gone */
       }
+    }
+    // A pairing nobody has scanned has nothing on disk worth keeping, and may
+    // have keys WhatsApp now refuses. Asked for "fresh", even a scanned
+    // session that is not connected starts over: the person is holding the
+    // phone, ready to scan again.
+    if (!ready.has(sessionId) && (fresh || !scannedBefore(sessionId))) {
+      forget(sessionId)
     }
     await startSession(sessionId)
     response.json({ ok: true })
@@ -855,6 +910,11 @@ app.post('/logout', async (request, response) => {
     sessions.delete(sessionId)
     ready.delete(sessionId)
   }
+  // Whether or not a connection was running. Logging out only worked on a
+  // live one, so a disconnect made while the session was down left its keys
+  // on disk, and the next pairing loaded them and was refused.
+  forget(sessionId)
+  gaveUp.delete(sessionId)
   reportStatus(sessionId, 'DISCONNECTED', { reason: 'logged_out' })
   response.json({ ok: true })
 })
