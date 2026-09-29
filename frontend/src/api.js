@@ -44,7 +44,8 @@ async function request(path, options = {}) {
     let detail = response.statusText
     try {
       const body = await response.json()
-      detail = body.detail || detail
+      // A refusal from the calendar carries its reason and the sentence to show.
+      detail = body.detail?.message || body.detail || detail
     } catch {
       // non-JSON error body
     }
@@ -247,6 +248,27 @@ export const api = {
     request('/agent/simulate', {
       method: 'POST',
       body: JSON.stringify({ message, history, booking_state: bookingState }),
+    }),
+
+  // ------------------------------ calendar ------------------------------
+  // Every change goes through the same checks a customer's booking does:
+  // opening hours, the diary, the database constraint. A refusal comes back
+  // as an error carrying the sentence to show.
+  listAppointments: (start, days = 7) =>
+    request(`/appointments?days=${days}${start ? `&start=${start}` : ''}`),
+  freeTimes: (day, kind) =>
+    request(`/appointments/free?day=${day}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`),
+  bookAppointment: (body) =>
+    request('/appointments', { method: 'POST', body: JSON.stringify(body) }),
+  moveAppointment: (id, startsAt, tellCustomer) =>
+    request(`/appointments/${id}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ starts_at: startsAt, tell_customer: tellCustomer }),
+    }),
+  cancelAppointment: (id, tellCustomer) =>
+    request(`/appointments/${id}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ tell_customer: tellCustomer }),
     }),
 
   // ------------------------------ what broke ----------------------------

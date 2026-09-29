@@ -18,12 +18,15 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
 from app.models import (
+    APPOINTMENT_CONFIRMED,
     PIPELINE_OUTCOMES,
+    Appointment,
     SENDER_CUSTOMER,
     CRMContact,
     Message,
@@ -54,6 +57,9 @@ from app.services.ws_manager import manager
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["operations"])
+
+# Where the Test agent page keeps its pretend appointment between messages.
+SANDBOX_APPOINTMENT_KEY = "sandbox_appointment"
 
 
 # ------------------------------------------------------------------- board
@@ -773,6 +779,7 @@ async def simulate(
     appointment = None
     performed = None
     offered_slots: list[str] = []
+    booking_reply = None
     state = payload.get("booking_state") if isinstance(payload.get("booking_state"), dict) else {}
     if booking.wants_booking(message) and not booking.booking_enabled(organization):
         reachable = await notifications.can_reach(db, organization)
@@ -803,13 +810,47 @@ async def simulate(
         )
         db.add(probe)
         await db.flush()
+        # The pretend appointment from an earlier turn, rebuilt inside the
+        # savepoint, so "cancel it" or "move it to Friday" can be tried here
+        # the way a real customer would say it.
+        pretend_booking = state.pop(SANDBOX_APPOINTMENT_KEY, None)
+        if isinstance(pretend_booking, dict):
+            try:
+                starts = datetime.fromisoformat(pretend_booking["starts_at"])
+                ends = datetime.fromisoformat(pretend_booking["ends_at"])
+                if ends > datetime.now(timezone.utc):
+                    db.add(
+                        Appointment(
+                            organization_id=tenant.id,
+                            contact_id=probe.id,
+                            starts_at=starts,
+                            ends_at=ends,
+                            timezone_name=pretend_booking.get("timezone") or "UTC",
+                            kind=pretend_booking.get("kind") or "other",
+                            status=APPOINTMENT_CONFIRMED,
+                            source="agent",
+                        )
+                    )
+                    await db.flush()
+            except (KeyError, TypeError, ValueError, IntegrityError):
+                pass
         turn = await booking.handle_turn(db, organization, probe, message)
+        booking_reply = turn.plain_reply(organization)
         performed = turn.performed
         if turn.appointment is not None:
             appointment = SimpleNamespace(when=booking.describe(turn.appointment))
         if turn.prompt_block:
             booking_block = "\n\n".join(filter(None, [booking_block, turn.prompt_block]))
         state = dict(probe.contact_metadata or {})
+        state.pop(SANDBOX_APPOINTMENT_KEY, None)
+        kept = await booking.upcoming_for(db, probe.id)
+        if kept is not None:
+            state[SANDBOX_APPOINTMENT_KEY] = {
+                "starts_at": booking._aware(kept.starts_at).isoformat(),
+                "ends_at": booking._aware(kept.ends_at).isoformat(),
+                "timezone": kept.timezone_name,
+                "kind": kept.kind,
+            }
         offered_slots = [str(slot) for slot in (turn.offered or [])]
         if performed:
             booking_note = (
@@ -843,11 +884,14 @@ async def simulate(
         # The sandbox sends nothing, pictures included.
         photos_attached=False,
         photos_available=await product_search.has_photos(db, tenant.id),
-        last_resort=""
-        if offer.quote.unknown_place
-        else offer.reply()
-        or sales_policy.without_filler(
-            sales_policy.deterministic_reply({}, chunks, organization, message=message)
+        last_resort=booking_reply
+        or (
+            ""
+            if offer.quote.unknown_place
+            else offer.reply()
+            or sales_policy.without_filler(
+                sales_policy.deterministic_reply({}, chunks, organization, message=message)
+            )
         ),
     )
     # What a real conversation would do when nothing answers the question:

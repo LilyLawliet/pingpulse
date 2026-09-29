@@ -915,16 +915,21 @@ async def process_inbound_message(
         # If both providers are down the customer still gets a real answer built
         # from retrieved facts — never a promise that a human will call back.
         # A worked-out quote comes first: it is the answer to what they asked.
-        last_resort=""
-        if offer and offer.quote.unknown_place
-        else (offer.reply() if offer and offer.reply() else None)
-        or sales_policy.without_filler(
-            sales_policy.deterministic_reply(
-                analysis, chunks, organization, products,
-                booking_url=scheduling.booking_link(
-                    organization.name, contact.name, phone_number
-                ),
-                message=body,
+        # What the diary did this turn comes first: a booking made while the
+        # models are down is confirmed from its row, not buried under a quote.
+        last_resort=appointment_turn.plain_reply(organization)
+        or (
+            ""
+            if offer and offer.quote.unknown_place
+            else (offer.reply() if offer and offer.reply() else None)
+            or sales_policy.without_filler(
+                sales_policy.deterministic_reply(
+                    analysis, chunks, organization, products,
+                    booking_url=scheduling.booking_link(
+                        organization.name, contact.name, phone_number
+                    ),
+                    message=body,
+                )
             )
         ),
     )
@@ -1182,11 +1187,24 @@ async def process_inbound_message(
             f"{who} messaged for the first time: {body.strip()[:200]}",
             contact_id=contact.id,
         )
-    if analysis.get("intent") == "book_call":
+    # What happened to the diary, from the rows written this turn. A request
+    # alone raises nothing here: with hours set, the agent answered it with
+    # real times; without them, it was raised above as unanswered.
+    diary = booking.alert_for(appointment_turn, who)
+    if diary is not None:
         await notifications.raise_and_send(
-            db, organization, "booking", "Someone wants to book",
-            f"{who} asked to book a time. The agent has replied, but a booking "
-            "usually wants a person to confirm it.",
+            db, organization, "booking", diary[0], diary[1], contact_id=contact.id
+        )
+    elif (
+        analysis.get("intent") == "book_call"
+        and not handed_to_a_person
+        and not booking.booking_enabled(organization)
+        and not booking.wants_booking(body)
+    ):
+        await notifications.raise_and_send(
+            db, organization, "unanswered", "Someone wants to book and the agent cannot",
+            f"{who} asked to book a time: {body.strip()[:200]}\n\nThis business has no "
+            "opening hours set, so nothing was offered or booked.",
             contact_id=contact.id,
         )
     if generation.provider == "none":

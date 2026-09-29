@@ -989,7 +989,10 @@ NOTIFY_EVENTS: tuple[tuple[str, str, bool], ...] = (
     # so silence is the symptom and nothing would ever fire.
     ("whatsapp_down", "Your WhatsApp number has stopped working", True),
     ("escalation", "Somebody asked for a person, or complained", True),
-    ("booking", "Somebody wants to book a time", True),
+    # Raised when the diary actually changes - booked, moved or cancelled -
+    # never on a mere request, which is either answered with real times or,
+    # when the shop has no hours, raised as "unanswered".
+    ("booking", "An appointment was booked, moved or cancelled", True),
     ("delivery_failure", "A message could not be delivered", True),
     ("opt_out", "Somebody asked to stop being messaged", True),
     ("new_lead", "A new person messaged for the first time", False),

@@ -353,6 +353,51 @@ Drag a card to move someone, or use the menu on the card. Both work, which
 matters because drag-and-drop does not fire on a phone at all, and a phone is
 the main device for most people running this.
 
+### Calendar
+
+Every appointment in one week, in your own timezone, with each day's opening
+hours at the top of its column. Appointments the agent made say *by the agent*;
+ones you made say *by you*.
+
+- **See it.** Move week by week with the arrows; **Today** comes back. Tick
+  *Show cancelled or moved* to see what changed. A cancelled appointment stays
+  in the calendar, crossed out, so "did you cancel that?" always has an answer.
+- **Book someone.** **New appointment**, pick the customer, the day and one of
+  the free times. Only times that really are free are shown.
+- **Move or cancel.** Tap an appointment. **Move** shows that day's free times;
+  **Cancel appointment** frees the time for other customers.
+- **Tell the customer.** Ticked by default. The WhatsApp message is written
+  from the calendar entry itself, so it says exactly the day and time saved.
+
+You get the same rules as the agent, with one difference: you can fit someone
+in at short notice. You can't book outside your hours, in the past, or on top
+of another appointment. If you try, the calendar says why.
+
+If the agent can't book at all (hours read from your document but never
+saved, or no timezone), the calendar says so at the top, with a button that
+takes you to the fix.
+
+**What customers can say.** The agent understands:
+
+- a time it offered: "the second one", "Thursday at 4", or a plain "yes" when
+  it offered one time;
+- their own time: "can I come on 9 October at 3pm?", "tomorrow 15:30",
+  "Friday at noon". "At 3" means 3pm when you are shut at 3am;
+- a question: "is Thursday at 4 free?" is answered, and booked only after they
+  say yes;
+- a move: "can I reschedule?", then any of the above. "Can we do Monday at 5
+  instead?" moves it straight away. The old time is freed;
+- a cancellation: "please cancel my appointment".
+
+Every time is checked against your hours and your calendar before anything is
+said. A time you're shut is refused with that day's hours and the free times
+that day. Two customers can never get the same time. If the AI is down, the
+customer still gets the exact confirmation, written from the calendar entry.
+
+**You are told.** Each booking, move and cancellation sends an alert (*An
+appointment was booked, moved or cancelled* in Alerts): who it was, and the
+old and new times.
+
 ### Analytics
 
 ![Analytics: how it is going, rather than what is happening right now.](images/guide/13-analytics.png)
@@ -383,7 +428,9 @@ wrong, the document was read wrongly, and you will see it before a customer
 does.
 
 **Booking works here too.** Ask for a time and it offers real free times
-from your diary; reply with one and it books it. It's done exactly as on
+from your diary; reply with one and it books it. Then try "can I reschedule?"
+or "cancel my appointment": the pretend booking is carried from message to
+message, so moving and cancelling work too. It's all done exactly as on
 WhatsApp, then undone, so nothing is kept. If your hours aren't set, the page
 says what a live customer would have been told.
 
@@ -425,7 +472,11 @@ talked out of.
   it never offers to send one.
 - **It never claims to be a person.** Asked directly, it says what it is.
 - **It only offers times it can actually honour** — inside your hours, in your
-  timezone, and only books a slot it already offered.
+  timezone, and free in your calendar. A time the customer names is checked
+  the same way, and a question about a time is never taken as a booking.
+- **It never says an appointment was booked, moved or cancelled** unless the
+  calendar changed on that message. The confirmation is written from the
+  calendar entry, with the full date.
 - **It answers each message once**, however many times the network delivers
   it, and sends one follow-up once.
 - **It stops when somebody asks for a person**, and tells you.

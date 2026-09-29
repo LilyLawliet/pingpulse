@@ -365,6 +365,8 @@ const NEEDS = {
   inbox: REQUIRED_STEPS,
   board: REQUIRED_STEPS,
   analytics: REQUIRED_STEPS,
+  // The calendar says for itself what stops the agent booking, with the fix.
+  calendar: ['business'],
   test: ['business', 'knowledge'],
   setup: [],
 }

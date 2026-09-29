@@ -133,3 +133,26 @@ Right answer:
 - The Test agent page shows **From your price list** under each answer, with
   what it matched and worked out. If a line there is wrong, the problem is the
   reading of the price list, not the AI.
+
+### 12. Appointments (a gift-wrapping or pick-up visit)
+First save the hours in **Hours and booking** (Mon–Sat, 11 AM–8 PM). Until
+you do, the Calendar page says the agent can't book, and every booking request
+goes to a team member. Use the **Test agent** page, or a phone.
+
+| Send | Right answer |
+|---|---|
+| `can I book an appointment?` | Up to six real free times, all Mon–Sat between 11 AM and 8 PM. None on Sunday. |
+| `the second one` | Booked. It states the day, the date and the time of the second time offered, and nothing else. |
+| `can I book next Sunday at 2pm?` | Refused: shut on Sunday. Offers other times. Nothing booked. |
+| `is Friday at 9pm free?` | No: open 11 AM to 8 PM on Friday. Offers Friday's free times. |
+| `is Friday at 4pm free?` | Yes, it's free, and it asks whether to book. Nothing is booked yet. |
+| `yes` (next) | Booked for Friday 4:00 pm. |
+| `can I reschedule?` | Offers new times. Says the Friday booking hasn't changed yet. |
+| `the last one` (next) | Moved. States the new time. The Calendar page shows one live booking; the old one is crossed out under *Show cancelled*. |
+| `can we do Monday at 5 instead?` | Moved to Monday 5:00 pm. |
+| `please cancel my appointment` | Cancelled, and it names what was cancelled. |
+| `cancel my appointment` (with nothing booked) | It can't find a booking. It must **not** say anything was cancelled. |
+| `will my order arrive by Friday?` | A delivery answer. No appointment times. |
+
+On WhatsApp, each booking, move and cancel sends an alert: *New appointment
+booked*, *Appointment moved* (old and new time), *Appointment cancelled*.

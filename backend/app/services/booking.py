@@ -241,7 +241,7 @@ def _aware(moment: datetime) -> datetime:
 
 
 async def is_free(
-    db, organization, starts_at: datetime, ends_at: datetime, ignore_id=None
+    db, organization, starts_at: datetime, ends_at: datetime, ignore_id=None, *, notice: bool = True
 ) -> Refusal | None:
     """None if the slot can be taken, or the reason it cannot.
 
@@ -253,8 +253,13 @@ async def is_free(
     if ends_at <= starts_at:
         return Refusal("backwards", "That appointment would end before it started.")
 
-    notice = min_notice_minutes(organization)
-    if starts_at < now + timedelta(minutes=notice):
+    if starts_at < now:
+        return Refusal("past", "That time has already passed.")
+
+    # The notice is for customers booking themselves. A person at the shop
+    # fitting somebody in this afternoon knows whether they can.
+    notice = min_notice_minutes(organization) if notice else 0
+    if notice and starts_at < now + timedelta(minutes=notice):
         hours = max(1, round(notice / 60))
         return Refusal(
             "too_soon",
@@ -363,6 +368,7 @@ async def book(
     location: str | None = None,
     notes: str | None = None,
     source: str = "agent",
+    notice: bool = True,
 ) -> Booked | Refusal:
     """Take a slot, or say why it could not be taken. Never claims success.
 
@@ -383,7 +389,7 @@ async def book(
 
     ends_at = starts_at + timedelta(minutes=duration_minutes(organization, chosen_kind))
 
-    refusal = await is_free(db, organization, starts_at, ends_at)
+    refusal = await is_free(db, organization, starts_at, ends_at, notice=notice)
     if refusal is not None:
         return refusal
 
@@ -437,7 +443,7 @@ async def cancel(db, appointment, *, source: str = "agent") -> Booked | Refusal:
 
 
 async def reschedule(
-    db, organization, appointment, starts_at: datetime, *, source: str = "agent"
+    db, organization, appointment, starts_at: datetime, *, source: str = "agent", notice: bool = True
 ) -> Booked | Refusal:
     """Move an appointment, leaving exactly one live row behind.
 
@@ -454,7 +460,7 @@ async def reschedule(
         minutes=duration_minutes(organization, appointment.kind)
     )
     refusal = await is_free(
-        db, organization, starts_at, ends_at, ignore_id=appointment.id
+        db, organization, starts_at, ends_at, ignore_id=appointment.id, notice=notice
     )
     if refusal is not None:
         return refusal
@@ -816,14 +822,33 @@ _TIME_IN_TEXT = re.compile(
 )
 
 
-def remember_offer(contact, slots: list[datetime]) -> None:
-    """Write down exactly what was offered, so a reply can be matched to it."""
+# What an offer was for. Times offered to somebody who asked to move their
+# appointment are a move when they pick one; the same pick after an offer to
+# book is a new booking. The purpose was not remembered, so a customer who
+# asked to move, was offered times and answered "the second one" - which says
+# nothing about moving - was answered from their old appointment and nothing
+# moved.
+OFFER_BOOK = "book"
+OFFER_MOVE = "move"
+
+
+def remember_offer(contact, slots: list[datetime], purpose: str = OFFER_BOOK) -> None:
+    """Write down exactly what was offered, and why, so a reply can be matched to it."""
     metadata = dict(getattr(contact, "contact_metadata", None) or {})
     metadata[OFFER_KEY] = {
         "at": datetime.now(timezone.utc).isoformat(),
         "slots": [slot.isoformat() for slot in slots],
+        "for": purpose,
     }
     contact.contact_metadata = metadata
+
+
+def offer_purpose(contact) -> str | None:
+    """What the standing offer was for, or None when there is none."""
+    if not remembered_offer(contact):
+        return None
+    offer = (getattr(contact, "contact_metadata", None) or {}).get(OFFER_KEY) or {}
+    return offer.get("for") or OFFER_BOOK
 
 
 def remembered_offer(contact) -> list[datetime]:
@@ -909,6 +934,268 @@ def chosen_slot(text: str, offered: list[datetime], zone: ZoneInfo) -> datetime 
     return None
 
 
+# ----------------------------------------------------- a time they named
+# Customers do not only pick from a list. "Can I come Friday at 3pm?" names a
+# time, and answering it with six other times is how a diary feels like a
+# form. So a day and a clock time written plainly are read - and only read:
+# the moment is then checked against the shop's hours and its diary exactly
+# as an offered one would be, and the confirmation is rendered from the row,
+# with the full date, so a misreading is visible to the customer at once.
+#
+# Anything that does not read one way only reads as nothing. "At 3" is 3pm at
+# a shop open 9 to 5 and ambiguous at one open 8am to 11pm; "Monday or
+# Tuesday" names two days and books neither.
+_WEEKDAY_WORDS = {
+    "monday": 0, "mon": 0,
+    "tuesday": 1, "tue": 1, "tues": 1,
+    "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3, "thur": 3, "thurs": 3,
+    "friday": 4, "fri": 4,
+    "saturday": 5, "sat": 5,
+    "sunday": 6, "sun": 6,
+}
+_MONTH_WORDS = {
+    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+    "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sept": 9, "sep": 9,
+    "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
+}
+_MONTH = "|".join(sorted(_MONTH_WORDS, key=len, reverse=True))
+_WEEKDAY = "|".join(sorted(_WEEKDAY_WORDS, key=len, reverse=True))
+
+_DAY_MONTH = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+(?:of\s+)?({_MONTH})\b\.?")
+_MONTH_DAY = re.compile(rf"\b({_MONTH})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?\b(?!\s*(?:am|pm|:))")
+_ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+_WEEKDAY_NAMED = re.compile(rf"\b(next\s+|this\s+|coming\s+)?({_WEEKDAY})\b\.?")
+_RELATIVE = re.compile(r"\b(day after tomorrow|tomorrow|tmrw|tmr|today|tonight)\b")
+
+_CLOCK_MERIDIEM = re.compile(
+    r"\b(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m\.?|p\.?m\.?)(?![a-z])"
+)
+_CLOCK_COLON = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
+_CLOCK_AT = re.compile(r"\b(?:at|around|by|for)\s+(\d{1,2})(?:\s*o'?clock)?\b(?![:.\d]|\s*(?:am|pm|a\.m|p\.m|st|nd|rd|th|%|/|-))")
+_NOON = re.compile(r"\b(noon|midday)\b")
+
+
+@dataclass(frozen=True)
+class Named:
+    """The day and time a customer wrote, as far as they can be read.
+
+    `days` is every date named, in order. `clocks` is every reading of the time
+    they gave: one when it is plain ("3pm", "15:00"), two when it could be
+    morning or afternoon ("at 3"), and none when there is no time at all.
+    """
+
+    days: tuple = ()
+    clocks: tuple = ()
+
+    @property
+    def any(self) -> bool:
+        return bool(self.days or self.clocks)
+
+
+def _next_weekday(today: date, weekday: int, skip_today: bool) -> date:
+    ahead = (weekday - today.weekday()) % 7
+    if ahead == 0 and skip_today:
+        ahead = 7
+    return today + timedelta(days=ahead)
+
+
+def _dated(year: int, month: int, day: int, today: date) -> date | None:
+    try:
+        found = date(year, month, day)
+    except ValueError:
+        return None
+    if found < today:
+        try:
+            found = date(year + 1, month, day)
+        except ValueError:
+            return None
+    return found
+
+
+def named_time(text: str, zone: ZoneInfo, now: datetime | None = None) -> Named:
+    """The days and times written in this message, read in the shop's zone."""
+    lowered = (text or "").lower().replace("’", "'")
+    today = (now or datetime.now(timezone.utc)).astimezone(zone).date()
+
+    days: list[date] = []
+
+    def add(found: date | None) -> None:
+        if found is not None and found not in days:
+            days.append(found)
+
+    for match in _ISO_DATE.finditer(lowered):
+        try:
+            add(date(int(match.group(1)), int(match.group(2)), int(match.group(3))))
+        except ValueError:
+            pass
+    for match in _DAY_MONTH.finditer(lowered):
+        add(_dated(today.year, _MONTH_WORDS[match.group(2)], int(match.group(1)), today))
+    for match in _MONTH_DAY.finditer(lowered):
+        # "may" is a month and a verb. Only "May 3" with a number reads as a
+        # date here, and "may 3 of us come" is rare enough to be asked again.
+        add(_dated(today.year, _MONTH_WORDS[match.group(1)], int(match.group(2)), today))
+    for match in _RELATIVE.finditer(lowered):
+        word = match.group(1)
+        add(today + timedelta(days={"day after tomorrow": 2, "tomorrow": 1, "tmrw": 1, "tmr": 1}.get(word, 0)))
+    if not days:
+        # A weekday next to a date names the same day twice ("Friday 3
+        # October"); it only counts on its own.
+        for match in _WEEKDAY_NAMED.finditer(lowered):
+            word = match.group(2)
+            # "sat", "sun" and "wed" are English words too. They count as days
+            # only where a day would stand: before a time or a part of the day.
+            if word in ("sat", "sun", "wed") and not re.match(
+                r"\.?\s*(\d|at\b|morning|afternoon|evening|[?.!,]|$)", lowered[match.end():]
+            ):
+                continue
+            add(_next_weekday(today, _WEEKDAY_WORDS[word], skip_today=bool(match.group(1) and "next" in match.group(1))))
+
+    clocks: list[time] = []
+
+    def clock(hour: int, minute: int) -> None:
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            moment = time(hour, minute)
+            if moment not in clocks:
+                clocks.append(moment)
+
+    for match in _CLOCK_MERIDIEM.finditer(lowered):
+        hour = int(match.group(1))
+        if not 1 <= hour <= 12:
+            continue
+        hour %= 12
+        if match.group(3).startswith("p"):
+            hour += 12
+        clock(hour, int(match.group(2) or 0))
+    if not clocks:
+        for match in _NOON.finditer(lowered):
+            clock(12, 0)
+    if not clocks:
+        for match in _CLOCK_COLON.finditer(lowered):
+            hour, minute = int(match.group(1)), int(match.group(2))
+            clock(hour, minute)
+            if 1 <= hour <= 11:
+                # "1:30" is half past one in the afternoon at most shops. Both
+                # readings are kept and the shop's hours choose.
+                clock(hour + 12, minute)
+    if not clocks:
+        for match in _CLOCK_AT.finditer(lowered):
+            hour = int(match.group(1))
+            if 1 <= hour <= 12:
+                clock(hour % 12, 0)
+                clock(hour % 12 + 12, 0)
+
+    return Named(days=tuple(days), clocks=tuple(clocks))
+
+
+def named_moment(organization, named: Named, kind: str | None = None) -> datetime | None:
+    """The one moment this names at this shop, or None when it is not exactly one.
+
+    Several readings of the time are narrowed by the shop's hours: of "at 3"
+    only 3pm fits a day that closes at 5. What is left must be a single
+    reading, on a single day.
+    """
+    if len(named.days) != 1 or not named.clocks:
+        return None
+    day = named.days[0]
+    zone = agent_config.zone_of(organization)
+    if len(named.clocks) == 1:
+        return datetime.combine(day, named.clocks[0], tzinfo=zone).astimezone(timezone.utc)
+
+    window = _window_for(organization, day)
+    if window is None:
+        return None
+    length = timedelta(minutes=duration_minutes(organization, kind))
+    fits = []
+    for reading in named.clocks:
+        start = datetime.combine(day, reading, tzinfo=zone)
+        if start.time() >= window[0] and (start + length).time() <= window[1] and (
+            (start + length).date() == day
+        ):
+            fits.append(start)
+    if len(fits) != 1:
+        return None
+    return fits[0].astimezone(timezone.utc)
+
+
+# A short yes, answering a single time put to them. Nothing longer counts: "yes
+# but can we do later" is not agreement to the time offered.
+_YES = re.compile(
+    r"^\W*(yes|yes please|yeah|yep|yup|ok|okay|ok please|sure|confirm|confirmed|book it|"
+    r"go ahead|please do|perfect|great|sounds good|that works|works for me|done|"
+    r"haan|han|ji|ji haan|theek hai|thik hai|sahi hai|si|oui|ja)\b[\s\W]*"
+    r"(please|thanks|thank you|go ahead|book it|do it|kar do|kardo)?[\s\W]*$",
+    re.IGNORECASE,
+)
+
+
+def agreed(text: str, offered: list[datetime]) -> datetime | None:
+    """The one time put to them, when their reply is a plain yes to it."""
+    if len(offered) == 1 and _YES.match(text or ""):
+        return offered[0]
+    return None
+
+
+# Asking whether a time is free is not asking for it. "Is Friday at 3 free?"
+# is answered with whether it is, and booked when they say yes.
+_ONLY_ASKING = re.compile(
+    r"\b(free|available|possible|ok|okay|fine|work|any (space|room|slot)|do you have)\b[^.!]*\?\s*$",
+    re.IGNORECASE,
+)
+_ASKS_FOR_IT = re.compile(r"\b(book|reserve|schedule|put me (in|down)|lock)\b", re.IGNORECASE)
+
+
+# "Is delivery possible tomorrow?" asks about a parcel, not a visit. A question
+# about an order is never read as a question about the diary.
+_ORDER_TALK = re.compile(
+    r"\b(deliver\w*|ship\w*|dispatch\w*|arriv\w*|courier|parcel|order\w*|stock|restock\w*|"
+    r"pick ?up|collect\w*|open(ing)? hours|close|closing)\b",
+    re.IGNORECASE,
+)
+
+
+def only_asking(text: str) -> bool:
+    """A question whether a time is free, from somebody not yet asking to book it."""
+    return (
+        bool(_ONLY_ASKING.search(text or ""))
+        and not _ASKS_FOR_IT.search(text or "")
+        and not _ORDER_TALK.search(text or "")
+    )
+
+
+def _say_day(day: date) -> str:
+    return day.strftime("%A %d %B").replace(" 0", " ")
+
+
+def _say_moment(moment: datetime, zone: ZoneInfo) -> str:
+    local = moment.astimezone(zone)
+    return f"{_say_day(local.date())} at {local.strftime('%I:%M %p').lstrip('0').lower()}"
+
+
+def hours_on(organization, day: date) -> str:
+    """The shop's hours on this date, as a sentence part."""
+    window = _window_for(organization, day)
+    if window is None:
+        return f"closed on {_say_day(day)}"
+    opens, closes = window
+    return (
+        f"open {opens.strftime('%I:%M %p').lstrip('0').lower()} to "
+        f"{closes.strftime('%I:%M %p').lstrip('0').lower()} on {_say_day(day)}"
+    )
+
+
+async def slots_on(db, organization, days, *, kind: str | None = None) -> list[datetime]:
+    """Free times on these particular dates, soonest first."""
+    zone = agent_config.zone_of(organization)
+    found: list[datetime] = []
+    for day in days:
+        start = datetime.combine(day, time(0, 0), tzinfo=zone).astimezone(timezone.utc)
+        found.extend(await free_slots(db, organization, from_time=start, days=0, kind=kind))
+    found = [slot for slot in found if slot.astimezone(zone).date() in set(days)]
+    return found[:MAX_OFFERED_SLOTS]
+
+
 def as_prompt_block(organization, contact, slots: list[datetime], appointment=None) -> str:
     """What the agent is allowed to say about appointments this turn.
 
@@ -978,14 +1265,16 @@ _WANTS_CANCEL = re.compile(
 _WANTS_MOVE = re.compile(
     r"\b(reschedul\w*|re-?book|move|change|shift|push)\b.{0,40}"
     r"\b(appointment|booking|visit|estimate|consultation|slot|time|it)\b"
-    r"|\b(different|another|earlier|later) (time|day|slot)\b",
+    r"|\b(different|another|earlier|later) (time|day|slot|date)\b"
+    # On their own these only ever mean one thing.
+    r"|\b(reschedul\w*|postpone\w*|prepone\w*|re-?date)\b",
     re.IGNORECASE,
 )
 
 _WANTS_BOOKING = re.compile(
     r"\b("
     # Naming the thing.
-    r"book|booking|schedul\w*|appointment|consultation|estimate|survey|"
+    r"book|booking|bookings|schedul\w*|appointments?|consultations?|estimate|survey|"
     r"viewing|site visit|home visit"
     # Asking when.
     r"|when (can|could|are|do|would) you"
@@ -993,8 +1282,12 @@ _WANTS_BOOKING = re.compile(
     r"|which (times?|days?|slots?)"
     r"|any (times?|days?|slots?|openings?)"
     r"|(times?|days?|slots?) (are |is )?(free|available|open)"
-    r"|availab\w*"
-    r"|free (on|this|next|tomorrow|today)"
+    # "Available" and "free" are about the diary only next to a word about
+    # time: "is the planner available?" asks about a planner.
+    r"|(availab\w*|free)\b[^.?!]{0,30}\b(on|this|next|tomorrow|today|week|morning|"
+    r"afternoon|evening|monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+    r"|(tomorrow|today|this week|next week|monday|tuesday|wednesday|thursday|friday|"
+    r"saturday|sunday)\b[^.?!]{0,30}\b(availab\w*|free)"
     # Asking somebody to come.
     r"|come (out|round|over|and see|to see|by)"
     r"|(can|could) (you|someone|somebody) come"
@@ -1019,6 +1312,7 @@ class TurnResult:
     performed: str | None = None          # "booked" | "cancelled" | "moved"
     refusal: "Refusal | None" = None
     offered: list = None                  # noqa: RUF012 - set in __post_init__
+    previous: "Appointment | None" = None  # what a move replaced
 
     def __post_init__(self):
         if self.offered is None:
@@ -1027,6 +1321,36 @@ class TurnResult:
     @property
     def booked(self) -> bool:
         return self.performed == "booked"
+
+    def plain_reply(self, organization) -> str | None:
+        """What to send when no model answers, rendered from the rows alone.
+
+        A booking made on a turn when both providers are down is still a
+        booking, and the customer is owed its confirmation - not a holding
+        line about something else. Nothing here comes from a model.
+        """
+        zone = agent_config.zone_of(organization)
+        if self.booked and self.appointment is not None:
+            return f"You're booked: {describe(self.appointment)}."
+        if self.moved and self.appointment is not None:
+            return f"Done - it's moved. Your booking is now: {describe(self.appointment)}."
+        if self.cancelled and self.appointment is not None:
+            return f"Your {describe(self.appointment)} has been cancelled."
+        lines = []
+        if self.refusal is not None and self.refusal.reason not in ("needs_qualification",):
+            lines.append(f"Sorry, that time isn't possible: {self.refusal.message}")
+        if self.offered:
+            if len(self.offered) == 1 and self.refusal is None:
+                lines.append(f"{_say_moment(self.offered[0], zone)} is free. Shall I book it?")
+            else:
+                times = "\n".join(
+                    f"{index}. {_say_moment(slot, zone)}"
+                    for index, slot in enumerate(self.offered, start=1)
+                )
+                lines.append(f"These times are free:\n{times}\nWhich one suits you?")
+        elif self.refusal is not None and self.refusal.reason == "not_found":
+            lines = ["I can't find an appointment booked in your name."]
+        return "\n".join(lines) or None
 
     @property
     def cancelled(self) -> bool:
@@ -1089,12 +1413,61 @@ async def handle_turn(db, organization, contact, text: str) -> TurnResult:
         return TurnResult()
 
 
+_INSTEAD = re.compile(r"\b(instead|rather|swap|switch)\b", re.IGNORECASE)
+
+
+def _offer_block(organization, slots, purpose, existing=None, lead: str = "") -> str:
+    block = as_prompt_block(organization, None, slots)
+    if purpose == OFFER_MOVE and existing is not None:
+        block += (
+            f"\n\nThey want to move their existing {describe(existing)}. Nothing has "
+            "changed yet - offer these times and let them pick one."
+        )
+    return (lead + "\n" + block) if lead else block
+
+
+async def _near(db, organization, moment: datetime, kind: str | None) -> list[datetime]:
+    """Free times on the day they asked for, or the soonest ones when it is full."""
+    zone = agent_config.zone_of(organization)
+    same_day = await slots_on(db, organization, [moment.astimezone(zone).date()], kind=kind)
+    return same_day or await free_slots(db, organization, days=7, kind=kind)
+
+
+def _why_not(organization, refusal: Refusal, moment: datetime) -> str:
+    """The refusal, with the hours of that day when the shop is shut then."""
+    zone = agent_config.zone_of(organization)
+    said = f"{_say_moment(moment, zone)} could NOT be booked: {refusal.message}"
+    if refusal.reason == "closed":
+        said += f" (The business is {hours_on(organization, moment.astimezone(zone).date())}.)"
+    return said
+
+
 async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
     existing = await upcoming_for(db, contact.id)
     zone = agent_config.zone_of(organization)
+    offered = remembered_offer(contact)
+    purpose = offer_purpose(contact)
+    named = named_time(text, zone)
+    kind = existing.kind if existing is not None else None
+    moment = named_moment(organization, named, kind) if named.any else None
+    picked = chosen_slot(text, offered, zone) or agreed(text, offered)
+    # "Move it to 4 October at 1pm" names its own day. A 1pm on another day in
+    # the standing offer is not what they asked for, however well the clock
+    # matches.
+    if picked is not None and named.days and picked.astimezone(zone).date() not in named.days:
+        picked = None
+
+    # "I don't want the Friday one, can we do Monday?" says cancel and means
+    # move. A cancellation that names another time is a move.
+    moving = existing is not None and (
+        wants_move(text)
+        or (purpose == OFFER_MOVE and not wants_cancel(text))
+        or (bool(_INSTEAD.search(text)) and (moment is not None or bool(named.days)))
+        or (wants_cancel(text) and (moment is not None or bool(named.days)))
+    )
 
     # ---------------------------------------------------------- cancelling
-    if wants_cancel(text):
+    if wants_cancel(text) and not moving:
         if existing is None:
             return TurnResult(
                 prompt_block=(
@@ -1114,6 +1487,7 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
                     f"Their {describe(existing)} has been CANCELLED, just now, "
                     "successfully. Confirm that plainly and briefly."
                 ),
+                appointment=existing,
                 performed="cancelled",
             )
         return TurnResult(
@@ -1127,48 +1501,78 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
         )
 
     # -------------------------------------------------------- rescheduling
-    if wants_move(text) and existing is not None:
-        picked = chosen_slot(text, remembered_offer(contact), zone)
-        if picked is not None:
-            result = await reschedule(db, organization, existing, picked)
+    if existing is not None and moving:
+        target = picked or moment
+        if target is not None:
+            if picked is None and only_asking(text):
+                return await _put_to_them(db, organization, contact, target, OFFER_MOVE, existing)
+            result = await reschedule(db, organization, existing, target)
             if result.ok:
                 forget_offer(contact)
                 return TurnResult(
                     prompt_block=(
                         "=== APPOINTMENTS ===\n"
                         f"Their appointment has been MOVED, just now, successfully. "
-                        f"It is now: {describe(result.appointment)}. Confirm exactly "
-                        "that and nothing else."
+                        f"It was: {describe(existing)}. It is now: "
+                        f"{describe(result.appointment)}. Confirm exactly that and "
+                        "nothing else."
                     ),
                     appointment=result.appointment,
                     performed="moved",
+                    previous=existing,
                 )
+            slots = await _near(db, organization, target, existing.kind)
+            remember_offer(contact, slots, OFFER_MOVE)
             return TurnResult(
-                prompt_block=(
-                    "=== APPOINTMENTS ===\n"
-                    f"The move did NOT happen: {result.message} They still have "
-                    f"their original {describe(existing)}. Say so, and offer to "
-                    "look at other times."
+                prompt_block=_offer_block(
+                    organization,
+                    slots,
+                    OFFER_MOVE,
+                    existing,
+                    lead=(
+                        "=== APPOINTMENTS ===\n"
+                        f"The move did NOT happen. {_why_not(organization, result, target)} "
+                        f"They still have their original {describe(existing)}. Say so."
+                    ),
                 ),
                 appointment=existing,
                 refusal=result,
+                offered=slots,
             )
 
-        slots = await free_slots(db, organization, days=7)
-        remember_offer(contact, slots)
-        block = as_prompt_block(organization, contact, slots)
-        return TurnResult(
-            prompt_block=(
-                block
-                + f"\n\nThey want to move their existing {describe(existing)}. "
-                "Nothing has changed yet - offer these times and let them pick one."
-            ),
-            appointment=existing,
-            offered=slots,
-        )
+        if named.days:
+            slots = await slots_on(db, organization, list(named.days), kind=existing.kind)
+            lead = ""
+            if not slots:
+                days = ", ".join(hours_on(organization, day) for day in named.days)
+                lead = (
+                    "=== APPOINTMENTS ===\n"
+                    f"Nothing is free on the day they asked for (the business is {days}). "
+                    "Say so and offer these other times instead."
+                )
+                slots = await free_slots(db, organization, days=7, kind=existing.kind)
+            remember_offer(contact, slots, OFFER_MOVE)
+            return TurnResult(
+                prompt_block=_offer_block(organization, slots, OFFER_MOVE, existing, lead),
+                appointment=existing,
+                offered=slots,
+            )
+
+        if wants_move(text) or wants_cancel(text):
+            slots = await free_slots(db, organization, days=7, kind=existing.kind)
+            remember_offer(contact, slots, OFFER_MOVE)
+            return TurnResult(
+                prompt_block=_offer_block(organization, slots, OFFER_MOVE, existing),
+                appointment=existing,
+                offered=slots,
+            )
 
     # ------------------------------------------------------------- booking
     if existing is not None:
+        if moment is not None and (wants_booking(text) or only_asking(text)):
+            # A time named by somebody who already has one: a second
+            # appointment or a move? Asked, never guessed.
+            return await _put_to_them(db, organization, contact, moment, OFFER_MOVE, existing)
         # They already have one. Answer from the record rather than offering
         # a second appointment nobody asked for.
         return TurnResult(
@@ -1179,30 +1583,39 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
     # A customer picking a slot does not say "book" - they say "the first one"
     # or "Tuesday at 2". So the standing offer is consulted before intent is,
     # and answering one of our own questions counts as wanting to book.
-    picked = chosen_slot(text, remembered_offer(contact), zone)
+    in_context = bool(offered) or wants_booking(text) or (only_asking(text) and named.any)
+    target = picked or (moment if in_context else None)
 
-    if picked is None and not wants_booking(text):
+    if target is None and not wants_booking(text) and not (
+        named.days and (offered or only_asking(text))
+    ):
         return TurnResult()
 
     if not booking_enabled(organization):
         return TurnResult(prompt_block=as_prompt_block(organization, contact, []))
-    if picked is not None:
+
+    if target is not None:
+        if picked is None and only_asking(text):
+            return await _put_to_them(db, organization, contact, target, OFFER_BOOK)
+
         # Everything the shop said it needs before sending somebody out.
         outstanding = _missing_for_booking(organization, contact)
         if outstanding:
             name, asks = outstanding[0]
+            remember_offer(contact, [target], OFFER_BOOK)
             return TurnResult(
                 prompt_block=(
                     "=== APPOINTMENTS ===\n"
-                    f"They chose a time, and it is still free - but this business "
+                    f"They chose {_say_moment(target, zone)} - but this business "
                     f"needs to know {asks or name} before an appointment can be "
                     "made. Ask them for that one thing. Nothing is booked yet, so "
                     "do NOT say it is."
                 ),
                 refusal=Refusal("needs_qualification", f"Still need: {asks or name}"),
+                offered=[target],
             )
 
-        result = await book(db, organization, contact, picked)
+        result = await book(db, organization, contact, target)
         if result.ok:
             forget_offer(contact)
             return TurnResult(
@@ -1216,12 +1629,12 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
                 performed="booked",
             )
 
-        slots = await free_slots(db, organization, days=7)
-        remember_offer(contact, slots)
+        slots = await _near(db, organization, target, None)
+        remember_offer(contact, slots, OFFER_BOOK)
         return TurnResult(
             prompt_block=(
                 "=== APPOINTMENTS ===\n"
-                f"That time could NOT be booked: {result.message}\n"
+                f"{_why_not(organization, result, target)}\n"
                 + as_prompt_block(organization, contact, slots)
                 + "\nSay what happened and offer these instead. Nothing is booked."
             ),
@@ -1229,12 +1642,100 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
             offered=slots,
         )
 
+    if named.days:
+        slots = await slots_on(db, organization, list(named.days))
+        if slots:
+            remember_offer(contact, slots, OFFER_BOOK)
+            return TurnResult(prompt_block=as_prompt_block(organization, contact, slots), offered=slots)
+        days = ", ".join(hours_on(organization, day) for day in named.days)
+        slots = await free_slots(db, organization, days=7)
+        remember_offer(contact, slots, OFFER_BOOK)
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"Nothing is free on the day they asked for (the business is {days}). "
+                "Say so, and offer these other times instead.\n"
+                + as_prompt_block(organization, contact, slots)
+            ),
+            offered=slots,
+        )
+
     slots = await free_slots(db, organization, days=7)
-    remember_offer(contact, slots)
+    remember_offer(contact, slots, OFFER_BOOK)
     return TurnResult(
         prompt_block=as_prompt_block(organization, contact, slots),
         offered=slots,
     )
+
+
+async def _put_to_them(db, organization, contact, moment, purpose, existing=None) -> TurnResult:
+    """Say whether this one time is free, and ask before taking it.
+
+    The time is remembered as a one-item offer, so a plain "yes" next books or
+    moves exactly it - and nothing else could be what they agreed to.
+    """
+    zone = agent_config.zone_of(organization)
+    kind = existing.kind if existing is not None else None
+    length = timedelta(minutes=duration_minutes(organization, kind))
+    refusal = await is_free(
+        db, organization, moment, moment + length,
+        ignore_id=existing.id if existing is not None else None,
+    )
+    if refusal is None:
+        remember_offer(contact, [moment], purpose)
+        question = (
+            f"Ask whether they want their {describe(existing)} moved to it"
+            if existing is not None
+            else "Ask whether they would like it booked"
+        )
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"{_say_moment(moment, zone)} is FREE. {question}. Nothing has been "
+                "booked or changed yet, so do NOT say it has."
+            ),
+            appointment=existing,
+            offered=[moment],
+        )
+    slots = await _near(db, organization, moment, kind)
+    remember_offer(contact, slots, purpose)
+    return TurnResult(
+        prompt_block=_offer_block(
+            organization, slots, purpose, existing,
+            lead="=== APPOINTMENTS ===\n" + _why_not(organization, refusal, moment),
+        ),
+        appointment=existing,
+        refusal=refusal,
+        offered=slots,
+    )
+
+
+def alert_for(turn: TurnResult, who: str) -> tuple[str, str] | None:
+    """The alert a shop gets for what this turn did to its diary, or None.
+
+    Written from the rows, like the customer's confirmation, so what the shop
+    reads and what the customer was told are the same appointment.
+    """
+    if not turn.performed or turn.appointment is None:
+        return None
+    if turn.booked:
+        return (
+            "New appointment booked",
+            f"{who} booked a {describe(turn.appointment)}. It is in your calendar.",
+        )
+    if turn.moved:
+        was = f" from {describe(turn.previous)}" if turn.previous is not None else ""
+        return (
+            "Appointment moved",
+            f"{who} moved their appointment{was} to {describe(turn.appointment)}. "
+            "The calendar has the new time and the old one is free again.",
+        )
+    if turn.cancelled:
+        return (
+            "Appointment cancelled",
+            f"{who} cancelled their {describe(turn.appointment)}. That time is free again.",
+        )
+    return None
 
 
 # --------------------------------------------------------------- readiness
