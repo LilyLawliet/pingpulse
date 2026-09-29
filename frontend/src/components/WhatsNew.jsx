@@ -12,6 +12,32 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.7.1',
+    date: '29 September 2026',
+    items: [
+      {
+        title: 'Block out time you are not available',
+        body:
+          '“I’m busy Thursday afternoon” now has somewhere to go. Block '
+          + 'the time out on the Calendar page and nobody is offered it — no link to '
+          + 'find, no other app to set up. It refuses only what would be wrong: time that '
+          + 'has passed, or time a customer is already booked into, which it names so you '
+          + 'can move them first. Remove a block the same way you cancel anything else, '
+          + 'and the time is free again.',
+      },
+      {
+        title: 'Connecting your own calendar is now optional, and says so',
+        body:
+          'Reading your own calendar needs its private address, which is genuinely hard '
+          + 'to find — on Google it only exists in a desktop browser, never the app. '
+          + 'That setting has moved out of the way, because you do not need it: bookings '
+          + 'are emailed to you as calendar invitations whether or not you connect '
+          + 'anything, and blocking out time covers what most shops actually wanted it '
+          + 'for.',
+      },
+    ],
+  },
+  {
     version: '1.7.0',
     date: '29 September 2026',
     items: [
