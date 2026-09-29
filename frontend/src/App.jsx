@@ -929,7 +929,12 @@ function Dashboard({ onSignedOut }) {
         </header>
 
         <main className="min-h-0 flex-1">
-          <PageBoundary key={view}>
+          {/* Keyed by business as well as page: every page reads the active
+              business when it mounts, so switching has to start it afresh.
+              Without this, Setup kept the previous business's form on screen
+              under the new one's name - and saving it would have written
+              that business's details over this one's. */}
+          <PageBoundary key={`${view}-${selectedOrg || 'none'}`}>
           {/* Nothing gated is drawn until the server has said whether it is
               allowed. Drawing the inbox first and locking it a moment later
               shows conversations to somebody who is meant to be finishing
