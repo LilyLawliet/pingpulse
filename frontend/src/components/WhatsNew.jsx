@@ -12,6 +12,64 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.5.7',
+    date: '29 September 2026',
+    items: [
+      {
+        title: 'You can see exactly what your agent will quote',
+        body:
+          'When you upload a file, the AI now reads it into a list of products, prices and '
+          + 'rules — and every price and name it comes back with is checked against your '
+          + 'file before it counts. A price not written in your file is dropped; so is a '
+          + 'name made of words your file doesn’t use. Under your files, “What your agent '
+          + 'will quote” shows that whole list. Those are the only prices a customer can '
+          + 'be given. Fix a name, correct a price, remove anything wrong, and press Looks '
+          + 'right. What was left out is listed too, with the reason.',
+      },
+      {
+        title: 'Wording that used to defeat it now reads correctly',
+        body:
+          'Reading a price list and reading what a customer asked for were both piles of '
+          + 'pattern rules, and every new shop’s wording found a hole in one of them. Both '
+          + 'are now read by the AI and checked by code: a quantity has to be a number the '
+          + 'customer actually wrote, a product has to be one of yours, and the arithmetic '
+          + '— packs, rates, discounts, delivery bands — is still done by the code, not '
+          + 'guessed. If no AI answers, the old reader still does the job.',
+      },
+      {
+        title: 'Re-uploading a price list replaces the old one',
+        body:
+          'Uploading a file with the same name now replaces that file’s previous version '
+          + 'and everything read from it, instead of leaving both in place. Deleting a file '
+          + 'removes what was read from it too.',
+      },
+      {
+        title: 'Customers see their message read, and “typing…”',
+        body:
+          'On the WhatsApp Web connection, a customer’s message is marked read and “typing…” '
+          + 'shows from the moment the agent starts writing until the reply lands, instead '
+          + 'of a grey tick and silence. Never for someone who has opted out, and never for '
+          + 'a chat one of your people has taken over.',
+      },
+      {
+        title: '“What do you have?” is answered from your price list',
+        body:
+          '"What items do you have?", "send me your menu", "kya kya milta hai" — these were '
+          + 'answered with whatever passage happened to share a word with the question, '
+          + 'once with the returns policy. They now get a spread of what you actually sell '
+          + 'with prices, narrowed by the rest of the question ("what books", "in pink").',
+      },
+      {
+        title: 'One bad sentence no longer costs the whole reply',
+        body:
+          'A good answer containing one sentence that breaks a rule — an offer of pictures, '
+          + 'a promised callback — now goes out without that sentence, instead of being '
+          + 'thrown away, asked for again, and ending as the fallback. A wrong price is '
+          + 'still never sent, and a reply in the wrong language is still rewritten.',
+      },
+    ],
+  },
+  {
     version: '1.5.6',
     date: '29 September 2026',
     items: [

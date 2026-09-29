@@ -1,11 +1,11 @@
 {
-  "version": "1.5.6",
-  "notes": "When nothing in your documents answers a question, the agent stops guessing: you get an alert with the customer's question, and they are told it has gone to the team - but only if an alert address or device is really set up, otherwise they get the contact from your own documents. Replies come back faster: the whole reply has one deadline, and the second AI provider is only tried if there is time for it. If neither provider answers you are now told, once per cool-off. Booking can be tried in Test agent against your real diary, then undone. Price lists from every trade read correctly: 'Rs. 2,500' is one price, leader dots are not a full stop, per-kilo prices are rates, and 'From $9,500' stays a starting price. Roman Urdu numbers, ladies/women, guests/heads and one-letter typos all find the right product.",
-  "pub_date": "2026-09-28T23:11:01+00:00",
+  "version": "1.5.7",
+  "notes": "Your files are now read by the AI into a list of products, prices and rules, and every price and name is checked against your own file before it counts: a price your file does not contain is dropped, and so is a name made of words it does not use. Under your files, 'What your agent will quote' shows that whole list, editable, with what was left out and why. Those are the only prices a customer can be given. Re-uploading a file with the same name replaces its old version. On the WhatsApp Web connection customers now see their message read and 'typing...' until the reply lands. 'What do you have?' is answered from your price list instead of whichever passage shared a word with the question. And a good reply with one sentence that breaks a rule now goes out without that sentence instead of being thrown away.",
+  "pub_date": "2026-09-29T00:48:10+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjhpdnV3N3J2bnY4VDhPVjdENS9SZU8zZGp3MjNTOFJoNFkzRFlGVXFPN0trQ09YcnJKVXNRT0J4UDVzcEd0RmpXeG85YUt4eE9jKzRYK08vQ3JWdUFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjM3MDYwCWZpbGU6UGluZ1B1bHNlXzEuNS42X3g2NC1zZXR1cC5leGUKWG5IYnEyQW9aOVRIUzB0WUFabVU0My9MTVI3SkpMYTRUenJob0dRSXF0LzZOUzdJWXR3THZJekY2Q3JVNVE2OENhZzdLS0NJRkMxeWdLQ1pvVE14RFE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.6_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMndMSDNWTU5YVFNqTGVjZTFSYzFLRjZVZDhSODV2VHNDNDFOT2I5TnJ3YWdnUkUyYWxsMVlFbDYvcEdXOHlLU1YzQmtnRjdPbDNGUEJYRm15RGx3NEE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjQyODkwCWZpbGU6UGluZ1B1bHNlXzEuNS43X3g2NC1zZXR1cC5leGUKbmJIbVFBU3BUbG1EL0dKWEVFbGdpek1pWlNhYUlBL2htM2E0cXRhTkJGQ0pIc1dCMm10V3A2WkZGS0wybXAyUWVDeU9meUtjNlVrVFZtNFdrazRRQlE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.7_x64-setup.exe"
     }
   }
 }
