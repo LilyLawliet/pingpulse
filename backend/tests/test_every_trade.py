@@ -249,3 +249,32 @@ def test_a_shoe_shop_answers_do_you_have_shoes():
         "Classic Leather Shoe | YH-100 | brown, mens | 1 pair | PKR 8,500\n",
     )])
     assert [line.item.sku for line in offers.quote("do you have shoes", shop).lines] == ["YH-100"]
+
+
+def test_the_tail_of_a_rule_is_not_something_we_sell():
+    """"...free for orders of PKR 5,000 or more" was read as a product.
+
+    It reached a customer as "Here's some of what we have: ders of: PKR 5,000"
+    once "what do you have?" started listing the price list.
+    """
+    policy = (
+        "Delivery within Karachi is PKR 250 for orders below PKR 3,000, and free for "
+        "orders of PKR 3,000 or more.\n"
+        "Delivery to the rest of Pakistan is PKR 350 for orders below PKR 5,000, and "
+        "free for orders of PKR 5,000 or more.\n"
+        "Gift wrapping is PKR 150 per item and is not discounted.\n"
+    )
+    items = offers.read_items([("policy", policy)])
+    assert [item.name for item in items] == ["Gift wrapping"]
+    assert "ders" not in (offers.quote("What items do you have?", items).reply() or "")
+
+
+def test_a_real_product_is_still_read_from_prose():
+    shop = (
+        "Wet room conversion - from USD 9,500\n"
+        "Heated flooring - from USD 2,800\n"
+        "Manicure - Rs 1,500 | Pedicure - Rs 2,000\n"
+    )
+    assert {item.name for item in offers.read_items([("shop", shop)])} == {
+        "Wet room conversion", "Heated flooring", "Manicure", "Pedicure",
+    }

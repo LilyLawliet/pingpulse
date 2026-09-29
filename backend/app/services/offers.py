@@ -513,6 +513,11 @@ def _text_items(text: str, currency: str | None, source: str) -> list[Item]:
         # A sentence is not a product name; a product name is a few words.
         if len(words(name)) == 0 or _RULE_WORDS.search(name) or len(name.split()) > 7:
             continue
+        # Nor is the tail of one. "...free for orders of PKR 5,000 or more"
+        # left "ders of", which was listed to customers as something sold.
+        # Nothing is sold under a name ending in a joining word.
+        if re.search(r"\b(?:of|for|to|and|or|with|from|in|on|at|by|per|than|is|are)$", name, re.I):
+            continue
         amount = re.search(_NUMBER, match.group("money"))
         price = to_decimal(amount.group(0)) if amount else None
         if not price or price <= 0:
