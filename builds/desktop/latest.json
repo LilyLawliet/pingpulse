@@ -1,11 +1,11 @@
 {
-  "version": "1.8.2",
-  "notes": "Switching business now starts every page afresh. Setup kept the previous business's details on screen under the new one's name, and saving from there would have written them over the new business.",
-  "pub_date": "2026-09-29T20:44:15+00:00",
+  "version": "1.9.0",
+  "notes": "Your live feed is yours alone: a dashboard was receiving every business's events, including another shop's customer messages. Each one now watches only its own business. Two tabs on two businesses no longer read or save into each other, saves show up without a reload, and browser alerts work for every business on the same browser.",
+  "pub_date": "2026-09-29T21:50:21+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjJpMEplSHFHYjVWa3VkZDZZME8vMU5LcU1SUUlyR3JuTTZXTWphSnE4dkVGUU0zRXU2Tmk4TXYxbkltMGVhRXYxR21xd0pWSmh0dlluN0grQ2RhRUFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzE0NjU0CWZpbGU6UGluZ1B1bHNlXzEuOC4yX3g2NC1zZXR1cC5leGUKckFFcFgzU1lBb1dXSTdPR29zRWhBNTc0Wkc4YVFhTUNYWW1TSGt4eklCeVJwY3VNRkxab2IveUlrYVZzc2JjUDEyYXpRTllVRGxycUlMRzBDVGozQkE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.8.2_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjBqdTRibHpnSElYYzJNS2F6dyt3TXJsK0RuaitubTEweEE3N292RW9QV0xXYUJRTXFyUlVRK05mRlA0S3I4dmNLVmVlVWNUZU9Jb1MwcWtqSFRzbUFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzE4NjIwCWZpbGU6UGluZ1B1bHNlXzEuOS4wX3g2NC1zZXR1cC5leGUKSGxqdW9FTXFiTWZWQ1NiYkdhQXM0ZzlHbURGZXYyek9wQ3BabkpCcWpoVjN2TDAwcW91b2MrNGtwVDBOcEYrKzVhYTVUcTMxbWx6Qzdra0NKcWxYQUE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.9.0_x64-setup.exe"
     }
   }
 }
