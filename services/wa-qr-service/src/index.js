@@ -95,6 +95,8 @@ const opened = new Set()
 /** Consecutive failed starts for a session that has never opened. */
 const attempts = new Map()
 const MAX_PAIRING_ATTEMPTS = 5
+// How long a brand-new pairing may take to offer its first code.
+const NO_CODE_TIMEOUT_MS = 30000
 
 // Ceiling on the wait between reconnects of an already-paired phone. Five
 // minutes is slow enough to be invisible to WhatsApp during a long outage and
@@ -309,6 +311,21 @@ async function startSession(sessionId) {
   if (!wasPaired) {
     reportStatus(sessionId, 'GENERATING_QR')
   }
+  // A connection can hang without ever offering a code or closing - the
+  // silent spinner. Past this, it is ended and counted as a failed attempt,
+  // which the retry below and the screen both hear about.
+  let noCode = null
+  if (!wasPaired) {
+    noCode = setTimeout(() => {
+      if (sessions.get(sessionId) !== socket || ready.has(sessionId)) return
+      log.warn({ sessionId }, 'no code offered in time; ending this attempt')
+      try {
+        socket.end(new Error('no code offered'))
+      } catch {
+        /* already gone */
+      }
+    }, NO_CODE_TIMEOUT_MS)
+  }
 
   socket.ev.on('creds.update', saveCreds)
 
@@ -334,6 +351,7 @@ async function startSession(sessionId) {
     const { connection, lastDisconnect, qr } = update
 
     if (qr) {
+      clearTimeout(noCode)
       // Sent as a data URL so the desktop app can render it directly in an
       // <img>, with no QR library of its own.
       const dataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 320 })
@@ -360,6 +378,11 @@ async function startSession(sessionId) {
     }
 
     if (connection === 'close') {
+      clearTimeout(noCode)
+      // A socket that was replaced - "Show QR" pressed again on a pairing that
+      // had stalled - closing late must not tear down, or retry over, the
+      // fresh one that replaced it.
+      if (sessions.get(sessionId) !== socket) return
       const status = lastDisconnect?.error?.output?.statusCode
       sessions.delete(sessionId)
       ready.delete(sessionId)
@@ -541,6 +564,12 @@ app.get('/session/:id', (request, response) => {
     connected: sessions.has(sessionId),
     status: state?.status || (sessions.has(sessionId) ? 'AUTHENTICATED' : 'UNKNOWN'),
     qr: state?.qr || null,
+    // Why it is where it is, so the screen can say so instead of spinning:
+    // "reconnecting", "unreachable" (given up), "logged_out".
+    reason: state?.reason || null,
+    tries: attempts.get(sessionId) || 0,
+    gaveUp: gaveUp.has(sessionId),
+    since: state?.at || null,
   })
 })
 
@@ -555,6 +584,19 @@ app.post('/pair', async (request, response) => {
     // A person is at the screen asking, which is the only thing that earns a
     // dead pairing another go.
     gaveUp.delete(sessionId)
+    // A pairing that is running but has not connected is replaced, not
+    // reused: reusing it is how "Show QR" could return the same stuck
+    // connection that never offered a code, forever.
+    const existing = sessions.get(sessionId)
+    if (existing && !ready.has(sessionId)) {
+      sessions.delete(sessionId)
+      latest.delete(sessionId)
+      try {
+        existing.end(new Error('replaced by a new pairing'))
+      } catch {
+        /* already gone */
+      }
+    }
     await startSession(sessionId)
     response.json({ ok: true })
   } catch (error) {

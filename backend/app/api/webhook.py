@@ -32,6 +32,7 @@ from app.schemas import TwilioWebhookPayload
 from sqlalchemy.exc import IntegrityError
 
 from app.services import (
+    languages,
     understanding,
     unanswered,
     booking,
@@ -198,7 +199,7 @@ def handoff_reply(organization) -> str:
 
 
 async def acknowledge_handoff(
-    db, organization, contact, channel, phone_number: str
+    db, organization, contact, channel, phone_number: str, customer_message: str = ""
 ) -> bool:
     """Send the one message a handed-over customer should get. Never raises.
 
@@ -207,7 +208,7 @@ async def acknowledge_handoff(
     """
     from app.services import outbox
 
-    text = handoff_reply(organization)
+    text = await languages.in_customer_language(handoff_reply(organization), customer_message)
     try:
         outbound = Message(
             organization_id=organization.id,
@@ -636,7 +637,7 @@ async def process_inbound_message(
         # handed over as far as the database is concerned and ignored as far
         # as they are concerned.
         acknowledged = await acknowledge_handoff(
-            db, organization, contact, channel, phone_number
+            db, organization, contact, channel, phone_number, body
         )
         await db.commit()
         await manager.broadcast(
@@ -947,6 +948,12 @@ async def process_inbound_message(
         generation.text = await unanswered.handle(
             db, organization, contact, generation.needs_team, body
         )
+
+    # A sentence the backend wrote rather than the model - the hand-over, the
+    # worked-out answer with no model to phrase it - goes out in the
+    # customer's language, with every figure checked unchanged.
+    if generation.needs_team is not None or generation.provider == "none":
+        generation.text = await languages.in_customer_language(generation.text, body)
 
     await manager.broadcast(
         ws_manager.EVENT_GENERATION,

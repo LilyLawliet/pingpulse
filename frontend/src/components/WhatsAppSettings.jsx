@@ -125,7 +125,15 @@ export default function WhatsAppSettings({ onChanged }) {
         if (cancelled) return
         setPairing((current) =>
           current && current.channelId === pairing.channelId
-            ? { ...current, status: state.status, qr: state.qr }
+            ? {
+                ...current,
+                status: state.status,
+                qr: state.qr,
+                reason: state.reason,
+                tries: state.tries,
+                gaveUp: state.gave_up,
+                unreachable: 0,
+              }
             : current,
         )
         if (state.status === 'AUTHENTICATED') {
@@ -133,7 +141,15 @@ export default function WhatsAppSettings({ onChanged }) {
           await load()
         }
       } catch {
-        /* the bridge may still be starting; the next tick retries */
+        // The bridge may still be starting, so one miss is not news - but
+        // three in a row are said on screen rather than spun through.
+        if (!cancelled) {
+          setPairing((current) =>
+            current && current.channelId === pairing.channelId
+              ? { ...current, unreachable: (current.unreachable || 0) + 1 }
+              : current,
+          )
+        }
       }
     }
 
@@ -147,7 +163,7 @@ export default function WhatsAppSettings({ onChanged }) {
 
   const beginPairing = async (channelId) => {
     setError(null)
-    setPairing({ channelId, status: 'GENERATING_QR', qr: null })
+    setPairing({ channelId, status: 'GENERATING_QR', qr: null, startedAt: Date.now() })
     try {
       await api.startPairing(channelId)
     } catch (err) {
@@ -306,7 +322,14 @@ export default function WhatsAppSettings({ onChanged }) {
 
               {pairing?.channelId === channel.id && (
                 <div className="mt-3 w-full basis-full border-t border-edge pt-3">
-                  {channel.session_status === 'AUTHENTICATED' ? (
+                  {channel.session_status === 'AUTHENTICATED' && channel.number_conflict ? (
+                    <p className="flex items-start gap-2 text-xs text-crit">
+                      <TriangleAlert size={14} className="mt-0.5 shrink-0" /> Scanned, but this
+                      phone is already connected to {channel.number_conflict}. Messages go to
+                      whichever business scanned it last. Disconnect it there, or use another
+                      phone here.
+                    </p>
+                  ) : channel.session_status === 'AUTHENTICATED' ? (
                     <p className="flex items-center gap-2 text-xs text-accent">
                       <Check size={14} /> Linked. This phone now sends and receives.
                     </p>
@@ -339,10 +362,7 @@ export default function WhatsAppSettings({ onChanged }) {
                       </ol>
                     </div>
                   ) : (
-                    <p className="flex items-center gap-2 text-xs text-faint">
-                      <Loader2 size={13} className="animate-spin" /> Asking WhatsApp for a
-                      code…
-                    </p>
+                    <PairingWait pairing={pairing} onRetry={() => beginPairing(channel.id)} />
                   )}
                 </div>
               )}
@@ -542,5 +562,63 @@ export default function WhatsAppSettings({ onChanged }) {
         </p>
       </div>
     </div>
+  )
+}
+
+/**
+ * Waiting for WhatsApp to offer a code - and saying why, when it does not.
+ *
+ * This was a spinner and nothing else, whatever happened behind it: WhatsApp
+ * refusing, the bridge giving up after five tries, the bridge not answering at
+ * all. A pairing that has failed looked exactly like one that was slow.
+ */
+function PairingWait({ pairing, onRetry }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  const waited = Math.round((now - (pairing.startedAt || now)) / 1000)
+
+  let problem = null
+  if ((pairing.unreachable || 0) >= 3) {
+    problem =
+      'PingPulse cannot reach its WhatsApp connection service right now. Nothing is wrong with your phone. Try again in a minute.'
+  } else if (pairing.gaveUp || pairing.reason === 'unreachable') {
+    problem =
+      'WhatsApp turned down every attempt to start a pairing. This usually passes within a few minutes. If this phone is linked to another PingPulse business, disconnect it there first.'
+  } else if (pairing.reason === 'logged_out') {
+    problem = 'This phone was logged out of WhatsApp Web. Start again to get a fresh code.'
+  } else if (waited >= 45) {
+    problem =
+      'WhatsApp has not offered a code yet. If this phone is linked to another PingPulse business, disconnect it there first, then try again.'
+  }
+
+  if (problem) {
+    return (
+      <div className="space-y-2">
+        <p className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2 text-xs text-warn">
+          <TriangleAlert size={13} className="mt-0.5 shrink-0" />
+          {problem}
+        </p>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="flex items-center gap-1.5 rounded-lg border border-accent/40 px-2.5 py-1.5 text-2xs font-semibold text-accent transition-colors hover:bg-accent/10"
+        >
+          <QrCode size={12} /> Try again
+        </button>
+      </div>
+    )
+  }
+  return (
+    <p className="flex items-center gap-2 text-xs text-faint">
+      <Loader2 size={13} className="animate-spin" /> Asking WhatsApp for a code…
+      {pairing.tries > 0 && (
+        <span className="text-2xs">
+          (attempt {pairing.tries + 1} of 5)
+        </span>
+      )}
+    </p>
   )
 }

@@ -81,7 +81,7 @@ def test_english_gets_a_language_instruction_like_any_other():
     """
     rules = regional_rules("USD", "en")
 
-    assert any("Write the reply in English" in rule for rule in rules)
+    assert any("use English" in rule for rule in rules)
 
 
 def test_regional_variant_resolves_to_its_base_language():

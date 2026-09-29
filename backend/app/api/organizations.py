@@ -537,6 +537,11 @@ async def pairing_state(
         "qr": state.get("qr"),
         "connected": bool(state.get("connected")),
         "phone_number": channel.phone_number,
+        # Why no code is showing, when none is: the screen says this instead
+        # of a spinner that never ends.
+        "reason": state.get("reason"),
+        "tries": state.get("tries") or 0,
+        "gave_up": bool(state.get("gaveUp")),
     }
 
 

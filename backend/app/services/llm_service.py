@@ -20,6 +20,7 @@ from app.models import SENDER_CUSTOMER, SENDER_OPERATOR, Contact, Message, Organ
 from app.services import agent_config
 from app.schemas import GenerationResult
 from app.services import booking
+from app.services import languages
 from app.services import offers
 from app.services import sales_policy
 
@@ -579,8 +580,11 @@ def regional_rules(currency: str | None, language: str | None) -> list[str]:
         # saying which language to write in.
         name = LANGUAGE_NAMES.get(base, code)
         rules.append(
-            f"Write the reply in {name}. If the customer writes in another "
-            f"language, answer in theirs, but default to {name}."
+            "LANGUAGE: reply in the language and script of the customer's latest message - "
+            "Spanish to Spanish, Arabic to Arabic, Urdu script to Urdu script, Roman Urdu to "
+            "Roman Urdu, and so on - even though everything above is written in English. "
+            f"Only when you cannot tell what language they wrote in, use {name}. Keep product "
+            "names and prices exactly as written above."
         )
 
     money = (currency or "").strip().upper()
@@ -1090,6 +1094,12 @@ async def generate_reply(
                 "rewrite the same reply in English"
             )
 
+        # The script is checkable: Arabic answered in Latin letters, or English
+        # answered in Devanagari, is wrong whatever the words say.
+        script = languages.wrong_script(latest_message, text)
+        if script:
+            problems.append(f"{script}; rewrite the same reply")
+
         return problems
 
     def repaired(text: str) -> str | None:
@@ -1102,6 +1112,8 @@ async def generate_reply(
         not one sentence, and is not repaired.
         """
         if expects_english and (is_roman_urdu(text) or opens_in_urdu(text)):
+            return None
+        if languages.wrong_script(latest_message, text):
             return None
         bad_amounts = unexplained(text) if settings.price_guard_enabled else set()
         parts = [p for p in re.split(offers.SENTENCE_END + r"|\n+", text) if p.strip()]
@@ -1178,6 +1190,8 @@ async def generate_reply(
             corrected, appointment=appointment, cancelled=did_cancel, moved=did_move
         ):
             raise RuntimeError("reply still claimed an appointment that does not exist")
+        if languages.wrong_script(latest_message, corrected):
+            raise RuntimeError("reply still came back in the wrong script")
         if expects_english and (is_roman_urdu(corrected) or opens_in_urdu(corrected)):
             raise RuntimeError("reply still came back in Roman Urdu")
         return corrected

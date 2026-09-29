@@ -32,6 +32,7 @@ from app.models import (
     TenantPipeline,
 )
 from app.services import (
+    languages,
     notifications,
     unanswered,
     agent_config,
@@ -866,6 +867,8 @@ async def simulate(
             else "Nothing in your documents answers this, and no alert address or device "
             "is set up - so the customer is not promised a reply. Add one under Alerts."
         )
+    if generation.needs_team is not None or generation.provider == "none":
+        generation.text = await languages.in_customer_language(generation.text, message)
     return {
         "reply": generation.text,
         "escalated": False,

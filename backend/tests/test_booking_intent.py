@@ -120,11 +120,13 @@ def test_english_tenants_are_told_to_write_in_english():
     from app.services.llm_service import regional_rules
 
     rules = " ".join(regional_rules("USD", "en")).lower()
-    assert "write the reply in english" in rules
+    # Named, as the language to fall back on; the customer's own language
+    # comes first, which is what lets a Spanish speaker be answered in Spanish.
+    assert "use english" in rules
+    assert "language and script of the customer's latest message" in rules
 
-    # Other languages keep working exactly as before.
     urdu = " ".join(regional_rules("PKR", "ur")).lower()
-    assert "write the reply in" in urdu
+    assert "use urdu" in urdu
 
 
 def test_the_offline_fallback_also_answers_a_booking_request():
