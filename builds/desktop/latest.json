@@ -1,11 +1,11 @@
 {
-  "version": "1.5.9",
-  "notes": "Scanning a WhatsApp code now links the phone: the moment right after a scan was being read as a failure. The code stops jumping about while you fetch your phone, and a linked phone can be disconnected without deleting the connection.",
-  "pub_date": "2026-09-29T14:52:54+00:00",
+  "version": "1.6.0",
+  "notes": "A calendar you can work from: your week in your own hours, with book, move and cancel by hand through the same checks the agent uses. Customers can name their own time, and you get an alert whenever the diary changes.",
+  "pub_date": "2026-09-29T16:16:27+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjNxSDVYbGV3UC9IQXBlMmF2ZmtCMEV3enE1SENsN3IyeklDVUtXNEZpelc3TGZBQXZ3ejl6Wm0vZVJGekZUYzIvU1VRREJhb2VPbnZTdVV5UXE4ZXdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjkzNTczCWZpbGU6UGluZ1B1bHNlXzEuNS45X3g2NC1zZXR1cC5leGUKQXFDZUFEQWRtWkpkT2F2QldHcGdRanM5WkkzelJsYkNyRy9qYmtGRzdaZTgrQjNrb3ZsOVdXQ2xCS1d5eGtVaE9ycXJjSHhIRXBreHhzMXpUU2JYQ0E9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.9_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMnlWa1cvZS9uR0svcUF1WWhxdkovTWRHb2dsd1VNRS9oeVdSMFJTZTZEbkdkNkRxNWVNTmF0bmVKYnFzcWlvRE1qS2JWUDArWVlDdzVia2lWaCtkbmdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjk4NTg2CWZpbGU6UGluZ1B1bHNlXzEuNi4wX3g2NC1zZXR1cC5leGUKTlNxQVM3eFlZQktsSUhVSktwa0xYQWl0TW9WVklxMFNibVVOb3dLK2RtdktOK2FPTE1RUUFtNEx4QmZaVFpsa0xycktJeU9pejNFVy9FVDdJanN6QXc9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.6.0_x64-setup.exe"
     }
   }
 }
