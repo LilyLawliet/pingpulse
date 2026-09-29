@@ -1,11 +1,11 @@
 {
-  "version": "1.7.0",
-  "notes": "Your own calendar now decides what is free: paste its private address in Setup > Calendar and no time you are already booked is ever offered. A demo or a call is booked as one, with your meeting link, and every booking, move and cancellation is emailed to you as a calendar invitation.",
-  "pub_date": "2026-09-29T17:32:31+00:00",
+  "version": "1.7.1",
+  "notes": "Block out time you are not available, straight from the Calendar page - no link to find and no other app to set up. Nobody is offered a time inside it. Connecting your own calendar is now clearly optional and has moved out of the way.",
+  "pub_date": "2026-09-29T18:36:47+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjBwYi9IcUlBWEgrNmR6ejRBdWxRU0Rrc2NCd3piVE9Pa3dQRUhveG5xU0g5MzJjcnltUzEvaHduZmxKdWQxUkxmUEVmaTVraE5RcUJyaHpNZmNqWGdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzAzMTUxCWZpbGU6UGluZ1B1bHNlXzEuNy4wX3g2NC1zZXR1cC5leGUKNjlzRVVINGVXbzVSbUZuSGFMK3ZBT0ZHSzhpZlB2Z3VDOHJLWWJtakZYMDVmMjdiUDZGbjZUNm1jMFpGSXJlUEFJbmZpN3dFUS9JVWdFNWVDNmpkREE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.7.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMnczZmUzWHV4TEhYODFLQkphcGowNHhhaXVibHdYT1RUS3ZlVmtxY1BxWU5pSXEzSmR2d3ZSZFRzV3NMaGpQbzVQSWZtcTFBbWc1b1dEV2pHNU9TNGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzA3MDA3CWZpbGU6UGluZ1B1bHNlXzEuNy4xX3g2NC1zZXR1cC5leGUKL1dhTHQrb21iL1A3QW82UXhVYjFPTzRmWEZhdWxIU05IcTJFc3ZuQ0xxdGN1ckpVREZ2MGNmUXN4eWtqZURSUVcxRUNMSVRQQU42bll6NXJJOHZoQ1E9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.7.1_x64-setup.exe"
     }
   }
 }
