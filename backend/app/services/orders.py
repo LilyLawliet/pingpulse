@@ -94,8 +94,14 @@ def wants_to_order(text: str) -> bool:
 
 
 # ------------------------------------------------------------------ payment
+# "We also take card" is how half of these documents say it, and without
+# "take" that sentence was not about paying at all, so the shop's customers
+# were never offered the card it takes. Widening this only decides which
+# sentences are read; the method patterns themselves still have to match, so
+# "we take orders on WhatsApp" names no method and changes nothing.
 _ABOUT_PAYING = re.compile(
-    r"\b(pay|paid|payment|payments|accept|accepted|transfer|iban|account|send to|cash on delivery|cod)\b",
+    r"\b(pay|paid|payment|payments|accept|accepted|takes?|taking|transfer|iban|account|"
+    r"send to|cash on delivery|cod)\b",
     re.IGNORECASE,
 )
 _REFUSED = r"\b(no|not|don'?t|do not|never|without)\b[^.,;]{0,20}"
@@ -265,9 +271,17 @@ _NOT_DELIVERED_UNITS = {
     "subscription", "plan", "session", "hour", "service", "class", "course", "consultation",
     "call", "visit", "setup", "installation", "training", "workspace", "account",
 }
+# Only phrases that cannot be a thing in a box. "plan", "monthly", "annual",
+# "yearly", "support", "training" and a bare "set-up" were here, and they are
+# ordinary words in ordinary product names: an Annual Planner, a Monthly
+# Planner Pad, a Cable Support Bracket and a Training Whiteboard were all
+# classed as software, so nobody was asked where to send them and no delivery
+# was charged. The sale unit carries this judgement - month, user, seat,
+# session, service - and it catches every service in the Tallybird pack on its
+# own. This is only for a catalogue whose units are vague.
 _NOT_DELIVERED_NAMES = re.compile(
-    r"\b(subscription|licen[cs]e|onboarding|training|setup fee|set-up|installation|"
-    r"per user|per seat|per month|per year|monthly|annual|yearly|plan|add-on|addon|support)\b",
+    r"\b(subscription|licen[cs]e|onboarding|add-?on|per (user|seat|month|year)|"
+    r"(setup|set-up|installation|training|onboarding) (fee|charge|service|package))\b",
     re.IGNORECASE,
 )
 

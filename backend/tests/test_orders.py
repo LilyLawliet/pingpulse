@@ -437,3 +437,60 @@ async def test_a_software_plan_is_never_asked_where_to_deliver(shop, db_session,
     assert "Total: PKR 4,500" in ready.reply
     placed = await orders.handle_turn(db_session, organization, contact, "yes", [], prepared)
     assert placed.placed and "Deliver to" not in placed.reply and "working days" not in placed.reply
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Annual Planner 2027",
+        "Monthly Planner Pad",
+        "Yearly Wall Calendar",
+        "Cable Support Bracket",
+        "Wall Plan Holder",
+        "Training Whiteboard",
+        "Desk Setup Organiser",
+    ],
+)
+def test_a_thing_in_a_box_is_still_delivered_whatever_it_is_called(name):
+    """A stationer sells Annual Planners; a supplier sells Support Brackets.
+
+    Classed as software, nobody is asked where to send them and no delivery is
+    charged - the shop finds out when it has nowhere to post the parcel.
+    """
+    assert orders.is_delivered(offers.Item(name, Decimal(500), "PKR", sale_unit="piece"))
+
+
+@pytest.mark.parametrize(
+    ("name", "unit"),
+    [
+        ("Starter plan", "month"),
+        ("Extra user", "user"),
+        ("Onboarding session", "session"),
+        ("Data import service", "service"),
+        ("Pro Subscription", "piece"),
+        ("Extra User Licence", "seat"),
+        ("Installation service", "piece"),
+    ],
+)
+def test_nothing_is_posted_to_you_for_a_service(name, unit):
+    assert not orders.is_delivered(offers.Item(name, Decimal(500), "PKR", sale_unit=unit))
+
+
+@pytest.mark.parametrize(
+    ("written", "expected"),
+    [
+        ("Cash on delivery is available in Lahore. We also take card.", ["Cash on delivery", "Card"]),
+        ("We take card and JazzCash.", ["Card", "JazzCash"]),
+        ("We accept JazzCash and bank transfer.", ["JazzCash", "Bank transfer"]),
+        # still only where it is offered, and only where a method is named
+        ("Free trial for 14 days, no card needed.", []),
+        ("We do not accept cash on delivery.", []),
+        ("We take orders on WhatsApp until 6pm.", []),
+        ("We take returns within 7 days.", []),
+        ("Our staff carry cash floats for the till.", []),
+    ],
+)
+def test_the_ways_to_pay_are_the_ways_the_business_says_it_takes(written, expected):
+    """"We also take card" is how half of these documents put it."""
+    prepared = offers.Prepared(items=[], texts=[("terms.docx", written)], tiers=[], written=set())
+    assert sorted(orders.accepted_methods(prepared)) == sorted(expected)
