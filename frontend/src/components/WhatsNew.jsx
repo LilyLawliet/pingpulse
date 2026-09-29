@@ -12,6 +12,42 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.8.0',
+    date: '30 September 2026',
+    items: [
+      {
+        title: 'Orders are taken in the chat and written down',
+        body:
+          'A chat could end with “Great, I’ve noted the notebook” and '
+          + 'nothing noted anywhere — no order, no payment method, and nobody told. '
+          + 'The agent now works the order out as you talk: which products, from your '
+          + 'price list; the city and address; how they want to pay, from the methods '
+          + 'your own documents name. Anything missing is asked for. When it is complete '
+          + 'the customer gets the whole thing back with the total and “Reply '
+          + 'YES” — and only that yes writes the order.',
+      },
+      {
+        title: 'The number and the total are read off the record',
+        body:
+          'Everything the customer is told about their order — the summary, '
+          + '“order #1001 is placed”, the total, your payment and delivery '
+          + 'lines — is written from the saved order, not by the AI. A reply that '
+          + 'says “noted” or “confirmed” about an order that was '
+          + 'never placed is refused before it goes out. If no AI is reachable, nothing '
+          + 'is taken at all and you are alerted instead.',
+      },
+      {
+        title: 'An Orders page to work from',
+        body:
+          'Every order, numbered from 1001, with what was bought at the prices agreed at '
+          + 'the time. Confirm it, mark it sent, delivered or paid, or cancel it — '
+          + 'and tell the customer with a message written from the order itself. You get '
+          + 'an alert the moment one is placed. “When will I receive it?” now '
+          + 'finds your delivery time rather than your delivery charges.',
+      },
+    ],
+  },
+  {
     version: '1.7.1',
     date: '29 September 2026',
     items: [
