@@ -6,6 +6,7 @@ import {
   STEPS,
   TIER_HINT,
   TIER_LABEL,
+  businessMissing,
   fromOrganization,
   mergeSetup,
   patchSetup,
@@ -220,7 +221,9 @@ export default function SettingsPage({
       const saved = setup?.hasOrg
         ? await api.updateActiveOrganization(body)
         : await api.createOrganization(body)
-      setNote('Saved.')
+      // Saved is not the same as done, and the difference is said.
+      const missing = businessMissing(saved)
+      setNote(missing ? `Saved. To finish this step, add ${missing}.` : 'Saved.')
       applySaved(fromOrganization(saved), saved)
       // Neither of these holds up the tick. The dashboard re-reading its
       // business list is its own business.

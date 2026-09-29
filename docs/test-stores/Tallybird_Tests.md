@@ -25,6 +25,7 @@ bank detail in it is invented.
 | **Business name** | `Tallybird POS` |
 | **Category** | `Professional services` (it's software, and there is no "Software" category) |
 | **What you sell** | `Point-of-sale and inventory software for small shops, plus receipt printers, barcode scanners and cash drawers` |
+| **How it should sell** | `Answer the question first, then help them pick the right plan. Offer a demo for the Business plan. Quote only the prices in the price list.` |
 | **Tone** | `Friendly, clear and confident, like a good product specialist. Short messages, plain words, no jargon, never pushy.` |
 | **Where you are** | `Asia/Karachi` |
 
@@ -32,7 +33,7 @@ bank detail in it is invented.
 
 1. **Make a new client** for this. Don't reuse Miku's or Northstar's, or their
    documents will be mixed in.
-2. **Your business:** enter the name, category, what you sell and tone above.
+2. **Your business:** enter the name, category, what you sell, how it should sell and tone above. The step ticks once *What you sell* is filled in.
 3. **Prices and knowledge:** upload the .docx. It should find **14 products
    with prices**: 9 plans, add-ons and services, and 5 hardware items. There
    are no photos, on purpose.

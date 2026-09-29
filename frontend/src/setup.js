@@ -167,6 +167,29 @@ const RECOMMENDED_KEYS = ['alerts', 'hours', 'calendar']
  */
 const QUOTABLE = new Set(['ready', 'described'])
 
+// What the server writes into "How it should sell" for a business that never
+// wrote its own. It is not an answer.
+const DEFAULT_SALES_PROMPT = 'you are a helpful sales agent.'
+
+/**
+ * What the business step still needs, in words for the owner, or null.
+ *
+ * This used to be decided by "How it should sell" alone, and only past forty
+ * characters, and nothing on the page said so: a business that filled in its
+ * name, its tone and exactly what it sells saved, read "Saved.", and stayed
+ * unticked. What the agent cannot work without is what is sold. Either box
+ * describing it properly is enough.
+ */
+export function businessMissing(org) {
+  if (!org) return 'the business name'
+  if (!(org.name || '').trim()) return 'the business name'
+  const sells = (org.product_rules || '').trim()
+  const how = (org.sales_prompt || '').trim()
+  const wroteHow = how.length >= 40 && how.toLowerCase() !== DEFAULT_SALES_PROMPT
+  if (sells.length >= 15 || wroteHow) return null
+  return 'what you sell - a sentence is enough'
+}
+
 /**
  * The two steps the business record itself answers, from a record the server
  * returned - whether read here or handed back by a save.
@@ -174,9 +197,7 @@ const QUOTABLE = new Set(['ready', 'described'])
 export function fromOrganization(org) {
   const zone = (org?.timezone || '').trim()
   return {
-    // The server fills in "You are a helpful sales agent." for a business
-    // that never wrote its own, so a line that short is not an answer.
-    business: Boolean((org?.sales_prompt || '').trim().length > 40),
+    business: businessMissing(org) === null,
     // Created businesses start on UTC. Nobody chose that, so it does not count.
     timezone: Boolean(zone) && zone !== 'UTC',
   }
