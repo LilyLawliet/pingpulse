@@ -927,6 +927,14 @@ async def process_inbound_message(
         order_turn = await orders.handle_turn(
             db, organization, contact, body, history, prepared, reading=order_reading
         )
+    if order_turn.placed:
+        # The order, alone, and committed before anything that can fail - the
+        # same rule the pairing status follows, for the same reason. Everything
+        # after this point can send the customer "order #1001 is placed": the
+        # alert, the reply, the outbound row. Written but not committed, one
+        # failure between here and the end of the turn would roll the order
+        # back after they had been told, and hand #1001 to the next customer.
+        await db.commit()
     if order_turn.needs_person and await notifications.can_reach(db, organization):
         handed_to_a_person = True
         order_turn.prompt_block += (

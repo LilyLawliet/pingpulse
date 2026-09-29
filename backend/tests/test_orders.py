@@ -177,8 +177,14 @@ async def test_orders_are_numbered_per_shop(shop, db_session, model):
 @pytest.mark.asyncio
 async def test_without_a_model_the_order_goes_to_a_person(shop, db_session, monkeypatch):
     organization, contact = shop
-    monkeypatch.setattr(settings, "groq_api_key", "")
-    monkeypatch.setattr(settings, "gemini_api_key", "")
+    # Every key, not just the first. groq_api_keys is a property over
+    # groq_api_key and _2.._5, so clearing the singular one leaves a working
+    # .env reachable - the test then called the real providers and decided a
+    # model was available, which is the opposite of what it is here to check.
+    for base in ("groq_api_key", "gemini_api_key"):
+        for suffix in ("", "_2", "_3", "_4", "_5"):
+            monkeypatch.setattr(settings, base + suffix, "", raising=False)
+    assert not settings.groq_api_keys and not settings.gemini_api_keys
     turn = await orders.handle_turn(db_session, organization, contact, "I want to order the notebook", [], _prepared())
     assert turn.needs_person and not turn.placed
 
@@ -267,6 +273,81 @@ async def test_a_live_chat_places_the_order_and_tells_the_shop(db_session, monke
     placed = [r for r in raised if r[0] == "order"]
     assert placed and "#1001" in placed[0][1] and "PKR 1,600" in placed[0][1]
     assert "Easypaisa details" in placed[0][2]
+
+
+
+@pytest.mark.asyncio
+async def test_the_order_is_committed_before_the_customer_is_told(db_session, monkeypatch, model):
+    """"Order #1001 is placed" may not go out over a row that could still vanish.
+
+    Everything after the order is written can fail - the alert, the outbound
+    row, the final commit. A failure there would take the order with it, after
+    the customer had been told, and hand #1001 to whoever ordered next.
+    """
+    from app.api.webhook import process_inbound_message
+    from app.schemas import GenerationResult, TwilioWebhookPayload
+    from app.services import llm_service, notifications
+    from app.services.twilio_service import TwilioService
+
+    organization = Organization(name="Miku's Stationery", sales_prompt="Stationery.")
+    db_session.add(organization)
+    await db_session.flush()
+
+    happened: list[str] = []
+
+    async def prepare(db, org):
+        return _prepared()
+
+    async def fake_send(self, to_number, body, media_urls=None, sender=None):
+        happened.append("told the customer: " + ("order placed" if "#1001" in body else "something else"))
+        return True, "SM_out"
+
+    async def fake_generate(*_a, **_k):
+        return GenerationResult(provider="groq", text="Which way would you like to pay?", prompt_used="p", latency_ms=5)
+
+    async def record(db, org, event, title, body, contact_id=None):
+        happened.append(f"alerted the shop: {event}")
+
+    async def no_read(*_a, **_k):
+        return None
+
+    real_commit = db_session.commit
+    real_place = orders.place
+
+    async def watched_commit():
+        happened.append("committed")
+        return await real_commit()
+
+    async def watched_place(db, organization, contact, state, source="agent"):
+        order = await real_place(db, organization, contact, state, source)
+        happened.append("order written")
+        return order
+
+    monkeypatch.setattr(offers, "prepare", prepare)
+    monkeypatch.setattr(understanding, "read_message", no_read)
+    monkeypatch.setattr(TwilioService, "send_whatsapp", fake_send)
+    monkeypatch.setattr("app.api.webhook.llm_service.generate_reply", fake_generate)
+    monkeypatch.setattr(notifications, "raise_and_send", record)
+    monkeypatch.setattr(db_session, "commit", watched_commit)
+    monkeypatch.setattr(orders, "place", watched_place)
+
+    async def say(text, sid):
+        payload = TwilioWebhookPayload.model_validate(
+            {"From": "whatsapp:+923001234567", "To": "whatsapp:+16602075318", "Body": text, "MessageSid": sid}
+        )
+        await process_inbound_message(db_session, payload)
+
+    model["next"] = _reading(payment="easypaisa")
+    await say("I want the pink dotted mochi notebook, lahore bahria town, easypaisa", "SMc1")
+    happened.clear()
+    await say("yes", "SMc2")
+
+    written = happened.index("order written")
+    told = next(i for i, step in enumerate(happened) if step.endswith("order placed"))
+    assert "committed" in happened[written:told], (
+        "nothing committed the order between writing it and telling the customer: "
+        + str(happened)
+    )
 
 
 # ------------------------------------------------------------- the dashboard
