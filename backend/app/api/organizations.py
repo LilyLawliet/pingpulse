@@ -450,8 +450,14 @@ async def remove_channel(
     return None
 
 
-async def _unpair(channel_id: uuid.UUID) -> None:
-    """Tell the bridge to log this session out and forget its credentials."""
+async def _unpair(channel_id: uuid.UUID) -> bool:
+    """Tell the bridge to log this session out and forget its credentials.
+
+    Returns whether the bridge confirmed it. A caller about to delete the row
+    can ignore that — the channel is going either way. A caller telling an
+    operator their phone is unlinked cannot: an unreachable bridge still holds
+    the credentials, and resumes the session with them on its next restart.
+    """
     try:
         async with httpx.AsyncClient(timeout=settings.wa_qr_timeout_seconds) as client:
             response = await client.post(
@@ -461,6 +467,7 @@ async def _unpair(channel_id: uuid.UUID) -> None:
             )
             response.raise_for_status()
         logger.info("unpaired session %s", channel_id)
+        return True
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "could not unpair session %s (%s) — the phone may still be linked; "
@@ -468,6 +475,7 @@ async def _unpair(channel_id: uuid.UUID) -> None:
             channel_id,
             exc,
         )
+        return False
 
 
 # --------------------------------------------------------------------------
@@ -527,7 +535,18 @@ async def unpair_channel(
     channel = await _own_channel(db, tenant, channel_id)
     if whatsapp.provider_of(channel) != whatsapp.QR_SESSION:
         raise HTTPException(status_code=422, detail="Only a scanned phone can be unlinked")
-    await _unpair(channel.id)
+    # Nothing is recorded until the bridge says the phone is off. Writing
+    # DISCONNECTED regardless would tell the operator their handset is
+    # unlinked while it still holds live credentials and comes back with them
+    # the next time the bridge starts.
+    if not await _unpair(channel.id):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "The WhatsApp connection service did not confirm the phone was "
+                "unlinked, so nothing was changed. Try again in a moment."
+            ),
+        )
     channel.session_status = "DISCONNECTED"
     channel.phone_number = None
     await db.flush()

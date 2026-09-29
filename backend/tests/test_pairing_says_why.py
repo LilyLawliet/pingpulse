@@ -70,6 +70,7 @@ async def test_disconnect_unlinks_the_phone_and_keeps_the_connection(org_a, monk
 
     async def fake_unpair(channel_id):
         unpaired.append(channel_id)
+        return True
 
     monkeypatch.setattr("app.api.organizations._unpair", fake_unpair)
     response = await org_a.post(f"/api/v1/organizations/active/channels/{channel.id}/unpair")
@@ -78,3 +79,29 @@ async def test_disconnect_unlinks_the_phone_and_keeps_the_connection(org_a, monk
     await session.refresh(channel)
     assert channel.session_status == "DISCONNECTED" and channel.phone_number is None
     assert await session.get(ChannelConfig, channel.id) is not None, "the connection was deleted"
+
+
+@pytest.mark.asyncio
+async def test_a_phone_is_not_called_unlinked_until_the_bridge_says_so(org_a, monkeypatch):
+    """A bridge that cannot be reached still holds the keys, and resumes with them."""
+    session = _session_for(org_a._client)
+    channel = ChannelConfig(
+        organization_id=uuid.UUID(org_a.organization_id),
+        channel="whatsapp",
+        provider="twilio",
+        whatsapp_provider="QR_SESSION",
+        phone_number="+923004445555",
+        session_status="AUTHENTICATED",
+    )
+    session.add(channel)
+    await session.flush()
+
+    async def bridge_is_down(channel_id):
+        return False
+
+    monkeypatch.setattr("app.api.organizations._unpair", bridge_is_down)
+    response = await org_a.post(f"/api/v1/organizations/active/channels/{channel.id}/unpair")
+    assert response.status_code == 502
+    await session.refresh(channel)
+    assert channel.session_status == "AUTHENTICATED", "told the operator it was off"
+    assert channel.phone_number == "+923004445555"

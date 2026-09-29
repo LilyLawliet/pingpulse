@@ -102,6 +102,13 @@ const NO_CODE_TIMEOUT_MS = 30000
 const MAX_QR_CYCLES = 3
 /** Rounds of unscanned codes so far, per session. */
 const qrCycles = new Map()
+// How many times in a row WhatsApp may ask a session to come straight back
+// before that stops being the scan handshake and becomes a loop. Unbounded,
+// it reconnects every 300ms for ever: the hammering that got this host
+// rate-limited once already.
+const MAX_RESTARTS = 3
+/** Consecutive restart-required closes, per session. */
+const restarts = new Map()
 
 // Ceiling on the wait between reconnects of an already-paired phone. Five
 // minutes is slow enough to be invisible to WhatsApp during a long outage and
@@ -282,6 +289,7 @@ function forget(sessionId) {
   opened.delete(sessionId)
   attempts.delete(sessionId)
   qrCycles.delete(sessionId)
+  restarts.delete(sessionId)
   latest.delete(sessionId)
 }
 
@@ -413,6 +421,7 @@ async function startSession(sessionId) {
       opened.add(sessionId)
       attempts.delete(sessionId)
       qrCycles.delete(sessionId)
+      restarts.delete(sessionId)
       latest.delete(sessionId)
       reportStatus(sessionId, 'AUTHENTICATED', { phoneNumber })
     }
@@ -429,14 +438,24 @@ async function startSession(sessionId) {
       // and never a failure. Treating it as one wiped the keys the scan had
       // just made.
       if (status === DisconnectReason.restartRequired) {
-        log.info({ sessionId }, 'code scanned; finishing the link')
-        notifyWatchers(sessionId, { type: 'status', status: 'SCANNED' })
-        // The identity is written before coming back, so the new connection
-        // resumes it instead of asking for another code.
-        Promise.resolve(saveCreds())
-          .catch(() => {})
-          .finally(() => setTimeout(() => startSession(sessionId).catch(() => {}), 300))
-        return
+        const asked = (restarts.get(sessionId) || 0) + 1
+        if (asked <= MAX_RESTARTS) {
+          restarts.set(sessionId, asked)
+          log.info({ sessionId, asked }, 'code scanned; finishing the link')
+          notifyWatchers(sessionId, { type: 'status', status: 'SCANNED' })
+          // The identity is written before coming back, so the new connection
+          // resumes it instead of asking for another code.
+          Promise.resolve(saveCreds())
+            .catch(() => {})
+            .finally(() => setTimeout(() => startSession(sessionId).catch(() => {}), 300))
+          return
+        }
+        // Asked to come straight back four times over. Whatever is wrong is
+        // not fixed by coming back faster, so this falls through and is
+        // treated as the dropped connection it has become: backed off for a
+        // phone that has scanned, counted for a pairing that never has.
+        restarts.delete(sessionId)
+        log.warn({ sessionId }, 'asked to restart over and over; treating it as a dropped connection')
       }
 
       // Logged out from the phone: the credentials are dead and a re-scan is
