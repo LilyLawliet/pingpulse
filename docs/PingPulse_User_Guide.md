@@ -366,6 +366,12 @@ ones you made say *by you*.
   the free times. Only times that really are free are shown.
 - **Move or cancel.** Tap an appointment. **Move** shows that day's free times;
   **Cancel appointment** frees the time for other customers.
+- **Block out time.** Busy on Thursday afternoon, a day off, a meeting booked
+  somewhere else? **Block out time**, pick the day and the hours (or *the
+  whole day*), add a note if you like. The agent won't offer any time inside
+  it, and you can't book over it by accident. Tap it and choose **Unblock**
+  to make the time bookable again. You can't block over a customer who is
+  already booked; move or cancel them first.
 - **Tell the customer.** Ticked by default. The WhatsApp message is written
   from the calendar entry itself, so it says exactly the day and time saved.
 
@@ -409,13 +415,26 @@ wholesale?" is booked a *meeting*, not the visit your customers get:
 It doesn't wait on the questions you ask retail customers before a visit,
 like an address.
 
-**Your real calendar.** In **Setup → Calendar → Your own calendar**, paste
-the private address of the calendar you actually live in:
+**Bookings land in your own calendar by themselves.** Each booking, move and
+cancellation is emailed to you as a calendar invitation (see below). No setup.
 
-- Google Calendar: Settings → your calendar → Integrate calendar → *Secret
-  address in iCal format*.
-- Outlook: Settings → Calendar → Shared calendars → Publish a calendar.
-- iCloud: share the calendar as a public calendar and copy the link.
+**Another calendar you keep (optional).** Most people won't need this: **Block
+out time** covers being busy. If you'd rather PingPulse read your other
+commitments automatically, open *Optional: see what's in another calendar you
+keep* in **Setup → Calendar** and paste that calendar's private address:
+
+- **Google:** on a computer, not in the phone app, where it doesn't exist. Go
+  to calendar.google.com, hover your calendar in the left list, then ⋮ →
+  Settings and sharing. Scroll right down to Integrate calendar and copy
+  *Secret address in iCal format*. If that section is missing on a work
+  (Workspace) account, your admin has turned off outside sharing and it
+  can't be found. A personal @gmail account always has it.
+- **Outlook / Microsoft 365:** Settings ⚙ → Calendar → Shared calendars →
+  Publish a calendar. Choose the calendar, pick *Can view all details*,
+  Publish, then copy the **ICS** link, not the HTML one.
+- **iCloud:** on icloud.com, open Calendar and click the radio-wave icon
+  beside the calendar. Tick Public Calendar and copy the link. It starts
+  `webcal://`, which is fine.
 
 From then on, the agent never offers a time you're busy there: dentist,
 school run, investor call, recurring meetings included. Only *when* you're

@@ -746,6 +746,13 @@ class SystemError(Base):
 # client's own complaint began with a confirmation that named neither.
 APPOINTMENT_KINDS = ("phone", "onsite", "video", "other")
 
+# Time the owner has blocked out: "I'm busy Thursday afternoon". Not a kind a
+# customer can be booked as, so it is not in APPOINTMENT_KINDS. A block is a
+# confirmed row with no contact, which is what makes the diary and the
+# database's no-double-booking rule treat it as taken without a line of
+# special handling.
+APPOINTMENT_BLOCKED = "blocked"
+
 # Confirmed means it exists and is expected to happen. Pending means the
 # booking operation has not completed yet and nobody may be told it has.
 # Failed is kept rather than deleted, because "we tried to book you and it did
@@ -786,8 +793,9 @@ class Appointment(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    contact_id: Mapped[uuid.UUID] = mapped_column(
-        UUIDType, ForeignKey("crm_contacts.id", ondelete="CASCADE"), nullable=False, index=True
+    # None only for time the owner blocked out, which belongs to no customer.
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("crm_contacts.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -828,7 +836,11 @@ class Appointment(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _now_column()
 
-    contact: Mapped["CRMContact"] = relationship()
+    contact: Mapped["CRMContact | None"] = relationship()
+
+    @property
+    def is_blocked(self) -> bool:
+        return self.kind == APPOINTMENT_BLOCKED
 
     @property
     def is_live(self) -> bool:

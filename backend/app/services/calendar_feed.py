@@ -119,6 +119,8 @@ def _stamp(moment: datetime) -> str:
 
 def _summary(appointment, contact) -> str:
     """What shows on the phone at a glance: who, and what kind of visit."""
+    if getattr(appointment, "is_blocked", False):
+        return f"Blocked: {appointment.notes}" if appointment.notes else "Blocked out"
     who = (contact.name if contact else None) or (
         contact.phone_number if contact else None
     ) or "Customer"

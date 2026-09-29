@@ -270,6 +270,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ starts_at: startsAt, tell_customer: tellCustomer }),
     }),
+  // Time the owner is busy. Undone with cancelAppointment, which frees it.
+  blockTime: (body) =>
+    request('/appointments/block', { method: 'POST', body: JSON.stringify(body) }),
   cancelAppointment: (id, tellCustomer) =>
     request(`/appointments/${id}/cancel`, {
       method: 'POST',

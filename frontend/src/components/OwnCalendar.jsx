@@ -70,29 +70,71 @@ export default function OwnCalendar() {
 
   return (
     <div className="space-y-5">
-      <div className="space-y-3">
+      <div className="space-y-2">
+        <p className="flex items-start gap-2.5 text-sm leading-relaxed text-dim">
+          <Mail size={15} className="mt-0.5 shrink-0 text-accent" />
+          <span>
+            <span className="font-semibold text-ink">Bookings straight into your calendar.</span> Each
+            booking is emailed to you as a calendar invitation, which Gmail, Outlook and Apple add by
+            themselves. Moving one updates it; cancelling takes it off.
+          </span>
+        </p>
+        {state?.email_available ? (
+          <label className="flex items-center gap-2 text-xs text-dim">
+            <input
+              type="checkbox"
+              checked={state.invite_owner}
+              disabled={busy}
+              onChange={(e) => save({ invite_owner: e.target.checked })}
+            />
+            Send them to {state.invites_go_to || 'your alert email address'}
+          </label>
+        ) : (
+          <p className="flex items-start gap-2 text-2xs text-warn">
+            <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+            Email isn't set up on this server, so invitations can't be sent. The calendar link above
+            still works.
+          </p>
+        )}
+      </div>
+
+      <p className="rounded-xl border border-edge bg-panel-2/50 px-3.5 py-2.5 text-2xs leading-relaxed text-dim">
+        <span className="font-semibold text-ink">Busy some afternoon?</span> Use{' '}
+        <span className="font-medium text-ink">Block out time</span> on the Calendar page. The agent
+        won't offer any time you've blocked, and there's nothing to set up.
+      </p>
+
+      <details className="group rounded-xl border border-edge px-3.5 py-2.5">
+        <summary className="cursor-pointer text-xs font-medium text-dim">
+          Optional: see what's in another calendar you keep{' '}
+          <span className="font-normal text-faint">(Google, Outlook, iCloud · takes a few minutes)</span>
+        </summary>
+        <div className="mt-3 space-y-3">
         <p className="flex items-start gap-2.5 text-sm leading-relaxed text-dim">
           <CalendarCheck size={15} className="mt-0.5 shrink-0 text-accent" />
           <span>
-            <span className="font-semibold text-ink">Your own calendar.</span> Paste its private
-            address and the agent never offers a time you are already busy. Only when you are busy is
-            read, never what the event is.
+            Paste the calendar's private address and the agent won't offer a time you're busy there,
+            without you blocking it here too. Only when you're busy is read, never what the event is.
           </span>
         </p>
         <details className="text-2xs leading-relaxed text-faint">
           <summary className="cursor-pointer text-dim">Where to find the address</summary>
-          <ul className="mt-1.5 list-disc space-y-1 pl-4">
+          <ul className="mt-1.5 list-disc space-y-1.5 pl-4">
             <li>
-              <b>Google Calendar</b> (on a computer): Settings → your calendar → Integrate calendar →{' '}
-              <i>Secret address in iCal format</i>.
+              <b>Google</b> - on a computer, not the phone app (it isn't there): calendar.google.com →
+              hover your calendar in the left list → ⋮ → Settings and sharing → scroll right down to
+              Integrate calendar → <i>Secret address in iCal format</i>. If that section is missing on a
+              work (Workspace) account, your admin has turned off outside sharing and it can't be
+              found; a personal @gmail account always has it.
             </li>
             <li>
-              <b>Outlook</b>: Settings → Calendar → Shared calendars → Publish a calendar → “Can view
-              when I'm busy” → copy the ICS link.
+              <b>Outlook / Microsoft 365</b> - Settings ⚙ → Calendar → Shared calendars → Publish a
+              calendar → choose the calendar → Can view all details → Publish → copy the{' '}
+              <i>ICS</i> link, not the HTML one.
             </li>
             <li>
-              <b>iPhone / iCloud</b>: Calendar on icloud.com → share the calendar as a Public Calendar
-              → copy the webcal:// link.
+              <b>iCloud</b> - icloud.com → Calendar → the radio-wave icon beside the calendar → tick
+              Public Calendar → copy. It starts webcal://, which is fine.
             </li>
           </ul>
         </details>
@@ -142,35 +184,8 @@ export default function OwnCalendar() {
           saved, and never shown again. If it ever can't be read, the agent offers no times and you get
           an alert.
         </p>
-      </div>
-
-      <div className="space-y-2 border-t border-edge pt-4">
-        <p className="flex items-start gap-2.5 text-sm leading-relaxed text-dim">
-          <Mail size={15} className="mt-0.5 shrink-0 text-accent" />
-          <span>
-            <span className="font-semibold text-ink">Bookings straight into your calendar.</span> Each
-            booking is emailed to you as a calendar invitation, which Gmail, Outlook and Apple add by
-            themselves. Moving one updates it; cancelling takes it off.
-          </span>
-        </p>
-        {state?.email_available ? (
-          <label className="flex items-center gap-2 text-xs text-dim">
-            <input
-              type="checkbox"
-              checked={state.invite_owner}
-              disabled={busy}
-              onChange={(e) => save({ invite_owner: e.target.checked })}
-            />
-            Send them to {state.invites_go_to || 'your alert email address'}
-          </label>
-        ) : (
-          <p className="flex items-start gap-2 text-2xs text-warn">
-            <TriangleAlert size={12} className="mt-0.5 shrink-0" />
-            Email isn't set up on this server, so invitations can't be sent. The calendar link above
-            still works.
-          </p>
-        )}
-      </div>
+        </div>
+      </details>
 
       <div className="space-y-3 border-t border-edge pt-4">
         <p className="flex items-start gap-2.5 text-sm leading-relaxed text-dim">

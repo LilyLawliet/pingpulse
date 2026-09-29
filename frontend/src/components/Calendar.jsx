@@ -3,6 +3,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Ban,
   Clock,
   Loader2,
   MessageSquare,
@@ -90,6 +91,7 @@ export default function Calendar({ contacts = [], onOpenSetup, onOpenConversatio
   const [error, setError] = useState(null)
   const [selected, setSelected] = useState(null)
   const [creating, setCreating] = useState(null)
+  const [blocking, setBlocking] = useState(null)
   const [showCancelled, setShowCancelled] = useState(false)
 
   const load = useCallback(async () => {
@@ -140,7 +142,9 @@ export default function Calendar({ contacts = [], onOpenSetup, onOpenConversatio
   }, [data, zone, showCancelled])
 
   const cancelledCount = (data?.appointments || []).filter((r) => r.status !== 'confirmed').length
-  const liveCount = (data?.appointments || []).filter((r) => r.status === 'confirmed').length
+  const liveCount = (data?.appointments || []).filter(
+    (r) => r.status === 'confirmed' && r.kind !== 'blocked',
+  ).length
   const blockers = data?.readiness?.blockers || []
   const canBook = data?.readiness?.can_book
 
@@ -156,6 +160,7 @@ export default function Calendar({ contacts = [], onOpenSetup, onOpenConversatio
   const saved = async () => {
     setSelected(null)
     setCreating(null)
+    setBlocking(null)
     await load()
   }
 
@@ -204,6 +209,15 @@ export default function Calendar({ contacts = [], onOpenSetup, onOpenConversatio
                   <ChevronRight size={16} />
                 </button>
               </div>
+              <button
+                type="button"
+                className="btn-secondary px-3 py-1.5 text-xs"
+                disabled={!data}
+                title="Mark time you're busy, so the agent never offers it"
+                onClick={() => setBlocking({ day: days.includes(today) ? today : days[0] })}
+              >
+                <Ban size={14} /> Block out time
+              </button>
               <button
                 type="button"
                 className="btn-primary px-3 py-1.5 text-xs"
@@ -326,6 +340,15 @@ export default function Calendar({ contacts = [], onOpenSetup, onOpenConversatio
           onOpenConversation={onOpenConversation}
         />
       )}
+      {blocking && (
+        <BlockDialog
+          initialDay={blocking.day < today ? today : blocking.day}
+          today={today}
+          hours={data?.hours}
+          onClose={() => setBlocking(null)}
+          onSaved={saved}
+        />
+      )}
       {creating && (
         <NewAppointmentDialog
           initialDay={creating.day}
@@ -344,6 +367,23 @@ export default function Calendar({ contacts = [], onOpenSetup, onOpenConversatio
 
 function AppointmentCard({ row, zone, onOpen }) {
   const live = row.status === 'confirmed'
+  if (row.kind === 'blocked') {
+    return (
+      <button
+        type="button"
+        onClick={onOpen}
+        className={`w-full rounded-lg border border-dashed px-2 py-1.5 text-left transition-colors ${
+          live ? 'border-edge-hi bg-panel-2 hover:border-dim' : 'border-edge text-faint line-through'
+        }`}
+      >
+        <p className="flex items-center gap-1 text-2xs font-semibold text-dim">
+          <Ban size={10} className="shrink-0 text-faint" />
+          {clock(row.starts_at, zone)} – {clock(row.ends_at, zone)}
+        </p>
+        <p className="truncate text-xs text-dim">{row.notes || 'Blocked out'}</p>
+      </button>
+    )
+  }
   return (
     <button
       type="button"
@@ -489,6 +529,41 @@ function AppointmentDialog({ row, zone, onClose, onSaved, onOpenConversation }) 
   }
 
   const name = row.contact?.name || row.contact?.phone_number || 'Customer'
+
+  if (row.kind === 'blocked') {
+    return (
+      <Dialog title="Blocked out" onClose={onClose}>
+        <div className="space-y-4">
+          <p className={`text-sm text-ink ${live ? '' : 'line-through'}`}>
+            {row.description.charAt(0).toUpperCase() + row.description.slice(1)}
+          </p>
+          {row.notes && <p className="whitespace-pre-wrap text-xs text-dim">{row.notes}</p>}
+          <p className="text-xs text-dim">
+            {live
+              ? 'The agent offers nobody a time inside this.'
+              : 'Given back: this time can be booked again.'}
+          </p>
+          {live && (
+            <button
+              type="button"
+              className="btn-secondary w-full py-1.5 text-xs"
+              disabled={busy}
+              onClick={() => act(() => api.cancelAppointment(row.id, false))}
+            >
+              {busy && <Loader2 size={12} className="animate-spin" />}
+              Unblock - make this time bookable again
+            </button>
+          )}
+          {error && (
+            <p className="flex items-start gap-2 rounded-lg bg-crit/10 px-3 py-2 text-xs text-crit">
+              <TriangleAlert size={13} className="mt-0.5 shrink-0" />
+              {error}
+            </p>
+          )}
+        </div>
+      </Dialog>
+    )
+  }
 
   return (
     <Dialog title={name} onClose={onClose}>
@@ -757,6 +832,122 @@ function NewAppointmentDialog({
         >
           {busy && <Loader2 size={13} className="animate-spin" />}
           Book {slot ? `${dayLabel(day, { weekday: 'short', day: 'numeric', month: 'short' })}, ${clock(slot, zone)}` : ''}
+        </button>
+      </div>
+    </Dialog>
+  )
+}
+
+/** Half-hour marks through a whole day, as HH:MM, for picking a block by hand. */
+const HALF_HOURS = Array.from({ length: 49 }, (_, i) => {
+  const h = Math.floor(i / 2)
+  return `${String(h).padStart(2, '0')}:${i % 2 ? '30' : '00'}`
+})
+
+function BlockDialog({ initialDay, today, hours, onClose, onSaved }) {
+  const openFor = (day) => hours?.[DAY_NAMES[weekdayOf(day)]]
+  const first = openFor(initialDay)
+  const [day, setDay] = useState(initialDay)
+  const [wholeDay, setWholeDay] = useState(false)
+  const [from, setFrom] = useState(first?.open || '09:00')
+  const [to, setTo] = useState(first?.close || '17:00')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  const field =
+    'mt-1 block w-full rounded-xl border border-edge bg-panel-2 px-3 py-2 text-sm text-ink focus:border-accent/60 focus:outline-none'
+
+  const submit = async () => {
+    setBusy(true)
+    setError(null)
+    // Written as the shop's own clock time; the server reads it in the shop's zone.
+    const starts = `${day}T${wholeDay ? '00:00' : from}`
+    const ends = wholeDay || to === '24:00' ? `${addDays(day, 1)}T00:00` : `${day}T${to}`
+    try {
+      await api.blockTime({ starts_at: starts, ends_at: ends, note: note.trim() || null })
+      await onSaved()
+    } catch (err) {
+      setError(err.message)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog title="Block out time" onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-xs leading-relaxed text-dim">
+          For when you're busy - a day off, an errand, a meeting booked somewhere else. The agent
+          won't offer any time inside it.
+        </p>
+        <label className="block text-xs font-medium text-ink">
+          Day
+          <input
+            type="date"
+            value={day}
+            min={today}
+            onChange={(e) => {
+              setDay(e.target.value)
+              const hoursThen = openFor(e.target.value)
+              if (hoursThen) {
+                setFrom(hoursThen.open)
+                setTo(hoursThen.close)
+              }
+            }}
+            className={field}
+          />
+        </label>
+        <label className="flex items-center gap-2 text-xs text-ink">
+          <input type="checkbox" checked={wholeDay} onChange={(e) => setWholeDay(e.target.checked)} />
+          The whole day
+        </label>
+        {!wholeDay && (
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-xs font-medium text-ink">
+              From
+              <select value={from} onChange={(e) => setFrom(e.target.value)} className={field}>
+                {HALF_HOURS.slice(0, -1).map((t) => (
+                  <option key={t} value={t}>
+                    {clockText(t)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-xs font-medium text-ink">
+              Until
+              <select value={to} onChange={(e) => setTo(e.target.value)} className={field}>
+                {HALF_HOURS.slice(1).map((t) => (
+                  <option key={t} value={t}>
+                    {t === '24:00' ? 'Midnight' : clockText(t)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+        <label className="block text-xs font-medium text-ink">
+          Note <span className="font-normal text-faint">(only you see this)</span>
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Dentist, stock take, day off…"
+            className={field}
+          />
+        </label>
+        {error && (
+          <p className="flex items-start gap-2 rounded-lg bg-crit/10 px-3 py-2 text-xs text-crit">
+            <TriangleAlert size={13} className="mt-0.5 shrink-0" />
+            {error}
+          </p>
+        )}
+        <button
+          type="button"
+          className="btn-primary w-full py-2 text-sm"
+          disabled={busy || (!wholeDay && to <= from)}
+          onClick={submit}
+        >
+          {busy && <Loader2 size={13} className="animate-spin" />}
+          Block it out
         </button>
       </div>
     </Dialog>

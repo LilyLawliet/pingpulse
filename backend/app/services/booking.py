@@ -40,6 +40,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.models import (
+    APPOINTMENT_BLOCKED,
     APPOINTMENT_CANCELLED,
     APPOINTMENT_CONFIRMED,
     APPOINTMENT_KINDS,
@@ -465,6 +466,54 @@ async def cancel(db, appointment, *, source: str = "agent") -> Booked | Refusal:
     return Booked(appointment)
 
 
+async def block(
+    db, organization, starts_at: datetime, ends_at: datetime, *, note: str | None = None
+) -> Booked | Refusal:
+    """Block out time the owner is busy, so nobody is offered it.
+
+    Refused only for what would make it wrong: backwards, over already, or
+    on top of a customer who is booked - they would silently keep an
+    appointment the owner can't keep, so they are moved or cancelled first.
+    Outside opening hours is allowed; it is simply already unavailable.
+    """
+    now = datetime.now(timezone.utc)
+    if ends_at <= starts_at:
+        return Refusal("backwards", "The end has to be after the start.")
+    if ends_at <= now:
+        return Refusal("past", "That time has already passed.")
+    if ends_at - starts_at > timedelta(days=31):
+        return Refusal("too_long", "Block out a month at most at a time.")
+
+    taken = await live_appointments(db, organization.id, starts_at, ends_at)
+    held = _clashes(starts_at, ends_at, taken, 0)
+    if held is not None:
+        if getattr(held, "is_blocked", False):
+            return Refusal("taken", "Part of that time is already blocked out.")
+        return Refusal(
+            "customer_booked",
+            f"A customer is booked in that time ({describe(held)}). Move or cancel it first.",
+        )
+
+    appointment = Appointment(
+        organization_id=organization.id,
+        contact_id=None,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        timezone_name=str(agent_config.zone_of(organization)),
+        kind=APPOINTMENT_BLOCKED,
+        status=APPOINTMENT_CONFIRMED,
+        notes=(note or "").strip()[:500] or None,
+        source="operator",
+    )
+    try:
+        async with db.begin_nested():
+            db.add(appointment)
+            await db.flush()
+    except IntegrityError:
+        return Refusal("taken", "Something was booked in that time just now.")
+    return Booked(appointment)
+
+
 async def reschedule(
     db, organization, appointment, starts_at: datetime, *, source: str = "agent", notice: bool = True
 ) -> Booked | Refusal:
@@ -476,6 +525,8 @@ async def reschedule(
     """
     if appointment is None:
         return Refusal("not_found", "There is no appointment booked to move.")
+    if getattr(appointment, "is_blocked", False):
+        return Refusal("blocked", "Blocked-out time is removed and added again, not moved.")
     if appointment.status != APPOINTMENT_CONFIRMED:
         return Refusal("not_confirmed", "There is no confirmed appointment to move.")
 
@@ -615,6 +666,14 @@ def describe(appointment) -> str:
     """
     zone = ZoneInfo(appointment.timezone_name or "UTC")
     local = _aware(appointment.starts_at).astimezone(zone)
+    if getattr(appointment, "is_blocked", False):
+        until = _aware(appointment.ends_at).astimezone(zone)
+        day = local.strftime("%A %d %B").replace(" 0", " ")
+        begin = local.strftime("%I:%M %p").lstrip("0").lower()
+        end = until.strftime("%I:%M %p").lstrip("0").lower()
+        if until.date() != local.date():
+            end = until.strftime("%A %d %B").replace(" 0", " ") + " " + end
+        return f"time blocked out on {day} from {begin} to {end}"
 
     # %-d and %-I are not portable to Windows, so the padding is stripped by
     # hand rather than by a format code that works on one developer's machine.

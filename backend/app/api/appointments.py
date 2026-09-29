@@ -181,7 +181,10 @@ async def _tell(db, tenant: Tenant, contact: CRMContact, text: str) -> dict:
 async def _changed(db, tenant: Tenant, contact_id) -> None:
     await manager.broadcast(
         ws_manager.EVENT_SYNC,
-        {"contact_id": str(contact_id), "organization_id": str(tenant.id)},
+        {
+            "contact_id": str(contact_id) if contact_id else None,
+            "organization_id": str(tenant.id),
+        },
     )
 
 
@@ -352,16 +355,48 @@ async def cancel_appointment(
     result = await booking.cancel(db, existing, source="operator")
     _refused(result)
     contact = existing.contact
-    booking.forget_offer(contact)
     told = None
-    if payload.tell_customer:
-        told = await _tell(
-            db, tenant, contact,
-            f"Your {booking.describe(existing)} has been cancelled. Message us any time "
-            "to book another.",
-        )
-    await invites.send_for(db, tenant.organization, cancelled=existing)
+    if contact is not None:
+        booking.forget_offer(contact)
+        if payload.tell_customer:
+            told = await _tell(
+                db, tenant, contact,
+                f"Your {booking.describe(existing)} has been cancelled. Message us any time "
+                "to book another.",
+            )
+        await invites.send_for(db, tenant.organization, cancelled=existing)
     await db.commit()
     cancelled = await _appointment(db, tenant, existing.id)
-    await _changed(db, tenant, contact.id)
+    await _changed(db, tenant, contact.id if contact is not None else None)
     return {"appointment": _row(cancelled), "told": told}
+
+
+class BlockIn(BaseModel):
+    starts_at: datetime
+    ends_at: datetime
+    note: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/appointments/block", status_code=201)
+async def block_time(
+    payload: BlockIn,
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Block out time the owner is busy. The agent offers nobody a time inside it.
+
+    Undone with the ordinary cancel endpoint, which frees the time again.
+    """
+    tenant.require_role(WRITE_ROLES)
+    result = await booking.block(
+        db,
+        tenant.organization,
+        _aware_input(payload.starts_at, tenant.organization),
+        _aware_input(payload.ends_at, tenant.organization),
+        note=payload.note,
+    )
+    _refused(result)
+    await db.commit()
+    blocked = await _appointment(db, tenant, result.appointment.id)
+    await _changed(db, tenant, None)
+    return {"appointment": _row(blocked)}
