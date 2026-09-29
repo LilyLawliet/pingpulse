@@ -12,6 +12,20 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.8.2',
+    date: '30 September 2026',
+    items: [
+      {
+        title: 'Switching business starts every page afresh',
+        body:
+          'After switching business — or creating one — Setup kept the '
+          + 'previous business’s details on screen under the new one’s name, '
+          + 'and saving from there would have written them over the new business. Every '
+          + 'page now reloads for the business you are actually on.',
+      },
+    ],
+  },
+  {
     version: '1.8.1',
     date: '30 September 2026',
     items: [
