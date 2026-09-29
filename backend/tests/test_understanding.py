@@ -72,8 +72,13 @@ async def test_what_the_model_reads_is_kept_only_if_the_file_says_it(model):
 
 @pytest.mark.asyncio
 async def test_no_model_means_the_reader(monkeypatch):
-    monkeypatch.setattr(settings, "groq_api_key", "")
-    monkeypatch.setattr(settings, "gemini_api_key", "")
+    # Every key, not just the first: `groq_api_keys` is built from the
+    # numbered ones too, so clearing one of five left this test calling the
+    # real provider on a developer's own keys - slowly, and at their expense.
+    for base in ("groq_api_key", "gemini_api_key"):
+        for suffix in ("", "_2", "_3", "_4", "_5"):
+            monkeypatch.setattr(settings, base + suffix, "", raising=False)
+    assert not settings.groq_api_keys and not settings.gemini_api_keys
     read = await understanding.read_document("bakery.txt", BAKERY, "PKR")
     assert read["read_by"] == "reader"
     assert any(i["name"] == "Red velvet cake" for i in read["items"])

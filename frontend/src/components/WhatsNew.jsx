@@ -12,6 +12,42 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.5.8',
+    date: '29 September 2026',
+    items: [
+      {
+        title: 'It answers in the language the customer wrote in',
+        body:
+          'Everything the agent is told is written in English, and “write in English, default '
+          + 'to English” among all that meant English whatever the customer wrote. The '
+          + 'customer’s own language and script now come first — Spanish to Spanish, Arabic '
+          + 'to Arabic, Urdu script to Urdu script — with your own language only as the '
+          + 'fallback when it cannot tell. A reply that comes back in the wrong script is '
+          + 'rewritten before it goes out.',
+      },
+      {
+        title: 'Our own sentences are translated too',
+        body:
+          'The hand-over to a person, “I’ve passed it to the team”, and the answer worked '
+          + 'out from your documents when no AI is reachable were only ever English. They '
+          + 'are now put into the customer’s language — and kept only if every number, price '
+          + 'and link in the rewrite is exactly what it was. A translated reply with a '
+          + 'different price is worse than an English one with the right price. English '
+          + 'customers cost nothing extra.',
+      },
+      {
+        title: 'A stuck WhatsApp pairing says what is wrong',
+        body:
+          'Waiting for a QR code was a spinner and nothing else, whether WhatsApp was slow, '
+          + 'had refused every attempt, or the connection service was unreachable. The '
+          + 'screen now says which it is and offers Try again. A pairing that produces no '
+          + 'code within 30 seconds is ended rather than left hanging, pressing Show QR on a '
+          + 'stalled one starts fresh instead of reattaching to it, and scanning a phone '
+          + 'another business already has connected says so instead of “Linked”.',
+      },
+    ],
+  },
+  {
     version: '1.5.7',
     date: '29 September 2026',
     items: [
