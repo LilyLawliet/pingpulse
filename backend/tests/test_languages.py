@@ -132,3 +132,44 @@ async def test_the_team_hand_over_reaches_a_spanish_speaker_in_spanish(db_sessio
     ))
     sent = (await db_session.execute(select(Message).where(Message.sender == "agent"))).scalars().all()
     assert sent[-1].content.startswith("Buena pregunta")
+
+
+# ------------------------------------------- a price is a price wherever it sits
+def test_a_full_stop_after_a_price_is_not_part_of_it():
+    """"Delivery is PKR 350." and "Delivery PKR 350 hai." are the same 350.
+
+    Reading the full stop as part of the number made every rewrite that moved
+    a price off the end of its sentence look like a changed price, and the
+    customer was sent the English back.
+    """
+    english = "I've passed it to the team. Delivery is PKR 350. See https://shop.example/x"
+    urdu = "Maine team ko bhej diya hai. Delivery PKR 350 hai. Dekhein https://shop.example/x."
+    assert languages._figures(english) == languages._figures(urdu) == ["350"]
+    assert languages._links(english) == languages._links(urdu)
+
+
+def test_a_decimal_price_is_still_read_whole():
+    assert languages._figures("PKR 1,250.50 and 8,500.") == ["1,250.50", "8,500"]
+
+
+@pytest.mark.parametrize(
+    "rewrite, kept",
+    [
+        ("Maine team ko bhej diya. Delivery PKR 350 hai.", True),
+        ("Maine team ko bhej diya. Delivery PKR 450 hai.", False),   # changed
+        ("Maine team ko bhej diya.", False),                          # dropped
+        ("Maine team ko bhej diya. PKR 350, 10% off.", False),        # added
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_rewrite_is_kept_only_when_every_figure_survives(monkeypatch, rewrite, kept):
+    original = "I've passed it to the team. Delivery is PKR 350."
+
+    async def answer(prompt, timeout):
+        return {"text": rewrite}
+
+    from app.services import understanding
+
+    monkeypatch.setattr(understanding, "structured", answer)
+    out = await languages.in_customer_language(original, "kitne ka hai?")
+    assert (out != original) is kept, out

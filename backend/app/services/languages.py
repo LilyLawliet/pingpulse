@@ -170,11 +170,18 @@ The shop's message:
 
 
 def _figures(text: str) -> list[str]:
-    return sorted(re.findall(r"\d[\d,.]*", text or ""))
+    """Every number, without the punctuation that happens to follow it.
+
+    "PKR 350." at the end of a sentence is the same 350 as "PKR 350 hai" in
+    the middle of one. Reading the full stop as part of the number made every
+    rewrite that moved a price off the end of its sentence look like a changed
+    price, and the customer got the English back.
+    """
+    return sorted(re.findall(r"\d[\d,]*(?:\.\d+)?", text or ""))
 
 
 def _links(text: str) -> list[str]:
-    return sorted(re.findall(r"https?://\S+", text or ""))
+    return sorted(link.rstrip(".,;:!?)") for link in re.findall(r"https?://\S+", text or ""))
 
 
 async def in_customer_language(text: str, customer_message: str, timeout: float = 4) -> str:

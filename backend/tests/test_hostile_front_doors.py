@@ -273,9 +273,23 @@ def test_a_url_pointing_inward_is_not_fetched(url):
         "https://example.com/photo.png",
     ],
 )
-def test_a_real_cdn_url_is_still_fetched(url):
+def test_a_real_cdn_url_is_still_fetched(url, monkeypatch):
+    """A public CDN host is fetched.
+
+    The resolver is stood in for, because `_is_public_host` fails closed on a
+    name that will not resolve: asking the real DNS for these made the test
+    fail whenever the network was slow, which says nothing about the code.
+    """
+    import socket as _socket
+
+    from app.services import media_service
     from app.services.media_service import _fetchable
 
+    monkeypatch.setattr(
+        media_service.socket,
+        "getaddrinfo",
+        lambda host, *a, **k: [(_socket.AF_INET, None, None, "", ("93.184.216.34", 0))],
+    )
     assert _fetchable(url) is True, url
 
 
