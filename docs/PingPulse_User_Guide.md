@@ -162,6 +162,14 @@ several; they add up rather than replace each other. Prices written into
 **If you skip it.** It has to refuse every question about cost. It will do so
 politely, but that is a demo, not a working agent.
 
+**Check what was read.** When a file is uploaded, the AI reads it into a list
+of products, prices and rules (delivery, discounts, payment, returns). Every
+price and name it returns is then checked against your file, and anything the
+file doesn't say is left out. Below your files, **What your agent will quote**
+shows exactly that list. These are the only prices the agent will give a
+customer. Correct a name or price, remove anything wrong, and press **Looks
+right**. Uploading a file with the same name again replaces its old version.
+
 **Photos.** In a Word price list, put a picture in each product's row (a
 photo column works). Each picture becomes that product's photo, and the agent
 can send it when a customer asks to see it. A product without one is described

@@ -133,6 +133,10 @@ by Alembic, and by `docker-compose.yml`.
 | `BACKEND_PORT` / `FRONTEND_PORT` | Published ports (8000 / 3000) |
 | `CHAT_HISTORY_LIMIT` | Messages of history folded into each prompt (default 12) |
 | `LLM_TIMEOUT_SECONDS` | Per-provider timeout before failover |
+| `REPLY_DEADLINE_SECONDS` | The whole reply, both providers included (default 14) |
+| `UNDERSTANDING_MODEL` | Groq model that reads documents and messages into structured form; empty uses `GROQ_MODEL`. A stronger model here pays for itself: a misread order is a wrong quote |
+| `UNDERSTANDING_TIMEOUT_SECONDS` | Reading one message while the customer waits (default 6); past it the built-in reader is used |
+| `EXTRACTION_TIMEOUT_SECONDS` | Reading one uploaded file (default 60) |
 | `AUTO_MIGRATE_ON_STARTUP` | Run `alembic upgrade head` during FastAPI startup |
 | `CORS_ORIGINS` | Comma-separated allowed origins |
 

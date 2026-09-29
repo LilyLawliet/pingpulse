@@ -591,6 +591,9 @@ class Wanted:
     measure: tuple[Decimal, str] | None = None
     # The word they counted in - "panels", "boxes" - when they counted.
     counted_as: str | None = None
+    # They counted the pieces inside a pack ("20 pens" of a pack of 10), as
+    # read by the model rather than guessed from the word.
+    pieces: bool = False
 
 
 _QUANTITY = re.compile(
@@ -1285,6 +1288,10 @@ class Quote:
     # An order value the customer named themselves - "what if I make it PKR
     # 500,000?" - which the rules were applied to instead of the goods above.
     stated: Decimal | None = None
+    # Things they asked for that the list has nothing like, in their words.
+    not_stocked: list[str] = field(default_factory=list)
+    # Who read the message: the model ("model") or the pattern reader.
+    read_by: str = "reader"
     # "What items do you have?": nothing named, so a spread of what is sold.
     overview: list[Item] = field(default_factory=list)
     overview_total: int = 0
@@ -1309,7 +1316,7 @@ class Quote:
     def empty(self) -> bool:
         return (
             not self.lines and not self.options and not self.applied and not self.rules
-            and not self.unknown_place and not self.overview
+            and not self.unknown_place and not self.overview and not self.not_stocked
         )
 
     @property
@@ -1379,6 +1386,11 @@ class Quote:
                 )
             out.append("- The order-size rules, already applied (use these exact figures):")
             out += [f"    {line}" for line in self.applied.lines()]
+        for thing in self.not_stocked:
+            out.append(
+                f'- They asked for "{thing}". Nothing in the price list is that. Say plainly that '
+                "you don't have it, then offer the closest thing listed, if anything is close."
+            )
         if self.overview:
             more = self.overview_total - len(self.overview)
             out.append(
@@ -1429,6 +1441,8 @@ class Quote:
         if self.empty() or (self.unknown_place and not self.lines):
             return ""
         out: list[str] = []
+        for thing in self.not_stocked:
+            out.append(f"We don't have {thing}.")
         if self.overview:
             out.append("Here's some of what we have:")
             out += [f"• {item.plain_label}: {item.priced()}" for item in self.overview]
@@ -1604,6 +1618,8 @@ def _counts_pieces(item: Item, wanted: Wanted) -> bool:
     of what the product is, not the unit it is sold in, and the pack holds
     more than one.
     """
+    if wanted.pieces:
+        return bool(item.pack and item.pack > 1)
     if not (wanted.counted_as and item.pack and item.pack > 1):
         return False
     counted = _stem(wanted.counted_as)
@@ -1815,10 +1831,16 @@ def quote(message: str, items: list[Item], context: str = "") -> Quote:
                 line.quantity = line.units = Decimal(1)
                 line.total = line.item.price
 
-    # The same item asked for twice in one message, once counted in what it is
-    # sold as and once in a measure it is not ("6 coils of the 4mm cable ...
-    # I want 20m of the 4mm cable rather than a full coil"): the count is the
-    # order, the measure is answered with how it is sold and not added again.
+    _mark_asides(result)
+    return result
+
+
+def _mark_asides(result: "Quote") -> None:
+    """The same item asked for twice in one message, once counted in what it is
+    sold as and once in a measure it is not ("6 coils of the 4mm cable ... I
+    want 20m of the 4mm cable rather than a full coil"): the count is the
+    order, the measure is answered with how it is sold and not added again.
+    """
     counted = {line.item.label for line in result.lines if line.quantity and not line.note}
     for line in result.lines:
         if line.note and line.item.label in counted:
@@ -1833,7 +1855,6 @@ def quote(message: str, items: list[Item], context: str = "") -> Quote:
             )
             line.units = None
             line.total = None
-    return result
 
 
 # ------------------------------------------------------------------ the guard
@@ -1964,6 +1985,9 @@ def as_dict(result: Quote) -> dict[str, Any]:
         "subtotal": money(result.subtotal, result.currency) if result.subtotal is not None else None,
         # The discount and delivery rules as they came out for this order.
         "rules_applied": result.applied.lines() if result.applied else [],
+        # Whether the model read the message, or the pattern reader had to.
+        "read_by": result.read_by,
+        "not_stocked": list(result.not_stocked),
         # Payment, returns and other terms, quoted as the business wrote them.
         "terms_quoted": list(result.rules),
         "catalogue_size": result.catalogue_size,
@@ -1999,35 +2023,53 @@ def _part(title: str) -> int:
     return int(found.group(1)) if found else 0
 
 
-async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) -> Turn:
-    """Read this business's priced items and work out what `message` asks for.
+@dataclass
+class Prepared:
+    """Everything stored about what this business sells, loaded once per turn."""
 
-    Read from what is already stored - uploaded documents, imported products
-    and the "What you sell" description - so a price list uploaded before this
-    existed is understood without uploading it again. Passages of one file are
-    put back together in order first: a table sits inside one passage, but the
-    rules around it do not.
+    items: list[Item]
+    texts: list[tuple[str, str]]
+    tiers: list[Tier]
+    written: set[Decimal]
+    # Whether the items came from catalogues read by the model at upload
+    # ("model"), or from the pattern reader ("reader").
+    read_by: str = "reader"
+
+
+async def prepare(db, organization) -> Prepared:
+    """Load this business's catalogue: the checked reading of each file where
+    there is one, and the pattern reader for anything uploaded before that.
+
+    Passages of one file are put back together in order first: a table sits
+    inside one passage, but the rules around it do not.
     """
     from sqlalchemy import select
 
-    from app.models import KnowledgeDocument
+    from app.models import Catalogue, KnowledgeDocument
+    from app.services import understanding
 
     rows = (
         await db.execute(
             select(KnowledgeDocument).where(KnowledgeDocument.organization_id == organization.id)
         )
     ).scalars().all()
+    catalogues = {
+        row.source: row
+        for row in (
+            await db.execute(select(Catalogue).where(Catalogue.organization_id == organization.id))
+        ).scalars().all()
+    }
 
     by_source: dict[str, list[Any]] = {}
     texts: list[tuple[str, str]] = []
     for row in rows:
-        # An imported product (a WhatsApp or Shopify catalogue entry) carries
-        # its price as a field. A price list uploaded as "product" does not,
-        # and is read like any other document.
         # A photo read out of an uploaded table: its price is already in
         # that table, and reading it twice would list the product twice.
         if (row.attributes or {}).get("photo_from"):
             continue
+        # An imported product (a WhatsApp or Shopify catalogue entry) carries
+        # its price as a field. A price list uploaded as "product" does not,
+        # and is read like any other document.
         price = (row.attributes or {}).get("price") if row.doc_type == "product" else None
         if price:
             currency = (row.attributes or {}).get("currency") or ""
@@ -2043,7 +2085,92 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
         texts.append(("What you sell", rules))
 
     currency = getattr(organization, "default_currency", None)
-    items = read_items(texts, currency)
+    items: list[Item] = []
+    tiers: list[Tier] = []
+    unread: list[tuple[str, str]] = []
+    read_by = "reader"
+    for source, text in texts:
+        catalogue = catalogues.get(source)
+        if catalogue is not None:
+            items += understanding.as_items(catalogue.items or [], source)
+            if catalogue.read_by == "model":
+                tiers += understanding.as_tiers(catalogue.rules or [], currency_of(text) or currency)
+                read_by = "model"
+            else:
+                tiers += read_tiers([(source, text)])
+        else:
+            unread.append((source, text))
+    if unread:
+        items += read_items(unread, currency)
+        tiers += read_tiers(unread)
+
+    written: set[Decimal] = set()
+    for _, text in texts:
+        written |= amounts(text)
+    return Prepared(items, texts, tiers, written, read_by)
+
+
+def delivery_terms(prepared: "Prepared") -> str:
+    """The business's own delivery sentences, for the reading to judge a place by."""
+    found: list[str] = []
+    for tier in prepared.tiers:
+        if tier.topic == "delivery" and tier.sentence and tier.sentence not in found:
+            found.append(tier.sentence)
+    return "\n".join(found[:6])
+
+
+def conversation(history: Iterable[Any], turns: int = 6) -> str:
+    """The last few messages, both sides, for reading "the first one"."""
+    out = []
+    for m in list(history)[-turns:]:
+        who = "Customer" if str(getattr(m, "sender", "")).lower() == "user" else "Shop"
+        out.append(f"{who}: {(getattr(m, 'content', '') or '')[:400]}")
+    return "\n".join(out)
+
+
+async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) -> Turn:
+    """Load, read and work out one message: the three steps in order.
+
+    The webhook runs the reading at the same time as the analysis; the
+    sandbox and anything else that wants the whole thing calls this.
+    """
+    from app.services import understanding
+
+    prepared = await prepare(db, organization)
+    reading = await understanding.read_message(
+        message, prepared.items, conversation(history), terms=delivery_terms(prepared)
+    )
+    return finish(prepared, organization, message, history, reading)
+
+
+def assemble(message: str, items: list[Item], reading: dict) -> Quote:
+    """The quote for what the model read, worked out by the arithmetic here."""
+    result = Quote(asked=message, catalogue_size=len(items))
+    for item, wanted in reading["lines"]:
+        result.lines.append(_line_for(item, wanted))
+    result.options = list(reading["choices"])
+    result.not_stocked = list(reading["not_stocked"])
+    if reading["wants_list"] and not result.lines and not result.options:
+        pool = items
+        narrowing = words(reading.get("list_filter") or "")
+        if narrowing:
+            pool = [i for i in items if narrowing & i.haystack_words()]
+        if pool:
+            result.overview = _spread(pool)
+            result.overview_total = len(pool)
+    _mark_asides(result)
+    return result
+
+
+def finish(prepared: Prepared, organization, message: str, history: Iterable[Any] = (),
+           reading: dict | None = None) -> Turn:
+    """Work out what `message` asks for against the loaded catalogue.
+
+    `reading` is the model's checked reading of the message; without one - no
+    model reachable, or nothing survived the checks - the pattern reader
+    reads it instead.
+    """
+    items, texts, tiers = prepared.items, prepared.texts, prepared.tiers
 
     # What they said just before, for "and how much for 10?" after naming one.
     earlier = " ".join(
@@ -2057,19 +2184,26 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
         if str(getattr(m, "sender", "")).lower() == "user"
     ]
     earlier_one = said_before[-1] if said_before else ""
-    written: set[Decimal] = set()
-    for _, text in texts:
-        written |= amounts(text)
-    result = quote(message, items, context=earlier)
+
+    if reading is not None:
+        result = assemble(message, items, reading)
+        asked_topics = set(reading["topics"])
+        named_value = reading["order_value"] or stated_value(message)
+        place = reading["place"]
+    else:
+        result = quote(message, items, context=earlier)
+        asked_topics = topics_in(message)
+        named_value = stated_value(message)
+        place = ""
+    result.read_by = "model" if reading is not None else "reader"
 
     # Discount and delivery tiers, applied to what this order is worth: the
     # goods worked out above, or an amount the customer names ("an order
     # worth PKR 499,999"). A follow-up like "what if I make it PKR 999,999?"
     # names no topic, so the ones asked about just before carry over.
-    topics = topics_in(message) or (topics_in(earlier) if stated_value(message) else set())
-    tiers = read_tiers(texts)
+    topics = asked_topics or (topics_in(earlier) if named_value else set())
     places = {p for t in tiers if t.topic == "delivery" for p in _places_named(t.condition)}
-    said_words = set(re.findall(r"[a-z]+", _plain(message).lower()))
+    said_words = set(re.findall(r"[a-z]+", _plain(f"{message} {place}").lower()))
     # "I'm in Karachi" after "how much with delivery?" answers which city.
     if not topics and places & said_words and "delivery" in topics_in(earlier):
         topics = {"delivery"}
@@ -2083,13 +2217,18 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
         re.search(r"\b(rest|other|others|outside|elsewhere|nationwide|anywhere)\b", t.condition, re.I)
         for t in delivery_rules if t.condition
     )
-    if delivery_rules and not covers_elsewhere and "delivery" in topics_in(message):
+    if reading is not None and reading.get("place_covered") is False and place:
+        # The model read the terms and the place: "rest of Pakistan" does not
+        # reach Dubai. Only ever used to hand over, never to promise delivery.
+        result.unknown_place = place
+    elif delivery_rules and not covers_elsewhere and "delivery" in asked_topics:
         everything = _plain(" ".join(text for _, text in texts)).lower()
-        for place in re.findall(r"\b(?:to|in|into|at)\s+([A-Z][a-z]{2,})", _plain(message)):
-            if place.lower() not in everything and place.lower() not in STOPWORDS:
-                result.unknown_place = place
+        named = [place] if place else re.findall(r"\b(?:to|in|into|at)\s+([A-Z][a-z]{2,})", _plain(message))
+        for where in named:
+            if where and where.lower() not in everything and where.lower() not in STOPWORDS:
+                result.unknown_place = where
                 break
-    value = result.order_value or stated_value(message)
+    value = result.order_value or named_value
     if value is None and topics & {"discount", "delivery"}:
         # "What about delivery?" after an order was described: the order is
         # the one in their previous messages, newest first.
@@ -2110,7 +2249,7 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
     if unasked_discount:
         topics = topics | {"discount"}
     if topics & {"discount", "delivery"} and value:
-        if result.order_value is None and stated_value(message) is not None:
+        if result.order_value is None and named_value is not None:
             result.stated = value
         # The currency the rules and the price list are written in comes
         # before the business's default: a shop set to USD whose documents are
@@ -2122,7 +2261,7 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
             or next((i.currency for i in items if i.currency), None)
             or getattr(organization, "default_currency", None)
         )
-        said = " ".join([*said_before[-6:], message])
+        said = " ".join([*said_before[-6:], message, place])
         result.applied = apply_tiers(value, tiers, currency, topics, where=said)
         if unasked_discount and result.applied:
             # Said because it applies; the next rate up is for when they ask.
@@ -2135,16 +2274,19 @@ async def for_turn(db, organization, message: str, history: Iterable[Any] = ()) 
         if topics:
             earlier = earlier_one
     # "Can I return the MCB?" is about returns, not the MCB's price.
-    if topics_in(message) & {"returns", "payment"} and not re.search(
+    if asked_topics & {"returns", "payment"} and not re.search(
         r"\b(how much|price|cost|total|quote|quotation)\b", message or "", re.I
     ):
         result.lines = [line for line in result.lines if line.quantity]
         result.options = []
     if not result.empty() or topics:
         names = {w for item in items for w in words(item.name)}
-        result.rules = rules_for(
-            message if topics_in(message) else f"{message} {earlier}", texts, ignore=names
-        )
+        # Which sentences to quote: the topics as read, said in the words
+        # rules_for looks for.
+        asking = message if asked_topics else f"{message} {earlier}"
+        if reading is not None and asked_topics:
+            asking = f"{message} " + " ".join(sorted(asked_topics))
+        result.rules = rules_for(asking, texts, ignore=names)
         if result.applied:
             result.rules = [r for r in result.rules if _rule_topic(r) not in result.applied.topics]
-    return Turn(result, items, written)
+    return Turn(result, items, prepared.written)

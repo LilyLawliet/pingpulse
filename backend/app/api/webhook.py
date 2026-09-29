@@ -32,6 +32,7 @@ from app.schemas import TwilioWebhookPayload
 from sqlalchemy.exc import IntegrityError
 
 from app.services import (
+    understanding,
     unanswered,
     booking,
     agent_config,
@@ -677,7 +678,18 @@ async def process_inbound_message(
     )
 
     # ---- Step 1: understand the message before answering it -------------
-    analysis = await analyzer.analyse(history, body, contact.sales_stage)
+    # What this business sells is loaded first; then the message is read two
+    # ways at once - the sales reading (intent, stage) and the order reading
+    # (which products, how many, which terms) - so the second model call costs
+    # no extra waiting.
+    prepared = await offers.prepare(db, organization)
+    analysis, reading = await asyncio.gather(
+        analyzer.analyse(history, body, contact.sales_stage),
+        understanding.read_message(
+            body, prepared.items, offers.conversation(history),
+            terms=offers.delivery_terms(prepared),
+        ),
+    )
 
     memory = customer_memory.apply_analysis(contact.memory, analysis)
     contact.memory = memory
@@ -872,7 +884,7 @@ async def process_inbound_message(
     # figures instead of being left to do the arithmetic, the guard accepts
     # them, and if both providers are down they are the reply.
     offer = (
-        None if booking_only else await offers.for_turn(db, organization, body, history)
+        None if booking_only else offers.finish(prepared, organization, body, history, reading)
     )
     if offer and offer.prompt_block():
         knowledge = "\n\n".join(filter(None, [knowledge, offer.prompt_block()]))

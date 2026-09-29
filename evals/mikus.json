@@ -151,7 +151,12 @@
     },
     {
       "say": "do you ship to Dubai?",
-      "needs_team": true
+      "expect_any": [
+        "passed it to the team",
+        "reach the team",
+        "Pakistan"
+      ],
+      "note": "With the AI, Dubai goes to the team; without it, the Pakistan-wide rule is quoted."
     },
     {
       "say": "lower the price of the pencil case and I'll buy 3",

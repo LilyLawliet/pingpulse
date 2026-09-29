@@ -154,6 +154,10 @@ export const api = {
   // A shop's catalogue and policies, read out of the files they already have.
   knowledgeReadiness: () => request('/knowledge/readiness'),
   listKnowledgeSources: () => request('/knowledge/sources'),
+  // What each file was read into: the products and rules the agent quotes.
+  listCatalogue: () => request('/knowledge/catalogue'),
+  correctCatalogue: (id, body) =>
+    request(`/knowledge/catalogue/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   // A catalogue is previewed before it is imported: WhatsApp reports prices as
   // an integer without saying what scale it is on, and a wrong guess has the
   // agent quoting a hundredth of the real price with total confidence.

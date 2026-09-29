@@ -10,6 +10,7 @@ import {
   Upload,
 } from 'lucide-react'
 import { api } from '../api.js'
+import CatalogueReview from './CatalogueReview.jsx'
 
 const ACCEPT = '.pdf,.docx,.txt,.md'
 
@@ -37,6 +38,8 @@ export default function KnowledgeSettings({ onChanged }) {
   // What the last upload did to the opening hours, reported by the server.
   const [hours, setHours] = useState(null)
   const [dragging, setDragging] = useState(false)
+  // Bumped after an upload or a removal, so the reading below reloads.
+  const [readAt, setReadAt] = useState(0)
   const picker = useRef(null)
 
   const load = useCallback(async () => {
@@ -52,6 +55,7 @@ export default function KnowledgeSettings({ onChanged }) {
     } catch {
       setReadiness(null)
     }
+    setReadAt((n) => n + 1)
   }, [])
 
   useEffect(() => {
@@ -316,6 +320,8 @@ export default function KnowledgeSettings({ onChanged }) {
           ))}
         </ul>
       )}
+
+      <CatalogueReview refreshKey={readAt} onChanged={() => onChanged?.({ knowledge: true })} />
 
       {sources.length === 0 && (
         <p className="text-2xs text-faint">

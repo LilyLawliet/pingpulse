@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -12,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
-from app.models import KnowledgeDocument, Organization
+from app.models import Catalogue, KnowledgeDocument, Organization
 from app.schemas_tenancy import (
     KnowledgeDocumentCreate,
     KnowledgeDocumentOut,
@@ -26,6 +27,7 @@ from app.services import (
     documents,
     media_service,
     retrieval,
+    understanding,
     whatsapp,
 )
 
@@ -199,6 +201,21 @@ async def upload_document(
     if not passages:
         raise HTTPException(status_code=422, detail=f"{file.filename} had no readable text")
 
+    # The same file again is a new version of it, not more of it: what the
+    # previous upload of this name left is replaced, or the old prices would
+    # go on being retrieved beside the new ones.
+    previous = (
+        await db.execute(
+            select(KnowledgeDocument).where(
+                KnowledgeDocument.organization_id == tenant.id,
+                KnowledgeDocument.source == file.filename,
+            )
+        )
+    ).scalars().all()
+    for old_passage in previous:
+        await db.delete(old_passage)
+    await db.flush()
+
     stored = []
     for index, passage in enumerate(passages):
         document = await retrieval.index_document(
@@ -212,6 +229,17 @@ async def upload_document(
         stored.append(document)
 
     photos = await _products_with_photos(db, tenant.id, extracted, file.filename or "document")
+
+    # What the file sells and on what terms, read once by the model and
+    # checked against the file's own text, kept for quoting and for the owner
+    # to review. Replaces any earlier reading of a file with the same name.
+    organization = await db.get(Organization, tenant.id)
+    reading = await understanding.read_document(
+        file.filename or "document",
+        extracted.text,
+        getattr(organization, "default_currency", None),
+    )
+    await _replace_catalogue(db, tenant.id, file.filename or "document", reading)
 
     await db.flush()
 
@@ -242,11 +270,54 @@ async def upload_document(
         # How many priced products were understood, so a shop can see at once
         # whether its table was read - a price list that yields none is one
         # the agent will not be able to quote from.
-        "products_found": len(offers.read_items([(file.filename or "document", extracted.text)])),
+        "products_found": len(reading["items"]),
+        # How it was read and what did not survive the checks, in plain words.
+        "catalogue": {
+            "read_by": reading["read_by"],
+            "items": len(reading["items"]),
+            "rules": len(reading["rules"]),
+            "left_out": [d["why"] for d in reading["dropped"]][:20],
+        },
         # Products whose row in the table carried a picture: the ones the
         # agent can now send a photo of.
         "photos_found": photos,
     }
+
+
+async def _replace_catalogue(db, organization_id, source: str, reading: dict) -> Catalogue:
+    previous = (
+        await db.execute(
+            select(Catalogue).where(
+                Catalogue.organization_id == organization_id, Catalogue.source == source
+            )
+        )
+    ).scalars().all()
+    for row in previous:
+        await db.delete(row)
+    row = Catalogue(
+        organization_id=organization_id,
+        source=source,
+        items=reading["items"],
+        rules=reading["rules"],
+        dropped=reading["dropped"],
+        read_by=reading["read_by"],
+        status="read",
+    )
+    db.add(row)
+    await db.flush()
+    return row
+
+
+async def _forget_catalogue(db, organization_id, source: str) -> None:
+    rows = (
+        await db.execute(
+            select(Catalogue).where(
+                Catalogue.organization_id == organization_id, Catalogue.source == source
+            )
+        )
+    ).scalars().all()
+    for row in rows:
+        await db.delete(row)
 
 
 async def _products_with_photos(db, organization_id, extracted, filename: str) -> int:
@@ -339,6 +410,17 @@ async def delete_document(
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     await db.delete(document)
+    await db.flush()
+    # The last passage of a file gone: so is what the file was read into.
+    if document.source:
+        remaining = await db.scalar(
+            select(func.count(KnowledgeDocument.id)).where(
+                KnowledgeDocument.organization_id == tenant.id,
+                KnowledgeDocument.source == document.source,
+            )
+        )
+        if not remaining:
+            await _forget_catalogue(db, tenant.id, document.source)
     return None
 
 
@@ -397,8 +479,114 @@ async def delete_source(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nothing from that file")
     for document in found:
         await db.delete(document)
+    # What the file was read into goes with it: a deleted price list must not
+    # go on being quoted.
+    await _forget_catalogue(db, tenant.id, source)
     logger.info("removed %d passage(s) from %s for %s", len(found), source, tenant.id)
     return None
+
+
+# ---------------------------------------------------------------- the reading
+def _catalogue_out(row: Catalogue) -> dict:
+    return {
+        "id": str(row.id),
+        "source": row.source,
+        "read_by": row.read_by,
+        "status": row.status,
+        "items": row.items or [],
+        "rules": row.rules or [],
+        "left_out": [d.get("why") for d in (row.dropped or [])],
+        "updated_at": row.updated_at or row.created_at,
+    }
+
+
+@router.get("/catalogue")
+async def list_catalogue(
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """What each uploaded file was read into: the products and rules quoted from."""
+    rows = (
+        await db.execute(
+            select(Catalogue)
+            .where(Catalogue.organization_id == tenant.id)
+            .order_by(Catalogue.created_at.desc())
+        )
+    ).scalars().all()
+    return [_catalogue_out(row) for row in rows]
+
+
+_ITEM_FIELDS = ("name", "sku", "details", "price", "currency", "sold_as", "holds", "pack",
+                "per_measure", "starting")
+_RULE_FIELDS = ("topic", "sentence", "place", "min_order", "max_order", "percent", "fee", "free")
+
+
+def _positive(value, what: str, required: bool = False) -> str | None:
+    if value in (None, ""):
+        if required:
+            raise HTTPException(status_code=422, detail=f"{what} is needed")
+        return None
+    try:
+        number = Decimal(str(value).replace(",", "").strip())
+    except (InvalidOperation, ValueError):
+        raise HTTPException(status_code=422, detail=f"{what} must be a number") from None
+    if number < 0 or (required and number == 0):
+        raise HTTPException(status_code=422, detail=f"{what} must be more than nothing")
+    return str(number)
+
+
+@router.patch("/catalogue/{catalogue_id}")
+async def correct_catalogue(
+    catalogue_id: uuid.UUID,
+    payload: dict,
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """The owner's corrections to a reading, and their confirmation of it.
+
+    What they send replaces what was read: the owner is the authority on their
+    own prices, so nothing here is checked against the file - only that each
+    item has a name and a price, and every figure is a number.
+    """
+    tenant.require_role(WRITE_ROLES)
+    row = await db.get(Catalogue, catalogue_id)
+    if row is None or row.organization_id != tenant.id:
+        raise HTTPException(status_code=404, detail="Not found")
+    if "items" in payload:
+        items = []
+        for index, raw in enumerate(payload.get("items") or [], start=1):
+            if not isinstance(raw, dict):
+                continue
+            item = {key: raw.get(key) for key in _ITEM_FIELDS}
+            item["name"] = str(item.get("name") or "").strip()[:160]
+            if not item["name"]:
+                raise HTTPException(status_code=422, detail=f"Item {index} needs a name")
+            item["price"] = _positive(item.get("price"), f"The price of {item['name']}", required=True)
+            item["pack"] = _positive(item.get("pack"), f"The pack size of {item['name']}")
+            item["per_measure"] = bool(item.get("per_measure"))
+            item["starting"] = bool(item.get("starting"))
+            item["id"] = str(raw.get("id") or f"p{index}")
+            items.append(item)
+        row.items = items
+    if "rules" in payload:
+        rules = []
+        for raw in payload.get("rules") or []:
+            if not isinstance(raw, dict) or not str(raw.get("sentence") or "").strip():
+                continue
+            rule = {key: raw.get(key) for key in _RULE_FIELDS}
+            for key in ("min_order", "max_order", "percent", "fee"):
+                rule[key] = _positive(rule.get(key), key.replace("_", " "))
+            rule["free"] = bool(rule.get("free"))
+            rules.append(rule)
+        row.rules = rules
+    if payload.get("status") in ("read", "confirmed"):
+        row.status = payload["status"]
+    elif "items" in payload or "rules" in payload:
+        # A correction is a confirmation of everything else as it stands.
+        row.status = "confirmed"
+    row.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    return _catalogue_out(row)
 
 
 CATALOGUE_SOURCE = "WhatsApp catalogue"

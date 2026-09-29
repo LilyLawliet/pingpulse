@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     # Turning the question into a vector for retrieval. Past this, keyword
     # scoring alone finds the passages.
     embed_timeout_seconds: int = 4
+    # The model that reads documents and messages into structured form. Empty
+    # means the reply model (GROQ_MODEL). Reading is where a stronger model
+    # pays for itself: a misread order is a wrong quote however well phrased.
+    understanding_model: str = ""
+    # Reading one message into order lines, while the customer waits.
+    understanding_timeout_seconds: int = 6
+    # Reading one uploaded file into products and rules. Nobody is waiting on
+    # a chat for this, so it may take its time.
+    extraction_timeout_seconds: int = 60
 
     # Reject a reply that quotes a price absent from the business's price list.
     price_guard_enabled: bool = True

@@ -649,6 +649,34 @@ class KnowledgeDocument(Base):
     organization: Mapped["Organization"] = relationship()
 
 
+class Catalogue(Base):
+    """What one uploaded file sells and on what terms, read once and checked.
+
+    The model reads the file into structured products and rules when it is
+    uploaded; every price and name it returns is then checked against the
+    file's own text before it is kept, and the owner can correct any of it.
+    Quoting then works from these rows rather than from re-reading prose on
+    every message. `read_by` says whether the model or the fallback reader
+    produced it; `status` is "read" until the owner confirms it.
+    """
+
+    __tablename__ = "catalogues"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source: Mapped[str] = mapped_column(String(255), nullable=False)
+    items: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    rules: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    # What was read and left out, and why - shown to the owner.
+    dropped: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    read_by: Mapped[str] = mapped_column(String(40), nullable=False, default="reader")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="read")
+    created_at: Mapped[datetime] = _now_column()
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 # ============================== Operations ================================
 class AuditLog(Base):
     """Who changed what, and to what.
