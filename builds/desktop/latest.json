@@ -1,11 +1,11 @@
 {
-  "version": "1.5.8",
-  "notes": "The agent now answers in the language and script the customer wrote in - Spanish to Spanish, Arabic to Arabic, Urdu script to Urdu script - with your own language only as the fallback; a reply that comes back in the wrong script is rewritten. Our own sentences (the hand-over to a person, 'passed to the team', the answer worked out from your documents when no AI is reachable) are translated too, and kept only if every number, price and link in the rewrite is exactly what it was. A stuck WhatsApp pairing now says what is wrong - WhatsApp refusing, the connection service unreachable, the phone logged out, or the phone already connected to another business - and offers Try again, instead of a spinner that never ends.",
-  "pub_date": "2026-09-29T02:17:37+00:00",
+  "version": "1.5.9",
+  "notes": "Scanning a WhatsApp code now links the phone: the moment right after a scan was being read as a failure. The code stops jumping about while you fetch your phone, and a linked phone can be disconnected without deleting the connection.",
+  "pub_date": "2026-09-29T14:52:54+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMi96NmYyc0dUdTg4ZW9UcXV1WW83L3RKcWg2WE9tN2ZwWDBvUkpUTU8rTm9hVVd0UjVpU2QwMldNUUUvTnlDeDRuREdYcU1GN1lvWHlpTFJoZENEMEFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjQ4MjU2CWZpbGU6UGluZ1B1bHNlXzEuNS44X3g2NC1zZXR1cC5leGUKNnZmeXJHM2xzQ1NjdzBQVjlsQktPOS9aSE5waC9Fc3gvTHhSUnN6ZGpGODI1NFhpUUNWREl5SDBjTTZwYmEyZXgzWk1iM1MwTnRvOHBwTnJlMzIzQXc9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.8_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjNxSDVYbGV3UC9IQXBlMmF2ZmtCMEV3enE1SENsN3IyeklDVUtXNEZpelc3TGZBQXZ3ejl6Wm0vZVJGekZUYzIvU1VRREJhb2VPbnZTdVV5UXE4ZXdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNjkzNTczCWZpbGU6UGluZ1B1bHNlXzEuNS45X3g2NC1zZXR1cC5leGUKQXFDZUFEQWRtWkpkT2F2QldHcGdRanM5WkkzelJsYkNyRy9qYmtGRzdaZTgrQjNrb3ZsOVdXQ2xCS1d5eGtVaE9ycXJjSHhIRXBreHhzMXpUU2JYQ0E9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.5.9_x64-setup.exe"
     }
   }
 }
