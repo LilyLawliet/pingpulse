@@ -973,7 +973,14 @@ _CLOCK_MERIDIEM = re.compile(
     r"\b(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m\.?|p\.?m\.?)(?![a-z])"
 )
 _CLOCK_COLON = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
-_CLOCK_AT = re.compile(r"\b(?:at|around|by|for)\s+(\d{1,2})(?:\s*o'?clock)?\b(?![:.\d]|\s*(?:am|pm|a\.m|p\.m|st|nd|rd|th|%|/|-))")
+_CLOCK_AT = re.compile(r"\b(?:at|around|by)\s+(\d{1,2})(?:\s*o'?clock)?\b(?![:.\d]|\s*(?:am|pm|a\.m|p\.m|st|nd|rd|th|%|/|-))")
+# "for" counts far more often than it tells the time: "a table for 2 people",
+# "for 3 hours", "book me in for 4 of us". Read as a clock, every one of those
+# became two o'clock, three, four — on the day they named, which is enough to
+# book somebody at a time they never asked for. It is a time only when the
+# number is said the way a time is said: "for 3 o'clock", or "book me in for
+# 3" with nothing counted after it.
+_CLOCK_FOR = re.compile(r"\bfor\s+(\d{1,2})(?:\s*o'?clock\b|\s*(?=[.!?,]|$))")
 _NOON = re.compile(r"\b(noon|midday)\b")
 
 
@@ -1080,11 +1087,12 @@ def named_time(text: str, zone: ZoneInfo, now: datetime | None = None) -> Named:
                 # readings are kept and the shop's hours choose.
                 clock(hour + 12, minute)
     if not clocks:
-        for match in _CLOCK_AT.finditer(lowered):
-            hour = int(match.group(1))
-            if 1 <= hour <= 12:
-                clock(hour % 12, 0)
-                clock(hour % 12 + 12, 0)
+        for pattern in (_CLOCK_AT, _CLOCK_FOR):
+            for match in pattern.finditer(lowered):
+                hour = int(match.group(1))
+                if 1 <= hour <= 12:
+                    clock(hour % 12, 0)
+                    clock(hour % 12 + 12, 0)
 
     return Named(days=tuple(days), clocks=tuple(clocks))
 

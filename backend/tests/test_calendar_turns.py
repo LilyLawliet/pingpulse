@@ -101,6 +101,37 @@ def test_orders_and_ordinary_sentences_name_no_time(text):
     assert not booking.named_time(text, KARACHI).any
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "can I book a table for 2 people",
+        "book me in for 4 of us",
+        "I would like an appointment for 2 adults",
+        "can you come for 3 hours",
+        "quote for 2 pallets",
+        "I need it for 5 days",
+        "discount for 10 items",
+    ],
+)
+def test_a_count_after_for_is_not_a_time(text):
+    """"for 2 people" is two people, not two o'clock."""
+    assert not booking.named_time(text, KARACHI).clocks
+
+
+@pytest.mark.parametrize(
+    ("text", "hour"),
+    [
+        ("book me in for 3 o'clock", 3),
+        ("can you do friday for 4?", 4),
+        ("put me down for 5.", 5),
+    ],
+)
+def test_for_still_tells_the_time_when_it_is_the_time(text, hour):
+    """Nothing is counted after the number, so it is the hour they meant."""
+    clocks = booking.named_time(text, KARACHI).clocks
+    assert time(hour, 0) in clocks and time(hour + 12, 0) in clocks
+
+
 def test_an_hour_without_am_or_pm_is_read_against_the_hours(shop):
     organization, _ = shop
     friday = _ahead(4)
