@@ -290,7 +290,7 @@ function OrderDialog({ order, onClose, onSaved, onOpenConversation }) {
           <div className="space-y-1.5 text-xs text-dim">
             <p className="flex items-start gap-2">
               <MapPin size={13} className="mt-0.5 shrink-0 text-faint" />
-              <span className="text-ink">{order.address || 'No address given'}</span>
+              <span className="text-ink">{order.address || 'Nothing to deliver'}</span>
             </p>
             <p className="flex items-start gap-2">
               <Wallet size={13} className="mt-0.5 shrink-0 text-faint" />

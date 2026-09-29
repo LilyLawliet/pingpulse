@@ -371,3 +371,12 @@ def test_the_trade_a_supplier_is_in_is_not_a_request_to_meet(text):
 )
 def test_asking_to_talk_is_a_meeting(text):
     assert booking.is_meeting(text)
+
+
+@pytest.mark.parametrize(
+    "text, move",
+    [("please cancel my demo", False), ("can we cancel the meeting?", False),
+     ("can I move my demo to another day?", True), ("change the call to friday", True)],
+)
+def test_demos_and_meetings_can_be_cancelled_and_moved_by_name(text, move):
+    assert (booking.wants_move(text) if move else booking.wants_cancel(text)), text

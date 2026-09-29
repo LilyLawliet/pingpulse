@@ -50,7 +50,7 @@ CONFIRMING = "confirming"
 # when the business's own documents name it: the agent never offers a way to
 # pay the shop has not said it takes.
 PAYMENT_METHODS: dict[str, str] = {
-    "Cash on delivery": r"cash on delivery|\bcod\b|pay(?:ment)? on delivery|cash",
+    "Cash on delivery": r"cash on delivery|\bcod\b|pay(?:ment)? on delivery|\bcash\b",
     "Bank transfer": r"bank transfer|bank deposit|online transfer|\bibft\b|\braast\b|\biban\b",
     "JazzCash": r"jazz ?cash",
     "Easypaisa": r"easy ?paisa",
@@ -94,15 +94,49 @@ def wants_to_order(text: str) -> bool:
 
 
 # ------------------------------------------------------------------ payment
-def accepted_methods(prepared) -> list[str]:
-    """The ways to pay the business's own documents name, in a steady order."""
+_ABOUT_PAYING = re.compile(
+    r"\b(pay|paid|payment|payments|accept|accepted|transfer|iban|account|send to|cash on delivery|cod)\b",
+    re.IGNORECASE,
+)
+_REFUSED = r"\b(no|not|don'?t|do not|never|without)\b[^.,;]{0,20}"
+
+
+def _payment_sentences(prepared) -> list[str]:
+    """Every sentence the business wrote about paying."""
     found: list[str] = []
-    for sentence in payment_terms(prepared, limit=8):
+    for _, text in prepared.texts:
+        for sentence in offers._sentences(text):
+            if _ABOUT_PAYING.search(sentence) and sentence not in found:
+                found.append(sentence)
+    return found
+
+
+def accepted_methods(prepared) -> list[str]:
+    """The ways to pay the business's own documents name, in a steady order.
+
+    Only from sentences about paying, and not where it is refused: "no card
+    needed" for a free trial is not an offer to take cards.
+    """
+    found: list[str] = []
+    for sentence in _payment_sentences(prepared):
         low = sentence.lower()
         for method, pattern in PAYMENT_METHODS.items():
-            if method not in found and re.search(pattern, low):
+            if method in found:
+                continue
+            hits = [m for m in re.finditer(pattern, low) if not re.search(_REFUSED + r"$", low[: m.start()])]
+            if hits:
                 found.append(method)
     return found
+
+
+def how_to_pay(prepared, method: str) -> list[str]:
+    """The business's own words for paying this way: account details first."""
+    pattern = PAYMENT_METHODS.get(method)
+    if not pattern:
+        return []
+    mentions = [s for s in _payment_sentences(prepared) if re.search(pattern, s.lower())]
+    details = [s for s in mentions if re.search(r"\d{6,}|\d{4}-\d{5,}|\biban\b", s.lower())]
+    return details[:2] if details else mentions[:1]
 
 
 def payment_terms(prepared, limit: int = 3) -> list[str]:
@@ -223,6 +257,29 @@ async def read_order(prepared, history, message: str, timeout: float | None = No
 
 
 # ------------------------------------------------------------------ pricing
+# Things nobody delivers: a monthly plan, a seat, an onboarding session. An
+# order made only of these has no address to ask for and no delivery charge -
+# asking somebody buying software where to send it is how a sale feels broken.
+_NOT_DELIVERED_UNITS = {
+    "day", "week", "month", "quarter", "year", "user", "seat", "licence", "license",
+    "subscription", "plan", "session", "hour", "service", "class", "course", "consultation",
+    "call", "visit", "setup", "installation", "training", "workspace", "account",
+}
+_NOT_DELIVERED_NAMES = re.compile(
+    r"\b(subscription|licen[cs]e|onboarding|training|setup fee|set-up|installation|"
+    r"per user|per seat|per month|per year|monthly|annual|yearly|plan|add-on|addon|support)\b",
+    re.IGNORECASE,
+)
+
+
+def is_delivered(item) -> bool:
+    """Whether this is a thing that is sent somewhere, rather than a service."""
+    unit = offers._stem((item.sale_unit or "").lower())
+    if unit in _NOT_DELIVERED_UNITS or (item.sale_unit or "").lower() in _NOT_DELIVERED_UNITS:
+        return False
+    return not _NOT_DELIVERED_NAMES.search(f"{item.name} {item.spec}")
+
+
 @dataclass
 class Draft:
     """An order worked out from the price list, with what is still missing."""
@@ -238,6 +295,7 @@ class Draft:
     address: str = ""
     payment: str | None = None
     note: str = ""
+    needs_delivery: bool = True
     missing: list[str] = field(default_factory=list)
     # Things to ask, in words for the prompt.
     asks: list[str] = field(default_factory=list)
@@ -259,6 +317,7 @@ class Draft:
             "address": self.address,
             "payment": self.payment,
             "note": self.note,
+            "needs_delivery": self.needs_delivery,
         }
 
 
@@ -298,11 +357,13 @@ def price(prepared, reading: dict, customer_text: str, accepted: list[str], late
                 "unit_price": str(line.item.price),
                 "total": str(line.total),
                 "note": line.note or "",
+                "delivered": is_delivered(line.item),
             }
         )
     currencies = {line.item.currency for line in counted if line.item.currency}
     draft.currency = currencies.pop() if len(currencies) == 1 else None
 
+    draft.needs_delivery = any(line.get("delivered", True) for line in draft.lines) or not draft.lines
     if draft.lines and "quantity" not in draft.missing and "choice" not in draft.missing:
         goods = sum((Decimal(line["total"]) for line in draft.lines), Decimal(0))
         draft.goods_total = goods
@@ -311,7 +372,8 @@ def price(prepared, reading: dict, customer_text: str, accepted: list[str], late
         place_said = draft.place or draft.address
         where = f"in {place_said.title()} " if place_said else ""
         where += f"{draft.address} {latest}"
-        applied = offers.apply_tiers(goods, prepared.tiers, draft.currency, {"delivery", "discount"}, where=where)
+        topics = {"delivery", "discount"} if draft.needs_delivery else {"discount"}
+        applied = offers.apply_tiers(goods, prepared.tiers, draft.currency, topics, where=where)
         after = goods
         if applied and applied.discount is not None:
             draft.discount = applied.saving
@@ -322,13 +384,13 @@ def price(prepared, reading: dict, customer_text: str, accepted: list[str], late
         elif applied and applied.delivery_by_place:
             draft.missing.append("place")
             draft.asks.append("which city it is to be delivered to (delivery depends on it)")
-        elif not any(t.topic == "delivery" for t in prepared.tiers):
+        elif not draft.needs_delivery or not any(t.topic == "delivery" for t in prepared.tiers):
             # Nothing written about delivery charges: the total is the goods,
             # and delivery is for the shop to say.
             draft.delivery_known = False
         draft.total = after + (draft.delivery_fee or Decimal(0))
 
-    if not draft.address:
+    if draft.needs_delivery and not draft.address:
         draft.missing.append("address")
         draft.asks.append("the full delivery address (house, street, area and city)")
 
@@ -360,14 +422,16 @@ def summary(state: dict) -> str:
     lines.append(f"Items: {_money(goods, currency)}")
     if _d(state.get("discount")):
         lines.append(f"Discount: −{_money(state['discount'], currency)}")
-    if state.get("delivery_known"):
+    delivered = state.get("needs_delivery", True)
+    if delivered and state.get("delivery_known"):
         fee = _d(state.get("delivery_fee")) or Decimal(0)
         where = f" ({state['place']})" if state.get("place") else ""
         lines.append(f"Delivery{where}: {'free' if fee == 0 else _money(fee, currency)}")
     lines.append(f"Total: {_money(state['total'], currency)}")
-    if not state.get("delivery_known"):
+    if delivered and not state.get("delivery_known"):
         lines.append("Delivery charge: the shop will confirm it.")
-    lines.append(f"Deliver to: {state['address']}")
+    if delivered:
+        lines.append(f"Deliver to: {state['address']}")
     if state.get("payment"):
         lines.append(f"Payment: {state['payment']}")
     if state.get("note"):
@@ -384,22 +448,24 @@ def placed_text(order: Order, prepared) -> str:
     for line in order.lines:
         out.append(f"• {line['name']} × {line['quantity']} — {_money(line['total'], currency)}")
     out.append(f"Total: {_money(order.total, currency)}")
-    out.append(f"Deliver to: {order.address}")
+    delivered = any(line.get("delivered", True) for line in order.lines)
+    if delivered and order.address:
+        out.append(f"Deliver to: {order.address}")
     if order.payment_method:
         out.append(f"Payment: {order.payment_method}")
         # The shop's own words about paying that way, when it wrote any.
-        terms = [
-            t for t in payment_terms(prepared, limit=6)
-            if re.search(PAYMENT_METHODS.get(order.payment_method, "$^"), t.lower())
-        ][:2]
+        terms = how_to_pay(prepared, order.payment_method)
         out += terms
-        if order.payment_method in ONLINE_METHODS and not any(re.search(r"\d{6,}", t) for t in terms):
+        if order.payment_method in ONLINE_METHODS and not any(
+            re.search(r"\d{6,}|\d{4}-\d{5,}", t) for t in terms
+        ):
             out.append(f"We'll send you the {order.payment_method} details to pay here.")
     timing = [
         t for t in offers.rules_for("when will it arrive delivery", prepared.texts, limit=2)
         if offers._TAKES_TIME.search(t.lower())
     ]
-    out += timing[:1]
+    if delivered:
+        out += timing[:1]
     out.append("Thank you for your order!")
     return "\n".join(out)
 

@@ -414,3 +414,26 @@ async def test_another_shop_sees_none_of_it(org_a, org_b):
     await session.commit()
     assert (await org_b.get("/api/v1/orders")).json()["orders"] == []
     assert (await org_b.patch(f"/api/v1/orders/{order.id}", json={"status": "confirmed"})).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_software_plan_is_never_asked_where_to_deliver(shop, db_session, model):
+    organization, contact = shop
+    items = [
+        offers.Item("Growth plan", Decimal(4500), "PKR", sale_unit="month", spec="up to 5 users"),
+        offers.Item("Thermal receipt printer", Decimal(18500), "PKR", sale_unit="unit"),
+    ]
+    texts = [("plans.docx", "We accept bank transfer and JazzCash. " + TERMS)]
+    prepared = offers.Prepared(items=items, texts=texts, tiers=offers.read_tiers(texts), written=set())
+    assert orders.is_delivered(items[1]) and not orders.is_delivered(items[0])
+
+    model["next"] = {"lines": [{"product": "P1", "quantity": 1, "counted_in": "unit", "as_written": "growth plan"}],
+                     "choose_between": [], "place": "", "address": "", "payment": "jazzcash", "note": ""}
+    ready = await orders.handle_turn(
+        db_session, organization, contact, "I want the growth plan, I'll pay by jazzcash", [], prepared
+    )
+    assert ready.reply, ready.prompt_block
+    assert "Deliver to" not in ready.reply and "Delivery" not in ready.reply
+    assert "Total: PKR 4,500" in ready.reply
+    placed = await orders.handle_turn(db_session, organization, contact, "yes", [], prepared)
+    assert placed.placed and "Deliver to" not in placed.reply and "working days" not in placed.reply

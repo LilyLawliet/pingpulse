@@ -1383,14 +1383,14 @@ def as_prompt_block(
 # record changes only if the lookup says it may.
 _WANTS_CANCEL = re.compile(
     r"\b(cancel|call it off|drop the|don'?t (want|need) the)\b.{0,40}"
-    r"\b(appointment|booking|visit|estimate|consultation|slot|it)\b"
+    r"\b(appointment|booking|visit|estimate|consultation|slot|demo|meeting|call|it)\b"
     r"|\bcancel (it|that|my appointment|the appointment)\b",
     re.IGNORECASE,
 )
 
 _WANTS_MOVE = re.compile(
     r"\b(reschedul\w*|re-?book|move|change|shift|push)\b.{0,40}"
-    r"\b(appointment|booking|visit|estimate|consultation|slot|time|it)\b"
+    r"\b(appointment|booking|visit|estimate|consultation|slot|demo|meeting|call|time|it)\b"
     r"|\b(different|another|earlier|later) (time|day|slot|date)\b"
     # On their own these only ever mean one thing.
     r"|\b(reschedul\w*|postpone\w*|prepone\w*|re-?date)\b",
