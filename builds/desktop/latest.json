@@ -1,11 +1,11 @@
 {
-  "version": "1.7.1",
-  "notes": "Block out time you are not available, straight from the Calendar page - no link to find and no other app to set up. Nobody is offered a time inside it. Connecting your own calendar is now clearly optional and has moved out of the way.",
-  "pub_date": "2026-09-29T18:36:47+00:00",
+  "version": "1.8.0",
+  "notes": "Orders: the agent works an order out in the chat from your own price list, asks for what is missing, and writes it down only when the customer replies YES. The order number, the total and the confirmation are read off the saved order, never written by the AI. A new Orders page to confirm, send, deliver, mark paid or cancel.",
+  "pub_date": "2026-09-29T19:33:51+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMnczZmUzWHV4TEhYODFLQkphcGowNHhhaXVibHdYT1RUS3ZlVmtxY1BxWU5pSXEzSmR2d3ZSZFRzV3NMaGpQbzVQSWZtcTFBbWc1b1dEV2pHNU9TNGdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzA3MDA3CWZpbGU6UGluZ1B1bHNlXzEuNy4xX3g2NC1zZXR1cC5leGUKL1dhTHQrb21iL1A3QW82UXhVYjFPTzRmWEZhdWxIU05IcTJFc3ZuQ0xxdGN1ckpVREZ2MGNmUXN4eWtqZURSUVcxRUNMSVRQQU42bll6NXJJOHZoQ1E9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.7.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjIzbEVlL1dqSWxnL1hWWWh6Y1YyRjFmYU9LRk52WTZIOExQaXVNek5OZ2xRN0RCMzhVaFVEUkFkRHd4VE5EcjJrZU1xc24xRmhIaHo2ekNNNzd0NHdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzEwNDMwCWZpbGU6UGluZ1B1bHNlXzEuOC4wX3g2NC1zZXR1cC5leGUKYi9qMUtHWXRiVE9QMVFyTGxqcCs0dmNXR3JSNXloT052VFlEQk9kamVWV05rOHBQNDNidVU1dllzMnl2Zml6WWgwalFJSWV1YWJqNHczVHYrTnhNQVE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.8.0_x64-setup.exe"
     }
   }
 }
