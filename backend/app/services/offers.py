@@ -222,7 +222,12 @@ def _stem(word: str) -> str:
     # "boxes", "dishes", "tomatoes" drop "es"; "cakes", "services", "sponges"
     # only drop the "s" - stripping "es" from those made "cak" and "servic",
     # which matched nothing the business wrote in the singular.
-    if word.endswith("es") and len(word) >= 5 and re.search(r"(s|x|z|ch|sh|o)es$", word):
+    # "-oes" needs a word in front of it: "tomatoes" is "tomato", but "shoes"
+    # is "shoe", and stripping it left "sho", which matched no shoe anyone
+    # sells.
+    if word.endswith("es") and len(word) >= 5 and (
+        re.search(r"(s|x|z|ch|sh)es$", word) or re.search(r"\w{3}oes$", word)
+    ):
         return word[:-2]
     if word.endswith("s") and not word.endswith("ss") and len(word) >= 4:
         return word[:-1]

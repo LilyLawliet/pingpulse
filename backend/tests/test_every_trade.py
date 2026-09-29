@@ -214,3 +214,38 @@ def test_a_generic_word_does_not_pick_an_unrelated_passage():
 
     reply = sales_policy.deterministic_reply({}, [Chunk()], None, message="What items do you have?")
     assert "exchanged" not in reply
+
+
+@pytest.mark.parametrize(
+    "plural, singular",
+    [
+        # What this rule was written for.
+        ("cakes", "cake"),
+        ("services", "service"),
+        ("sponges", "sponge"),
+        # "-es" after a hiss is part of the plural.
+        ("boxes", "box"),
+        ("dishes", "dish"),
+        ("glasses", "glass"),
+        ("classes", "class"),
+        # "-oes" needs a word in front of it. "shoes" is "shoe": stripping the
+        # "es" left "sho", so a shoe shop could not answer "do you have shoes".
+        ("shoes", "shoe"),
+        ("toes", "toe"),
+        ("tomatoes", "tomato"),
+        ("potatoes", "potato"),
+        ("heroes", "hero"),
+        ("echoes", "echo"),
+    ],
+)
+def test_a_plural_finds_what_the_business_wrote_in_the_singular(plural, singular):
+    assert offers._stem(plural) == offers._stem(singular) == singular
+
+
+def test_a_shoe_shop_answers_do_you_have_shoes():
+    shop = offers.read_items([(
+        "list",
+        "Product | SKU | Details | Pack | Price\n"
+        "Classic Leather Shoe | YH-100 | brown, mens | 1 pair | PKR 8,500\n",
+    )])
+    assert [line.item.sku for line in offers.quote("do you have shoes", shop).lines] == ["YH-100"]
