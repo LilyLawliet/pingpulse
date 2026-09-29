@@ -26,11 +26,20 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # Keep one row per endpoint - the newest - before it may be unique again.
+    #
+    # Ordered by id as well as time. created_at defaults to now(), which is
+    # the same instant for every row written in one transaction: a browser
+    # that subscribed to two businesses together had two rows neither of which
+    # was older, so nothing was deleted and the index could not be rebuilt.
+    # Rehearsed on a copy of production, where this downgrade failed with
+    # "could not create unique index uq_push_endpoint" and left the table
+    # with no unique constraint at all.
     op.execute(
         """
         DELETE FROM push_subscriptions a
         USING push_subscriptions b
-        WHERE a.endpoint = b.endpoint AND a.created_at < b.created_at
+        WHERE a.endpoint = b.endpoint
+          AND (a.created_at, a.id) < (b.created_at, b.id)
         """
     )
     with op.batch_alter_table("push_subscriptions") as batch:
