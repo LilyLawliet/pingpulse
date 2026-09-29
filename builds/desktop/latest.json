@@ -1,11 +1,11 @@
 {
-  "version": "1.8.1",
-  "notes": "Orders of plans, seats and one-off services are no longer asked for a delivery address and are charged no delivery; anything that comes in a box still is, whatever it is called. The confirmation now gives your own account details for the method chosen. Cancel my demo and move the meeting are understood.",
-  "pub_date": "2026-09-29T20:39:06+00:00",
+  "version": "1.8.2",
+  "notes": "Switching business now starts every page afresh. Setup kept the previous business's details on screen under the new one's name, and saving from there would have written them over the new business.",
+  "pub_date": "2026-09-29T20:44:15+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMi81cm1OWWw4cm1YWGIxSU1rcmlZRHB0NndFeThIS3dzMGlyOC9icWgrRm9odERiUHJnNzI0MTJhcnpUWE5ibHhSTlpJbmkwcy9sTGVZQzJsNjE2TFF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzE0MzQ2CWZpbGU6UGluZ1B1bHNlXzEuOC4xX3g2NC1zZXR1cC5leGUKVVZSNDRKU2RwcG1VNFNLbkV1eTdTU3A5dG9Scmp5L3h1a3NwOWFOUU1FSkoxdzl4d1lQRWhPeFg3R0hPUzlyN3Rpcmtsd3U0b0ZPU1pvd2VMa1lEQXc9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.8.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjJpMEplSHFHYjVWa3VkZDZZME8vMU5LcU1SUUlyR3JuTTZXTWphSnE4dkVGUU0zRXU2Tmk4TXYxbkltMGVhRXYxR21xd0pWSmh0dlluN0grQ2RhRUFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzE0NjU0CWZpbGU6UGluZ1B1bHNlXzEuOC4yX3g2NC1zZXR1cC5leGUKckFFcFgzU1lBb1dXSTdPR29zRWhBNTc0Wkc4YVFhTUNYWW1TSGt4eklCeVJwY3VNRkxab2IveUlrYVZzc2JjUDEyYXpRTllVRGxycUlMRzBDVGozQkE9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.8.2_x64-setup.exe"
     }
   }
 }
