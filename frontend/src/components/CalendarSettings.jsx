@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CalendarDays, Check, Copy, Loader2, TriangleAlert } from 'lucide-react'
 import { api } from '../api.js'
+import OwnCalendar from './OwnCalendar.jsx'
 
 /**
  * The diary, on the phone the business actually runs its day from.
@@ -66,6 +67,7 @@ export default function CalendarSettings({ onChanged }) {
   }
 
   return (
+    <div className="space-y-6">
     <div className="space-y-4">
       <div className="space-y-2 rounded-xl border border-edge bg-panel-2/50 px-4 py-3.5">
         <p className="flex items-start gap-2.5 text-sm leading-relaxed text-dim">
@@ -162,6 +164,8 @@ export default function CalendarSettings({ onChanged }) {
           Create my calendar link
         </button>
       )}
+    </div>
+    <OwnCalendar />
     </div>
   )
 }

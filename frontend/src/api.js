@@ -232,6 +232,11 @@ export const api = {
   // The diary, as a calendar the phone can subscribe to. No account, no
   // OAuth: a secret URL every calendar client already knows how to read.
   getCalendarSubscription: () => request('/calendar/subscription'),
+  // The owner's own calendar, read for busy times, and how meetings are booked.
+  getCalendarConnection: () => request('/calendar/connection'),
+  saveCalendarConnection: (body) =>
+    request('/calendar/connection', { method: 'PUT', body: JSON.stringify(body) }),
+  checkCalendarConnection: () => request('/calendar/connection/check', { method: 'POST' }),
   createCalendarSubscription: () =>
     request('/calendar/subscription', { method: 'POST' }),
   deleteCalendarSubscription: () =>

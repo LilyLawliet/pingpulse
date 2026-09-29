@@ -120,6 +120,9 @@ class Tenant:
     async def patch(self, url, **kwargs):
         return await self._client.patch(url, headers=self.headers, **kwargs)
 
+    async def put(self, url, **kwargs):
+        return await self._client.put(url, headers=self.headers, **kwargs)
+
     async def delete(self, url, **kwargs):
         return await self._client.delete(url, headers=self.headers, **kwargs)
 

@@ -35,7 +35,7 @@ from app.models import (
     CRMContact,
     Message,
 )
-from app.services import agent_config, analytics, booking, languages, outbox, pipelines, whatsapp
+from app.services import agent_config, analytics, booking, invites, languages, outbox, pipelines, whatsapp
 from app.services import ws_manager
 from app.services.ws_manager import manager
 
@@ -296,6 +296,7 @@ async def book_appointment(
             db, tenant, contact,
             f"Your {booking.describe(appointment)} is booked. See you then!",
         )
+    await invites.send_for(db, organization, booked=appointment)
     await db.commit()
     appointment = await _appointment(db, tenant, appointment.id)
     await _changed(db, tenant, contact.id)
@@ -331,6 +332,7 @@ async def move_appointment(
             f"Your {was} has been moved. Your booking is now: "
             f"{booking.describe(result.appointment)}.",
         )
+    await invites.send_for(db, tenant.organization, booked=result.appointment, cancelled=existing)
     await db.commit()
     moved = await _appointment(db, tenant, result.appointment.id)
     await _changed(db, tenant, contact.id)
@@ -358,6 +360,7 @@ async def cancel_appointment(
             f"Your {booking.describe(existing)} has been cancelled. Message us any time "
             "to book another.",
         )
+    await invites.send_for(db, tenant.organization, cancelled=existing)
     await db.commit()
     cancelled = await _appointment(db, tenant, existing.id)
     await _changed(db, tenant, contact.id)

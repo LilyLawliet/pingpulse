@@ -45,7 +45,7 @@ from app.models import (
     APPOINTMENT_KINDS,
     Appointment,
 )
-from app.services import agent_config
+from app.services import agent_config, busy_calendar
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +213,16 @@ async def live_appointments(
     return list(rows)
 
 
+async def _taken(db, organization, since: datetime, until: datetime) -> list:
+    """Everything that makes a time unavailable: the diary, and the owner's own calendar.
+
+    Raises busy_calendar.Unreadable when the owner's calendar is set and can't
+    be read - a time is never called free on a guess.
+    """
+    held = await live_appointments(db, organization.id, since, until)
+    return held + await busy_calendar.busy_between(organization, since, until)
+
+
 def _clashes(
     starts_at: datetime,
     ends_at: datetime,
@@ -277,13 +287,23 @@ async def is_free(
         return Refusal("closed", "The business is not open at that time.")
 
     buffer = buffer_minutes(organization)
-    taken = await live_appointments(
-        db,
-        organization.id,
-        starts_at - timedelta(minutes=buffer + 1),
-        ends_at + timedelta(minutes=buffer + 1),
-    )
-    if _clashes(starts_at, ends_at, taken, buffer, ignore_id=ignore_id):
+    try:
+        taken = await _taken(
+            db,
+            organization,
+            starts_at - timedelta(minutes=buffer + 1),
+            ends_at + timedelta(minutes=buffer + 1),
+        )
+    except busy_calendar.Unreadable:
+        return Refusal(
+            "calendar_unreadable",
+            "Availability can't be checked right now, so no time can be confirmed.",
+        )
+    clash = _clashes(starts_at, ends_at, taken, buffer, ignore_id=ignore_id)
+    if isinstance(clash, busy_calendar.Busy):
+        # Said without saying what is there: the owner's calendar is theirs.
+        return Refusal("busy", "That time isn't free.")
+    if clash is not None:
         return Refusal("taken", "That time has already been booked.")
 
     return None
@@ -328,7 +348,10 @@ async def free_slots(
     # landed on a day the shop was open did the gap show at all, so the test
     # covering it passed except when run on a Friday.
     window_end = start_from + timedelta(days=days + 1)
-    taken = await live_appointments(db, organization.id, start_from, window_end)
+    try:
+        taken = await _taken(db, organization, start_from, window_end)
+    except busy_calendar.Unreadable:
+        return []
 
     found: list[datetime] = []
     for offset in range(days + 1):
@@ -599,7 +622,11 @@ def describe(appointment) -> str:
     clock = local.strftime("%I:%M %p").lstrip("0").lower()
     label = KIND_WORDS.get(appointment.kind, "appointment")
 
-    where = f" at {appointment.location}" if appointment.location else ""
+    location = appointment.location or ""
+    if location.lower().startswith("http"):
+        where = f" (join: {location})"
+    else:
+        where = f" at {location}" if location else ""
     return f"{label} on {day} at {clock}{where}"
 
 
@@ -832,15 +859,38 @@ OFFER_BOOK = "book"
 OFFER_MOVE = "move"
 
 
-def remember_offer(contact, slots: list[datetime], purpose: str = OFFER_BOOK) -> None:
-    """Write down exactly what was offered, and why, so a reply can be matched to it."""
+def remember_offer(
+    contact,
+    slots: list[datetime],
+    purpose: str = OFFER_BOOK,
+    *,
+    kind: str | None = None,
+    about: str | None = None,
+    meeting: bool = False,
+) -> None:
+    """Write down exactly what was offered, and why, so a reply can be matched to it.
+
+    A meeting offered as a 45-minute video call is still one when they answer
+    "the second one", so the kind and what it was about are kept with it.
+    """
     metadata = dict(getattr(contact, "contact_metadata", None) or {})
     metadata[OFFER_KEY] = {
         "at": datetime.now(timezone.utc).isoformat(),
         "slots": [slot.isoformat() for slot in slots],
         "for": purpose,
+        "kind": kind,
+        "about": about,
+        "meeting": meeting,
     }
     contact.contact_metadata = metadata
+
+
+def offer_details(contact) -> dict:
+    """The kind, subject and meeting flag of the standing offer, when there is one."""
+    if not remembered_offer(contact):
+        return {}
+    offer = (getattr(contact, "contact_metadata", None) or {}).get(OFFER_KEY) or {}
+    return {key: offer.get(key) for key in ("kind", "about", "meeting")}
 
 
 def offer_purpose(contact) -> str | None:
@@ -1204,7 +1254,9 @@ async def slots_on(db, organization, days, *, kind: str | None = None) -> list[d
     return found[:MAX_OFFERED_SLOTS]
 
 
-def as_prompt_block(organization, contact, slots: list[datetime], appointment=None) -> str:
+def as_prompt_block(
+    organization, contact, slots: list[datetime], appointment=None, *, meeting_kind_: str | None = None
+) -> str:
     """What the agent is allowed to say about appointments this turn.
 
     Either real times or none. There is deliberately no branch that produces
@@ -1247,9 +1299,16 @@ def as_prompt_block(organization, contact, slots: list[datetime], appointment=No
         clock = local.strftime("%I:%M %p").lstrip("0").lower()
         lines.append(f"  {index}. {day} at {clock}")
 
+    as_meeting = (
+        f"They want a meeting. It will be a {KIND_WORDS.get(meeting_kind_, 'meeting')} of "
+        f"{duration_minutes(organization, meeting_kind_)} minutes.\n"
+        if meeting_kind_
+        else ""
+    )
     return (
         "=== APPOINTMENTS ===\n"
-        "These times are genuinely free in the diary right now:\n"
+        + as_meeting
+        + "These times are genuinely free in the diary right now:\n"
         + "\n".join(lines)
         + "\nOffer some of these and let them choose. Use these exact times - do not "
         "round them, shift them or invent others. Nothing is booked until they pick "
@@ -1284,6 +1343,10 @@ _WANTS_BOOKING = re.compile(
     # Naming the thing.
     r"book|booking|bookings|schedul\w*|appointments?|consultations?|estimate|survey|"
     r"viewing|site visit|home visit"
+    # Meetings: a demo of the product, a call, a sit-down.
+    r"|meetings?|meet (up|with|you|your team)|demos?|walk-?through|discovery call|"
+    r"sales call|intro call|introductory call|video call|zoom|google meet|teams call|"
+    r"(have|set up|arrange|jump on|hop on|get on) a (quick |short )?(phone |video )?call|phone call"
     # Asking when.
     r"|when (can|could|are|do|would) you"
     r"|what (times?|days?|slots?)"
@@ -1321,6 +1384,8 @@ class TurnResult:
     refusal: "Refusal | None" = None
     offered: list = None                  # noqa: RUF012 - set in __post_init__
     previous: "Appointment | None" = None  # what a move replaced
+    calendar_down: bool = False            # the owner's own calendar couldn't be read
+    meeting: bool = False                  # a meeting, not a visit
 
     def __post_init__(self):
         if self.offered is None:
@@ -1369,6 +1434,63 @@ class TurnResult:
         return self.performed == "moved"
 
 
+_MEETING = re.compile(
+    r"\b(meetings?|meet (up|with|you|your team)|demos?|walk-?through|discovery call|sales call|"
+    r"intro(ductory)? call|video call|zoom|google meet|teams|"
+    r"(have|set up|arrange|jump on|hop on|get on|book|schedule) a (quick |short )?(phone |video )?call|phone call|"
+    r"partnership|wholesale|distributor|reseller|b2b|pricing call|onboarding)\b",
+    re.IGNORECASE,
+)
+_VIDEO = re.compile(r"\b(video|zoom|google meet|meet link|teams|online|screen ?share|demo)\b", re.IGNORECASE)
+_PHONE = re.compile(r"\b(phone|voice call|ring me|call me|whatsapp call)\b", re.IGNORECASE)
+
+
+def is_meeting(text: str) -> bool:
+    """A meeting with the business - a demo, a call - rather than a visit."""
+    return bool(_MEETING.search(text or ""))
+
+
+def meeting_link(organization) -> str | None:
+    """The owner's own video room (Zoom, Google Meet, Teams), when they gave one."""
+    config = _config(organization).get("appointments") or {}
+    link = str(config.get("meeting_link") or "").strip()
+    return link if link.lower().startswith("https://") else None
+
+
+def meeting_kind(organization, text: str = "") -> str:
+    """What kind of appointment a meeting is booked as.
+
+    What the customer said wins ("a quick phone call", "over Zoom"); then the
+    shop's choice; then video when the shop has a video room, phone otherwise.
+    """
+    if _PHONE.search(text or "") and not _VIDEO.search(text or ""):
+        return "phone"
+    if _VIDEO.search(text or "") and not _PHONE.search(text or ""):
+        return "video"
+    config = _config(organization).get("appointments") or {}
+    chosen = str(config.get("meeting_kind") or "").lower()
+    if chosen in ("phone", "video"):
+        return chosen
+    return "video" if meeting_link(organization) else "phone"
+
+
+def add_to_calendar_link(organization, appointment) -> str:
+    """A Google Calendar link with this exact appointment, for the customer's own calendar."""
+    from app.services import scheduling
+
+    details = f"With {organization.name}"
+    if appointment.location:
+        details += f"\nJoin: {appointment.location}"
+    return scheduling.google_calendar_link(
+        title=f"{KIND_WORDS.get(appointment.kind, 'Appointment').capitalize()} with {organization.name}",
+        note=details,
+        start=_aware(appointment.starts_at),
+        duration_minutes=int(
+            (_aware(appointment.ends_at) - _aware(appointment.starts_at)).total_seconds() // 60
+        ),
+    )
+
+
 def wants_cancel(text: str) -> bool:
     return bool(_WANTS_CANCEL.search(text or ""))
 
@@ -1407,7 +1529,9 @@ def _missing_for_booking(organization, contact) -> list:
     return qualification.missing(organization, contact.qualification)
 
 
-async def handle_turn(db, organization, contact, text: str) -> TurnResult:
+async def handle_turn(
+    db, organization, contact, text: str, *, wants_meeting: bool = False
+) -> TurnResult:
     """Do the appointment work for one inbound message. Never raises.
 
     Returns what actually happened. The caller puts `prompt_block` in front of
@@ -1415,7 +1539,7 @@ async def handle_turn(db, organization, contact, text: str) -> TurnResult:
     announcing a booking can only survive if a booking was made.
     """
     try:
-        return await _handle_turn(db, organization, contact, text)
+        return await _handle_turn(db, organization, contact, text, wants_meeting=wants_meeting)
     except Exception as exc:  # noqa: BLE001 - never at the cost of a reply
         logger.warning("appointment handling failed for %s: %s", contact.id, exc)
         return TurnResult()
@@ -1450,7 +1574,9 @@ def _why_not(organization, refusal: Refusal, moment: datetime) -> str:
     return said
 
 
-async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
+async def _handle_turn(
+    db, organization, contact, text: str, *, wants_meeting: bool = False
+) -> TurnResult:
     existing = await upcoming_for(db, contact.id)
     zone = agent_config.zone_of(organization)
     offered = remembered_offer(contact)
@@ -1464,6 +1590,46 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
     # matches.
     if picked is not None and named.days and picked.astimezone(zone).date() not in named.days:
         picked = None
+
+    # A meeting - a demo, a call, a partnership talk - is booked as a call of
+    # the shop's meeting kind and length, not as the visit a retail customer
+    # gets, and it keeps what it was about.
+    details = offer_details(contact)
+    asked_meeting = is_meeting(text) or wants_meeting
+    meeting = existing is None and (asked_meeting or bool(offered and details.get("meeting")))
+    new_kind = None
+    about = None
+    if meeting:
+        new_kind = meeting_kind(organization, text) if asked_meeting else details.get("kind")
+        new_kind = new_kind or meeting_kind(organization, text)
+        about = details.get("about") or text.strip()[:300]
+        if named.any:
+            moment = named_moment(organization, named, new_kind)
+    keep = {"kind": new_kind, "about": about, "meeting": meeting}
+
+    # With the owner's own calendar set, nothing about a time can be said
+    # until it has been read. Cancelling needs no calendar and still works.
+    about_times = (
+        bool(offered) or named.any or wants_booking(text) or wants_move(text) or wants_meeting
+    )
+    if about_times and not (wants_cancel(text) and not named.any) and booking_enabled(organization):
+        try:
+            await busy_calendar.read(organization)
+        except busy_calendar.Unreadable:
+            return TurnResult(
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    "Availability can't be checked right now. Do NOT offer, suggest or "
+                    "confirm any time, and do NOT say anything is booked or changed. Ask "
+                    "which days and times suit them."
+                ),
+                appointment=existing,
+                refusal=Refusal(
+                    "calendar_unreadable",
+                    "Availability can't be checked right now, so no time can be confirmed.",
+                ),
+                calendar_down=True,
+            )
 
     # "I don't want the Friday one, can we do Monday?" says cancel and means
     # move. A cancellation that names another time is a move.
@@ -1591,10 +1757,10 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
     # A customer picking a slot does not say "book" - they say "the first one"
     # or "Tuesday at 2". So the standing offer is consulted before intent is,
     # and answering one of our own questions counts as wanting to book.
-    in_context = bool(offered) or wants_booking(text) or (only_asking(text) and named.any)
+    in_context = bool(offered) or (wants_booking(text) or wants_meeting) or (only_asking(text) and named.any)
     target = picked or (moment if in_context else None)
 
-    if target is None and not wants_booking(text) and not (
+    if target is None and not (wants_booking(text) or wants_meeting) and not (
         named.days and (offered or only_asking(text))
     ):
         return TurnResult()
@@ -1604,13 +1770,15 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
 
     if target is not None:
         if picked is None and only_asking(text):
-            return await _put_to_them(db, organization, contact, target, OFFER_BOOK)
+            return await _put_to_them(db, organization, contact, target, OFFER_BOOK, keep=keep)
 
         # Everything the shop said it needs before sending somebody out.
-        outstanding = _missing_for_booking(organization, contact)
+        # A meeting is a conversation, not a van: the questions a shop asks
+        # before sending somebody out don't hold it back.
+        outstanding = [] if meeting else _missing_for_booking(organization, contact)
         if outstanding:
             name, asks = outstanding[0]
-            remember_offer(contact, [target], OFFER_BOOK)
+            remember_offer(contact, [target], OFFER_BOOK, **keep)
             return TurnResult(
                 prompt_block=(
                     "=== APPOINTMENTS ===\n"
@@ -1623,7 +1791,15 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
                 offered=[target],
             )
 
-        result = await book(db, organization, contact, target)
+        result = await book(
+            db,
+            organization,
+            contact,
+            target,
+            kind=new_kind,
+            location=meeting_link(organization) if meeting and new_kind == "video" else None,
+            notes=f"Meeting request: {about}" if meeting and about else None,
+        )
         if result.ok:
             forget_offer(contact)
             return TurnResult(
@@ -1632,18 +1808,25 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
                     f"BOOKED, just now, successfully: {describe(result.appointment)}. "
                     "Confirm exactly that - the same day, the same time, the same "
                     "kind of appointment. Do not add a detail that is not in it."
+                    + (
+                        f" Give them this link to add it to their own calendar: "
+                        f"{add_to_calendar_link(organization, result.appointment)}"
+                        if meeting
+                        else ""
+                    )
                 ),
                 appointment=result.appointment,
                 performed="booked",
+                meeting=meeting,
             )
 
-        slots = await _near(db, organization, target, None)
-        remember_offer(contact, slots, OFFER_BOOK)
+        slots = await _near(db, organization, target, new_kind)
+        remember_offer(contact, slots, OFFER_BOOK, **keep)
         return TurnResult(
             prompt_block=(
                 "=== APPOINTMENTS ===\n"
                 f"{_why_not(organization, result, target)}\n"
-                + as_prompt_block(organization, contact, slots)
+                + as_prompt_block(organization, contact, slots, meeting_kind_=new_kind if meeting else None)
                 + "\nSay what happened and offer these instead. Nothing is booked."
             ),
             refusal=result,
@@ -1651,46 +1834,58 @@ async def _handle_turn(db, organization, contact, text: str) -> TurnResult:
         )
 
     if named.days:
-        slots = await slots_on(db, organization, list(named.days))
+        slots = await slots_on(db, organization, list(named.days), kind=new_kind)
         if slots:
-            remember_offer(contact, slots, OFFER_BOOK)
-            return TurnResult(prompt_block=as_prompt_block(organization, contact, slots), offered=slots)
+            remember_offer(contact, slots, OFFER_BOOK, **keep)
+            return TurnResult(
+                prompt_block=as_prompt_block(
+                    organization, contact, slots, meeting_kind_=new_kind if meeting else None
+                ),
+                offered=slots,
+            )
         days = ", ".join(hours_on(organization, day) for day in named.days)
-        slots = await free_slots(db, organization, days=7)
-        remember_offer(contact, slots, OFFER_BOOK)
+        slots = await free_slots(db, organization, days=7, kind=new_kind)
+        remember_offer(contact, slots, OFFER_BOOK, **keep)
         return TurnResult(
             prompt_block=(
                 "=== APPOINTMENTS ===\n"
                 f"Nothing is free on the day they asked for (the business is {days}). "
                 "Say so, and offer these other times instead.\n"
-                + as_prompt_block(organization, contact, slots)
+                + as_prompt_block(
+                    organization, contact, slots, meeting_kind_=new_kind if meeting else None
+                )
             ),
             offered=slots,
         )
 
-    slots = await free_slots(db, organization, days=7)
-    remember_offer(contact, slots, OFFER_BOOK)
+    slots = await free_slots(db, organization, days=7, kind=new_kind)
+    remember_offer(contact, slots, OFFER_BOOK, **keep)
     return TurnResult(
-        prompt_block=as_prompt_block(organization, contact, slots),
+        prompt_block=as_prompt_block(
+            organization, contact, slots, meeting_kind_=new_kind if meeting else None
+        ),
         offered=slots,
     )
 
 
-async def _put_to_them(db, organization, contact, moment, purpose, existing=None) -> TurnResult:
+async def _put_to_them(
+    db, organization, contact, moment, purpose, existing=None, *, keep: dict | None = None
+) -> TurnResult:
     """Say whether this one time is free, and ask before taking it.
 
     The time is remembered as a one-item offer, so a plain "yes" next books or
     moves exactly it - and nothing else could be what they agreed to.
     """
     zone = agent_config.zone_of(organization)
-    kind = existing.kind if existing is not None else None
+    keep = keep or {}
+    kind = existing.kind if existing is not None else keep.get("kind")
     length = timedelta(minutes=duration_minutes(organization, kind))
     refusal = await is_free(
         db, organization, moment, moment + length,
         ignore_id=existing.id if existing is not None else None,
     )
     if refusal is None:
-        remember_offer(contact, [moment], purpose)
+        remember_offer(contact, [moment], purpose, **keep)
         question = (
             f"Ask whether they want their {describe(existing)} moved to it"
             if existing is not None
@@ -1706,7 +1901,7 @@ async def _put_to_them(db, organization, contact, moment, purpose, existing=None
             offered=[moment],
         )
     slots = await _near(db, organization, moment, kind)
-    remember_offer(contact, slots, purpose)
+    remember_offer(contact, slots, purpose, **keep)
     return TurnResult(
         prompt_block=_offer_block(
             organization, slots, purpose, existing,
@@ -1728,7 +1923,7 @@ def alert_for(turn: TurnResult, who: str) -> tuple[str, str] | None:
         return None
     if turn.booked:
         return (
-            "New appointment booked",
+            "New meeting booked" if turn.meeting else "New appointment booked",
             f"{who} booked a {describe(turn.appointment)}. It is in your calendar.",
         )
     if turn.moved:

@@ -23,6 +23,10 @@ twilio==9.4.1
 # kind of clever.
 pywebpush==2.0.0
 aiosmtplib==3.0.2
+# Reading the owner's own calendar (its private iCal address) for busy times,
+# repeating events included. No OAuth: a link the owner pastes and can remove.
+icalendar==7.3.0
+recurring-ical-events==3.8.2
 celery==5.4.0
 redis==5.2.1
 websockets==14.1

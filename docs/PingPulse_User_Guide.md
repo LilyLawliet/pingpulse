@@ -394,6 +394,41 @@ said. A time you're shut is refused with that day's hours and the free times
 that day. Two customers can never get the same time. If the AI is down, the
 customer still gets the exact confirmation, written from the calendar entry.
 
+**Meetings — for a business selling to other businesses.** A prospect who
+writes "can we book a demo?", "let's set up a call" or "can we meet about
+wholesale?" is booked a *meeting*, not the visit your customers get:
+
+- a phone or video call, of the length you set, in **Setup → Calendar →
+  Meetings**;
+- with your own meeting room link (Zoom, Google Meet, Teams) in the
+  confirmation;
+- with what they asked about saved on the appointment, so you walk in knowing
+  it;
+- and a link for them to add it to their own calendar.
+
+It doesn't wait on the questions you ask retail customers before a visit,
+like an address.
+
+**Your real calendar.** In **Setup → Calendar → Your own calendar**, paste
+the private address of the calendar you actually live in:
+
+- Google Calendar: Settings → your calendar → Integrate calendar → *Secret
+  address in iCal format*.
+- Outlook: Settings → Calendar → Shared calendars → Publish a calendar.
+- iCloud: share the calendar as a public calendar and copy the link.
+
+From then on, the agent never offers a time you're busy there: dentist,
+school run, investor call, recurring meetings included. Only *when* you're
+busy is read, never what the event is. The address is checked before it's
+saved. If it ever stops working, the agent offers no times at all rather
+than guess, and you get an alert.
+
+Each booking is also **emailed to you as a calendar invitation**, which Gmail,
+Outlook and Apple add to your calendar straight away. A move updates it and a
+cancellation takes it off. This needs email set up on the server; the
+Calendar step says if it isn't. No Google or Microsoft account is ever
+connected.
+
 **You are told.** Each booking, move and cancellation sends an alert (*An
 appointment was booked, moved or cancelled* in Alerts): who it was, and the
 old and new times.

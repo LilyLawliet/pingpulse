@@ -457,7 +457,16 @@ def _check_appointments(problems: list[str], appointments) -> None:
         problems.append("appointments must be an object.")
         return
 
-    known = set(_APPOINTMENT_NUMBERS) | {"enabled", "duration_by_kind", "default_kind"}
+    known = set(_APPOINTMENT_NUMBERS) | {
+        "enabled",
+        "duration_by_kind",
+        "default_kind",
+        # Meetings, and the owner's own calendar (Setup > Calendar).
+        "busy_calendar_url",
+        "meeting_link",
+        "meeting_kind",
+        "invite_owner",
+    }
     for key in appointments:
         if key not in known:
             problems.append(
@@ -467,6 +476,19 @@ def _check_appointments(problems: list[str], appointments) -> None:
 
     if "enabled" in appointments and not isinstance(appointments["enabled"], bool):
         problems.append("appointments.enabled must be true or false.")
+    if "invite_owner" in appointments and not isinstance(appointments["invite_owner"], bool):
+        problems.append("appointments.invite_owner must be true or false.")
+    if appointments.get("meeting_kind") not in (None, "", "phone", "video"):
+        problems.append("appointments.meeting_kind must be phone or video.")
+    for key in ("busy_calendar_url", "meeting_link"):
+        value = appointments.get(key)
+        if value in (None, ""):
+            continue
+        address = str(value).strip().lower()
+        if key == "busy_calendar_url" and address.startswith("webcal://"):
+            continue
+        if not address.startswith("https://"):
+            problems.append("appointments." + key + " must be an https:// address.")
 
     for key, (low, high) in _APPOINTMENT_NUMBERS.items():
         if key not in appointments:

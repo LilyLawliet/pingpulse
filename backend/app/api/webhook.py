@@ -52,7 +52,7 @@ from app.services import (
     vision,
     ws_manager,
 )
-from app.services import analytics, notifications, oplog, outbox, pipelines, whatsapp
+from app.services import analytics, invites, notifications, oplog, outbox, pipelines, whatsapp
 from app.services.twilio_service import (
     Sender,
     signature_url,
@@ -851,7 +851,24 @@ async def process_inbound_message(
             contact_id=contact.id,
         )
 
-    appointment_turn = await booking.handle_turn(db, organization, contact, body)
+    appointment_turn = await booking.handle_turn(
+        db, organization, contact, body, wants_meeting=bool(analysis.get("wants_meeting"))
+    )
+    if appointment_turn.calendar_down:
+        # The owner's own calendar is set and couldn't be read, so no time was
+        # offered. Somebody has to hear about it: until it is fixed, nobody
+        # can book.
+        handed_to_a_person = await notifications.can_reach(db, organization)
+        await notifications.raise_and_send(
+            db,
+            organization,
+            "unanswered",
+            "Your calendar couldn't be read",
+            f"{contact.name or phone_number} wants a time: {body.strip()[:200]}\n\n"
+            "Your own calendar is connected and could not be read, so the agent offered "
+            "no times and booked nothing. Check the calendar address in Setup > Calendar.",
+            contact_id=contact.id,
+        )
 
     extra_blocks = [vision.as_prompt_block(image_analysis, bool(stored_media))]
     if appointment_turn.prompt_block:
@@ -866,7 +883,9 @@ async def process_inbound_message(
             "anything is booked, and never claim to be a person."
         )
 
-    elif booking_only or analysis.get("wants_meeting") or scheduling.looks_like_b2b(body):
+    elif not booking.booking_enabled(organization) and (
+        booking_only or analysis.get("wants_meeting") or scheduling.looks_like_b2b(body)
+    ):
         # A B2B caller wanting a sales call is a different thing from a
         # customer booking a site visit, and the link is still the right
         # answer for it - now only when there is no real diary in play.
@@ -1194,6 +1213,15 @@ async def process_inbound_message(
     if diary is not None:
         await notifications.raise_and_send(
             db, organization, "booking", diary[0], diary[1], contact_id=contact.id
+        )
+        # And into the owner's own calendar, straight away.
+        await invites.send_for(
+            db,
+            organization,
+            booked=appointment_turn.appointment if not appointment_turn.cancelled else None,
+            cancelled=appointment_turn.appointment
+            if appointment_turn.cancelled
+            else appointment_turn.previous,
         )
     elif (
         analysis.get("intent") == "book_call"
