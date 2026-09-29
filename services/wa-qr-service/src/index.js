@@ -390,9 +390,15 @@ async function startSession(sessionId) {
   socket.ev.on('contacts.upsert', (contacts) => contacts.forEach(rememberContact))
   socket.ev.on('contacts.update', (contacts) => contacts.forEach(rememberContact))
 
-  // Whether this connection has offered a code. A connection that has, and then
-  // closes without a scan, is a code that expired - not a failure.
-  let shownCode = false
+  // Whether a code has been on screen during this pairing run. Per session,
+  // not per connection: WhatsApp answers the first connection with a code and
+  // then refuses the ones that follow it with a 408, so a per-connection flag
+  // made every round after the first look like a pairing that never got as
+  // far as a code. In production that meant a code nobody scanned ended at
+  // "PingPulse could not get a code from WhatsApp" - five more connections
+  // and a wiped folder - instead of the "code expired, get a new one" this
+  // was written for. A round that ended is the record that one was shown.
+  let shownCode = qrCycles.has(sessionId)
 
   socket.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update
@@ -542,6 +548,7 @@ async function startSession(sessionId) {
           return
         }
         const last = latest.get(sessionId)
+        log.info({ sessionId, cycles, status }, 'code expired unscanned; offering another round')
         notifyWatchers(sessionId, { type: 'status', status: 'QR_REFRESHING', qr: last?.qr || null })
         setTimeout(() => startSession(sessionId).catch(() => {}), 1000)
         return
