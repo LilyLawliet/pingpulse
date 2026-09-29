@@ -44,7 +44,11 @@ class FakeSocket:
         return [json.loads(raw) for raw in self.sent]
 
 
+ORG = "11111111-1111-1111-1111-111111111111"
+
+
 def _event(event_type: str, origin: str, **data) -> dict:
+    data.setdefault("organization_id", ORG)
     return {
         "type": event_type,
         "timestamp": "2026-09-11T00:00:00+00:00",
@@ -58,9 +62,9 @@ async def test_a_broadcast_is_published_for_the_other_processes(events_stay_loca
     """The half that was missing. Local fan-out alone is a single-process app."""
     manager = ConnectionManager()
     socket = FakeSocket()
-    await manager.connect(socket)
+    await manager.connect(socket, ORG)
 
-    await manager.broadcast("outbound_message", {"content": "hello"})
+    await manager.broadcast("outbound_message", {"content": "hello", "organization_id": ORG})
 
     assert len(socket.events()) == 1, "the local tab still gets it directly"
     assert len(events_stay_local) == 1, "and the other processes are told"
@@ -72,7 +76,7 @@ async def test_every_event_carries_the_process_that_raised_it(events_stay_local)
     """Without an origin there is no way to tell a loop-back from a real event."""
     manager = ConnectionManager()
 
-    event = await manager.broadcast("sync", {"contact_id": "abc"})
+    event = await manager.broadcast("sync", {"contact_id": "abc", "organization_id": ORG})
 
     assert event["origin"] == ws_manager.ORIGIN
     assert len(ws_manager.ORIGIN) == 32
@@ -83,7 +87,7 @@ async def test_an_event_from_another_process_reaches_this_ones_sockets():
     """The whole point: the worker sends, this process's operator sees it."""
     manager = ConnectionManager()
     socket = FakeSocket()
-    await manager.connect(socket)
+    await manager.connect(socket, ORG)
 
     await manager.deliver(
         _event("outbound_message", "some-other-process", content="Still interested?")
@@ -104,7 +108,7 @@ async def test_a_remote_event_is_replayed_to_a_tab_that_opens_afterwards():
     await manager.deliver(_event("outbound_message", "worker", content="nudge"))
 
     latecomer = FakeSocket()
-    await manager.connect(latecomer)
+    await manager.connect(latecomer, ORG)
 
     assert [e["data"]["content"] for e in latecomer.events()] == ["nudge"]
 
@@ -219,10 +223,10 @@ async def test_redis_being_unreachable_does_not_break_a_broadcast(monkeypatch):
 
     manager = ConnectionManager()
     socket = FakeSocket()
-    await manager.connect(socket)
+    await manager.connect(socket, ORG)
 
     event = await asyncio.wait_for(
-        manager.broadcast("outbound_message", {"content": "still shown"}), timeout=10
+        manager.broadcast("outbound_message", {"content": "still shown", "organization_id": ORG}), timeout=10
     )
 
     assert event["type"] == "outbound_message"

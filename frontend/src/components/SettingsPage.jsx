@@ -99,6 +99,11 @@ export default function SettingsPage({
   open = true,
   onSaved,
   onProgress,
+  // The dashboard's own copies of things Setup can change: the board's
+  // columns and whether alerts reach anybody. Called after those saves, so
+  // the board and the sidebar change without a reload.
+  onPipelineChanged,
+  onAlertsChanged,
   initialStep = 'business',
   // What the dashboard already knows. Rendered from straight away, so a step
   // is on screen the moment Setup opens instead of after a second round of
@@ -182,13 +187,15 @@ export default function SettingsPage({
 
   const mounted = useRef(true)
   const retry = useRef(null)
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // Set again on mount: React's development double-mount runs the cleanup
+    // once, and a flag left false stopped the retry after a failed check.
+    mounted.current = true
+    return () => {
       mounted.current = false
       clearTimeout(retry.current)
-    },
-    [],
-  )
+    }
+  }, [])
 
   useEffect(() => {
     if (open) check()
@@ -201,10 +208,27 @@ export default function SettingsPage({
 
   // Called by each step's panel after it saves. `patch` is what that save
   // has just confirmed, shown at once; the re-read then settles it.
-  const recheck = (patch) => {
-    if (patch && typeof patch === 'object') applySaved(patch)
-    return check()
-  }
+  //
+  // Stable, because panels poll with it: a new function each render tore the
+  // WhatsApp pairing poll down and restarted it on every re-render, which
+  // after a scan became a loop of re-checks.
+  const recheck = useCallback(
+    (patch) => {
+      if (patch && typeof patch === 'object') {
+        readSeq.current += 1
+        setSetup((was) => patchSetup(was, patch))
+      }
+      return check()
+    },
+    [check],
+  )
+  const alertsChanged = useCallback(
+    (patch) => {
+      onAlertsChanged?.()
+      return recheck(patch)
+    },
+    [recheck, onAlertsChanged],
+  )
 
   const saveBusiness = async (event) => {
     event.preventDefault()
@@ -635,8 +659,8 @@ export default function SettingsPage({
                   />
               )}
               {current.key === 'calendar' && <CalendarSettings onChanged={recheck} />}
-              {current.key === 'alerts' && <NotificationSettings onChanged={recheck} />}
-              {current.key === 'pipeline' && <PipelineEditor />}
+              {current.key === 'alerts' && <NotificationSettings onChanged={alertsChanged} />}
+              {current.key === 'pipeline' && <PipelineEditor onChanged={onPipelineChanged} />}
               {current.key === 'learning' && <LearningSettings />}
               {current.key === 'problems' && <ErrorLog />}
               </>

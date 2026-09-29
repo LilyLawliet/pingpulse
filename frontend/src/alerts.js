@@ -24,11 +24,22 @@ import { api } from './api.js'
 // Set only when a person deliberately turns this device off. Without it the
 // silent resubscribe below would undo their choice on the very next reload,
 // which is worse than not having the feature.
+//
+// Per business. One flag for the whole browser meant turning a device off for
+// one shop turned it off - and kept it off - for every shop signed in here.
 const DECLINED = 'pingpulse.alerts.off'
+let business = null
+
+/** Which business the next answers are about, from its alert settings. */
+export function noteBusiness(settings) {
+  if (settings?.organization_id) business = settings.organization_id
+}
+
+const declinedKey = () => (business ? `${DECLINED}.${business}` : DECLINED)
 
 export function alertsDeclined() {
   try {
-    return localStorage.getItem(DECLINED) === '1'
+    return localStorage.getItem(declinedKey()) === '1'
   } catch {
     return false
   }
@@ -36,8 +47,8 @@ export function alertsDeclined() {
 
 export function rememberDeclined(declined) {
   try {
-    if (declined) localStorage.setItem(DECLINED, '1')
-    else localStorage.removeItem(DECLINED)
+    if (declined) localStorage.setItem(declinedKey(), '1')
+    else localStorage.removeItem(declinedKey())
   } catch {
     // A browser with storage blocked still works; it just forgets the choice.
   }
@@ -113,6 +124,7 @@ async function register(vapidKey) {
  * replaces a repeat subscription rather than accumulating one.
  */
 export async function subscribeQuietly(settings) {
+  noteBusiness(settings)
   try {
     if (!supported() || Notification.permission !== 'granted') return false
     if (alertsDeclined()) return false
@@ -152,6 +164,7 @@ export async function deviceSubscribed() {
 
 /** Ask, then subscribe. Must be called from a real click. */
 export async function subscribeWithPrompt(settings) {
+  noteBusiness(settings)
   if (!supported()) {
     throw new Error('This browser cannot show alerts. Try Chrome, Edge or Firefox.')
   }
@@ -171,13 +184,18 @@ export async function subscribeWithPrompt(settings) {
   return granted
 }
 
-/** Stop alerting this device, and remember that it was deliberate. */
+/**
+ * Stop alerting this device for this business, and remember it was deliberate.
+ *
+ * Only this business's record goes. The browser's subscription itself is
+ * shared by every business signed in here, and cancelling it cut off the
+ * others too.
+ */
 export async function unsubscribe() {
   rememberDeclined(true)
   const registration = await navigator.serviceWorker?.getRegistration()
   const subscription = await registration?.pushManager?.getSubscription()
   if (subscription) {
     await api.unsubscribePush(subscription.endpoint)
-    await subscription.unsubscribe()
   }
 }

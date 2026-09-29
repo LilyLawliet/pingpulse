@@ -167,6 +167,7 @@ async def _tell(db, tenant: Tenant, contact: CRMContact, text: str) -> dict:
         {
             "message_id": str(message.id),
             "contact_id": str(contact.id),
+            "organization_id": str(tenant.id),
             "phone_number": contact.phone_number,
             "content": text,
             "provider": "manual",

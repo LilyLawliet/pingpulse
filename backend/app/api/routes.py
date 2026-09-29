@@ -198,6 +198,7 @@ async def send_manual_message(
         {
             "message_id": str(message.id),
             "contact_id": str(contact.id),
+            "organization_id": str(tenant.id),
             "phone_number": contact.phone_number,
             "content": payload.content,
             "provider": "manual",

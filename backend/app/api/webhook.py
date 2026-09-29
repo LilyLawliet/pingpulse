@@ -812,6 +812,7 @@ async def process_inbound_message(
         ws_manager.EVENT_THINKING,
         {
             "contact_id": str(contact.id),
+            "organization_id": str(organization.id),
             "step": "building_prompt",
             "detail": (
                 f"Assembling prompt from organization rules + "
@@ -1026,6 +1027,7 @@ async def process_inbound_message(
         ws_manager.EVENT_GENERATION,
         {
             "contact_id": str(contact.id),
+            "organization_id": str(organization.id),
             "provider": generation.provider,
             "model": (
                 settings.groq_model
@@ -1090,7 +1092,12 @@ async def process_inbound_message(
         )
         await manager.broadcast(
             ws_manager.EVENT_ERROR,
-            {"contact_id": str(contact.id), "stage": "dispatch", "detail": delivery.detail},
+            {
+                "contact_id": str(contact.id),
+                "organization_id": str(organization.id),
+                "stage": "dispatch",
+                "detail": delivery.detail,
+            },
         )
 
     db.add(
@@ -1110,6 +1117,7 @@ async def process_inbound_message(
         {
             "message_id": str(outbound.id),
             "contact_id": str(contact.id),
+            "organization_id": str(organization.id),
             "phone_number": phone_number,
             "content": generation.text,
             "provider": generation.provider,
@@ -1220,6 +1228,7 @@ async def process_inbound_message(
             ws_manager.EVENT_STAGE,
             {
                 "contact_id": str(contact.id),
+                "organization_id": str(organization.id),
                 "phone_number": phone_number,
                 "from": previous_stage,
                 "to": new_stage,

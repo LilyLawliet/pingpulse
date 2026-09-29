@@ -291,6 +291,39 @@ async def health(deep: bool = False):
 
 
 # ----------------------------- WebSocket ---------------------------------
+async def _watched_business(db, token, asked: str | None) -> str | None:
+    """The business a socket may watch: asked for and a member, or the active one."""
+    import uuid as _uuid
+
+    from sqlalchemy import select as _select
+
+    from app.models import OrganizationMember, User
+
+    if token.user_id is None:
+        return None
+    user = await db.get(User, token.user_id)
+    if user is None or not user.is_active:
+        return None
+    member_of = set(
+        (
+            await db.execute(
+                _select(OrganizationMember.organization_id).where(
+                    OrganizationMember.user_id == user.id
+                )
+            )
+        ).scalars()
+    )
+    try:
+        wanted = _uuid.UUID(asked) if asked else None
+    except ValueError:
+        wanted = None
+    if wanted is not None and wanted in member_of:
+        return str(wanted)
+    if user.active_organization_id in member_of:
+        return str(user.active_organization_id)
+    return None
+
+
 @app.websocket("/ws/monitor")
 async def monitor_socket(websocket: WebSocket):
     """Live dashboard feed: inbound, thinking, generation, outbound, stage events.
@@ -312,12 +345,19 @@ async def monitor_socket(websocket: WebSocket):
 
     async with SessionLocal() as db:
         try:
-            await resolve_token(db, raw)
+            token = await resolve_token(db, raw)
         except HTTPException:
             await websocket.close(code=1008, reason="Invalid or expired access token")
             return
+        # The business this tab is watching: the one it asks for, if the
+        # account belongs to it, else the account's active one. Only that
+        # business's events reach it.
+        watching = await _watched_business(db, token, websocket.query_params.get("organization"))
+    if watching is None:
+        await websocket.close(code=1008, reason="No business to watch")
+        return
 
-    await manager.connect(websocket)
+    await manager.connect(websocket, watching)
     try:
         while True:
             # Client messages are only used as a keepalive / ping channel.

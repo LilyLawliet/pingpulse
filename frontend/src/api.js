@@ -27,6 +27,17 @@ export const auth = {
   },
 }
 
+// The business this tab is showing, named on every request. The server keeps
+// one "active" business per account, so with two tabs on two businesses a
+// switch in one used to make the other read and save into the wrong one.
+let currentBusiness = null
+export function setCurrentBusiness(id) {
+  currentBusiness = id || null
+}
+function businessHeader() {
+  return currentBusiness ? { 'X-Organization-Id': currentBusiness } : {}
+}
+
 export class ApiError extends Error {
   constructor(status, message) {
     super(message)
@@ -35,7 +46,7 @@ export class ApiError extends Error {
 }
 
 async function request(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
+  const headers = { 'Content-Type': 'application/json', ...businessHeader(), ...(options.headers || {}) }
   if (auth.token) headers.Authorization = `Bearer ${auth.token}`
 
   const response = await fetch(`${BASE}${path}`, { ...options, headers })
@@ -68,7 +79,7 @@ async function upload(path, file, fields = {}) {
   body.append('file', file)
   for (const [key, value] of Object.entries(fields)) body.append(key, value)
 
-  const headers = {}
+  const headers = { ...businessHeader() }
   if (auth.token) headers.Authorization = `Bearer ${auth.token}`
 
   const response = await fetch(`${BASE}${path}`, { method: 'POST', headers, body })

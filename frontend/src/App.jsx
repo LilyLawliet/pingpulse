@@ -22,7 +22,7 @@ import {
   X,
 } from 'lucide-react'
 import useMonitorSocket from './useMonitorSocket.js'
-import { api, auth } from './api.js'
+import { api, auth, setCurrentBusiness } from './api.js'
 import { subscribeQuietly } from './alerts.js'
 import { DEFAULT_STAGES } from './format.js'
 import { useTheme } from './theme.js'
@@ -73,6 +73,8 @@ const VIEWS = [
   { id: 'test', label: 'Test agent', short: 'Test', icon: FlaskConical },
   { id: 'setup', label: 'Setup', short: 'Setup', icon: Settings },
 ]
+
+const EMPTY_FILTERS = { search: '', stage: '', unread_only: false, taken_over: false }
 
 /** Is anything narrowing the list right now? */
 function filtering(filters) {
@@ -348,11 +350,23 @@ export default function App() {
 }
 
 function Dashboard({ onSignedOut }) {
-  const { connected, events, generation } = useMonitorSocket()
-
   const [organizations, setOrganizations] = useState([])
   const [selectedOrg, setSelectedOrg] = useState(null)
+  // The live feed is this business's alone: the server sends a socket only
+  // the events of the business it asked for, and a switch opens a new one.
+  const { connected, events, generation } = useMonitorSocket(selectedOrg)
+  const selectedOrgRef = useRef(null)
+  selectedOrgRef.current = selectedOrg
+  // Every request from this tab names this tab's business - set during
+  // render, so it is in place before any page's effects ask for anything.
+  setCurrentBusiness(selectedOrg)
   const [contacts, setContacts] = useState([])
+  const [allContacts, setAllContacts] = useState([])
+  const contactsRef = useRef([])
+  contactsRef.current = contacts
+  // Bumped when the socket says the WhatsApp connection changed, so the
+  // connection light re-reads at once instead of on its next minute.
+  const [waStatusTick, setWaStatusTick] = useState(0)
   const [selectedContact, setSelectedContact] = useState(null)
   const [threads, setThreads] = useState({})
   const [composing, setComposing] = useState(new Set())
@@ -361,12 +375,7 @@ function Dashboard({ onSignedOut }) {
   // columns never flicker between two different sets while the call is in
   // flight, and replaced by whatever the server says belongs to this tenant.
   const [stages, setStages] = useState(DEFAULT_STAGES)
-  const [filters, setFilters] = useState({
-    search: '',
-    stage: '',
-    unread_only: false,
-    taken_over: false,
-  })
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [showDrawer, setShowDrawer] = useState(false)
   const [window_, setWindow_] = useState('all')
   // Which page is showing. Pages rather than overlays, so there is always a
@@ -410,12 +419,19 @@ function Dashboard({ onSignedOut }) {
 
   const seenEvents = useRef(0)
 
-  const loadOrganizations = useCallback(async () => {
+  const loadOrganizations = useCallback(async (prefer = null) => {
     try {
       const memberships = await api.listOrganizations()
       setOrganizations(memberships.map((m) => m.organization))
+      const ids = memberships.map((m) => m.organization.id)
       const active = memberships.find((m) => m.is_active)
-      setSelectedOrg(active ? active.organization.id : memberships[0]?.organization.id ?? null)
+      // This tab stays on the business it is showing while it is still a
+      // member: another tab switching must not move this one.
+      setSelectedOrg((current) => {
+        if (prefer && ids.includes(prefer)) return prefer
+        if (current && ids.includes(current)) return current
+        return active ? active.organization.id : ids[0] ?? null
+      })
     } catch (err) {
       if (err.status === 401) onSignedOut()
       setOrganizations([])
@@ -423,13 +439,29 @@ function Dashboard({ onSignedOut }) {
     setOrgsLoaded(true)
   }, [onSignedOut])
 
+  // Only the newest answer to each of these may land. A search typed quickly,
+  // or a switch of business, leaves older requests still on their way, and
+  // the one that arrives last used to win - showing the wrong results, or
+  // the last business's conversations under this one's name.
+  const contactsSeq = useRef(0)
+  const statsSeq = useRef(0)
   const loadContacts = useCallback(async () => {
+    contactsSeq.current += 1
+    const mine = contactsSeq.current
     try {
       // Scoped server-side to the active organization — no id is sent. The
       // filters go to the server rather than narrowing a list already fetched,
       // which would only ever search the most recent hundred.
-      const rows = await api.listContacts(filters)
+      const narrowed = filtering(filters)
+      // The board, the calendar and the counts are about everybody, not about
+      // the inbox's search: with a filter on, the whole list is read as well.
+      const [rows, everyone] = await Promise.all([
+        api.listContacts(filters),
+        narrowed ? api.listContacts({}) : null,
+      ])
+      if (mine !== contactsSeq.current) return
       setContacts(rows)
+      setAllContacts(everyone || rows)
       // Keep the open conversation, but only if it still exists — replayed
       // history can point at a contact that has since been deleted, which
       // would otherwise leave the thread pane stuck on "coming in".
@@ -437,23 +469,31 @@ function Dashboard({ onSignedOut }) {
         rows.some((row) => row.id === current) ? current : rows[0]?.id ?? null
       )
     } catch (err) {
+      if (mine !== contactsSeq.current) return
       if (err.status === 401) onSignedOut()
       setContacts([])
+      setAllContacts([])
     }
   }, [selectedOrg, onSignedOut, filters])
 
   const loadStats = useCallback(async () => {
+    statsSeq.current += 1
+    const mine = statsSeq.current
     try {
-      setStats(await api.stats(window_))
+      const found = await api.stats(window_)
+      if (mine === statsSeq.current) setStats(found)
     } catch {
-      setStats(null)
+      if (mine === statsSeq.current) setStats(null)
     }
-  }, [window_])
+  }, [window_, selectedOrg])
 
+  const pipelineSeq = useRef(0)
   const loadPipeline = useCallback(async () => {
+    pipelineSeq.current += 1
+    const mine = pipelineSeq.current
     try {
       const board = await api.getPipeline()
-      if (board?.stages?.length) setStages(board.stages)
+      if (mine === pipelineSeq.current && board?.stages?.length) setStages(board.stages)
     } catch {
       // The defaults are already on screen and are what the server falls back
       // to as well, so a failed read changes nothing a person would notice.
@@ -462,9 +502,18 @@ function Dashboard({ onSignedOut }) {
 
   useEffect(() => {
     loadOrganizations()
+  }, [loadOrganizations])
+
+  useEffect(() => {
     loadStats()
+  }, [loadStats])
+
+  // Each business has its own board. It was read once, when the dashboard
+  // opened, so every other business showed the first one's columns.
+  useEffect(() => {
+    setStages(DEFAULT_STAGES)
     loadPipeline()
-  }, [loadOrganizations, loadStats, loadPipeline])
+  }, [selectedOrg, loadPipeline])
 
   /**
    * Keep this browser subscribed, without ever asking.
@@ -478,14 +527,19 @@ function Dashboard({ onSignedOut }) {
    * It also settles whether anything can currently reach this shop at all,
    * which is what the warning in the header is for.
    */
+  const alertsSeq = useRef(0)
   const checkAlerts = useCallback(async () => {
+    alertsSeq.current += 1
+    const mine = alertsSeq.current
     try {
       const settings = await api.notificationSettings()
       await subscribeQuietly(settings)
       const after = await api.notificationSettings()
+      if (mine !== alertsSeq.current) return
       setAlertsReach(after.devices > 0 || Boolean(after.email))
       setAlertsLost(after.undelivered || 0)
     } catch {
+      if (mine !== alertsSeq.current) return
       // Never a visible failure. An older deployment has no such endpoint,
       // and a dashboard that will not load because alerts could not be
       // checked would be a poor trade.
@@ -498,12 +552,15 @@ function Dashboard({ onSignedOut }) {
     checkAlerts()
   }, [checkAlerts, selectedOrg])
 
+  const waitingSeq = useRef(0)
   const countWaiting = useCallback(async () => {
+    waitingSeq.current += 1
+    const mine = waitingSeq.current
     try {
       const found = await api.listProspects(30)
-      setWaiting(found.available ? found.prospects.length : 0)
+      if (mine === waitingSeq.current) setWaiting(found.available ? found.prospects.length : 0)
     } catch {
-      setWaiting(0)
+      if (mine === waitingSeq.current) setWaiting(0)
     }
   }, [])
 
@@ -525,6 +582,10 @@ function Dashboard({ onSignedOut }) {
   // such answer still on its way is dropped rather than allowed to undo it.
   const onSetupReport = useCallback(
     (state) => {
+      // A report about a business this dashboard has since left is not news
+      // about the one on screen.
+      const about = state?.org?.id
+      if (about && selectedOrgRef.current && about !== selectedOrgRef.current) return
       checkSeq.current += 1
       onSetupProgress(state)
     },
@@ -632,9 +693,11 @@ function Dashboard({ onSignedOut }) {
     setMobilePane('thread')
   }, [])
 
+  // Typing a search waits for a pause, rather than asking once per letter.
   useEffect(() => {
-    loadContacts()
-  }, [loadContacts])
+    const timer = setTimeout(loadContacts, filters.search ? 250 : 0)
+    return () => clearTimeout(timer)
+  }, [loadContacts, filters.search])
 
 
   /**
@@ -655,20 +718,35 @@ function Dashboard({ onSignedOut }) {
     })
   }, [])
 
-  // Pull a thread the first time its conversation is opened.
+  // Pull a thread's history the first time its conversation is opened.
+  //
+  // "Opened before" is its own record, not "a thread exists": a live message
+  // for a conversation nobody had opened created a one-message thread, and
+  // opening it then skipped the history and showed that message alone.
+  const fetchedThreads = useRef(new Set())
   useEffect(() => {
-    if (!selectedContact || threads[selectedContact]) return
+    if (!selectedContact || fetchedThreads.current.has(selectedContact)) return
+    fetchedThreads.current.add(selectedContact)
     let cancelled = false
+    const contactId = selectedContact
     api
-      .contactMessages(selectedContact)
+      .contactMessages(contactId)
       .then((messages) => {
-        if (!cancelled) mergeMessages(selectedContact, messages)
+        if (!cancelled) mergeMessages(contactId, messages)
       })
-      .catch(() => {})
+      .catch(() => {
+        fetchedThreads.current.delete(contactId)
+      })
     return () => {
       cancelled = true
     }
-  }, [selectedContact, threads, mergeMessages])
+  }, [selectedContact, mergeMessages])
+
+  // Reading a conversation marks it read, so "Unread" means unread.
+  useEffect(() => {
+    if (!selectedContact || view !== 'inbox') return
+    api.markRead(selectedContact).catch(() => {})
+  }, [selectedContact, view])
 
   const appendMessage = useCallback(
     (contactId, message) => mergeMessages(contactId, [message]),
@@ -695,29 +773,42 @@ function Dashboard({ onSignedOut }) {
   // laptop, a dropped network. Everything on screen is now as old as the gap,
   // including the delivery mark on a reply that has since gone out, so it is
   // re-read rather than left to look current.
-  const firstConnection = useRef(true)
+  //
+  // Only on a new connection. The loaders change identity with the search,
+  // the business and the stats window, and listing them used to re-run all of
+  // this on every keystroke in the search box.
+  const handledGeneration = useRef(0)
   useEffect(() => {
-    if (generation === 0) return
-    if (firstConnection.current) {
-      // The mount effects above have already loaded this.
-      firstConnection.current = false
-      return
-    }
-    loadOrganizations()
+    if (generation === 0 || generation === handledGeneration.current) return
+    const first = handledGeneration.current === 0
+    handledGeneration.current = generation
+    // The mount effects above have already loaded this.
+    if (first) return
+    // Threads not open now may have missed messages in the gap too.
+    fetchedThreads.current = new Set(selectedContactRef.current ? [selectedContactRef.current] : [])
     loadContacts()
     loadStats()
     refreshOpenThread()
-  }, [generation, loadOrganizations, loadContacts, loadStats, refreshOpenThread])
+    checkSetup()
+  }, [generation, loadContacts, loadStats, refreshOpenThread, checkSetup])
 
   // Live traffic drives the whole screen: new bubbles, typing state, stages.
+  //
+  // Read by sequence number, not by position: the list is capped, and
+  // counting by its length stopped every live update after the 300th event.
   useEffect(() => {
-    const fresh = events.slice(seenEvents.current)
+    const fresh = events.filter((event) => event.seq > seenEvents.current)
     if (fresh.length === 0) return
-    seenEvents.current = events.length
+    seenEvents.current = fresh[fresh.length - 1].seq
 
     for (const event of fresh) {
       const data = event.data || {}
       const contactId = data.contact_id
+      // Replayed on connecting: already in what the API returns, and not
+      // something that has just happened.
+      if (event.replay) continue
+      // Another business's event has no place on this screen.
+      if (data.organization_id && data.organization_id !== selectedOrgRef.current) continue
 
       if (event.type === 'inbound_message' && contactId) {
         appendMessage(contactId, {
@@ -727,8 +818,10 @@ function Dashboard({ onSignedOut }) {
           media_urls: data.media_urls || [],
           created_at: event.timestamp,
         })
-        setSelectedContact(contactId)
-        if (data.new_contact) loadContacts()
+        // A new message does not take over the conversation somebody is
+        // reading - it only opens one when nothing is open.
+        if (!selectedContactRef.current) setSelectedContact(contactId)
+        if (data.new_contact || !contactsRef.current.some((c) => c.id === contactId)) loadContacts()
       }
 
       if (event.type === 'ai_thinking' && contactId) {
@@ -754,9 +847,10 @@ function Dashboard({ onSignedOut }) {
       }
 
       if (event.type === 'stage_change' && contactId) {
-        setContacts((prev) =>
+        const moved = (prev) =>
           prev.map((c) => (c.id === contactId ? { ...c, pipeline_stage: data.to } : c))
-        )
+        setContacts(moved)
+        setAllContacts(moved)
       }
 
       // Emitted after the write is committed — the only point at which a
@@ -767,9 +861,15 @@ function Dashboard({ onSignedOut }) {
         // A drained outbox changes the delivery mark on messages already on
         // screen, so the open thread is re-read rather than appended to.
         if (data.outbox) refreshOpenThread()
+        // The WhatsApp connection changed: the sidebar, the lock and the
+        // connection light all read it from Setup's answer.
+        if (data.wa_session_status) {
+          checkSetup()
+          setWaStatusTick((n) => n + 1)
+        }
       }
     }
-  }, [events, appendMessage, loadContacts, loadStats, refreshOpenThread])
+  }, [events, appendMessage, loadContacts, loadStats, refreshOpenThread, checkSetup])
 
   const previews = useMemo(() => {
     const map = {}
@@ -782,19 +882,48 @@ function Dashboard({ onSignedOut }) {
 
   const activeContact = contacts.find((c) => c.id === selectedContact) || null
 
-  const selectOrg = async (id) => {
-    if (!id || id === selectedOrg) return
-    // Say straight away that the new business is being checked, rather than
-    // leaving the old one's pages up for the length of the switch.
+  /**
+   * Forget everything that belongs to the business being left.
+   *
+   * The list, the numbers, the board, the open conversation, the drawer, the
+   * filters: all of it was the last business's, and leaving any of it up -
+   * even for the moment a request takes - showed one shop's customers under
+   * another shop's name.
+   */
+  const leaveBusiness = useCallback(() => {
     checkSeq.current += 1
+    contactsSeq.current += 1
+    statsSeq.current += 1
     setSetup(null)
-    await api.switchOrganization(id)
-    setSelectedOrg(id)
+    setContacts([])
+    setAllContacts([])
+    setStats(null)
+    setStages(DEFAULT_STAGES)
     setSelectedContact(null)
     setThreads({})
+    fetchedThreads.current = new Set()
+    setComposing(new Set())
+    setShowDrawer(false)
+    setMobilePane('list')
+    setFilters(EMPTY_FILTERS)
+  }, [])
+
+  const [switchError, setSwitchError] = useState(null)
+  const selectOrg = async (id) => {
+    if (!id || id === selectedOrg) return
+    setSwitchError(null)
+    leaveBusiness()
+    try {
+      await api.switchOrganization(id)
+      setCurrentBusiness(id)
+      setSelectedOrg(id)
+    } catch (err) {
+      // Still on the business we were on: say so, and put its pages back
+      // rather than leaving every page "checking" for good.
+      setSwitchError(err?.message || 'Could not switch business. Try again.')
+      checkSetup()
+    }
     await loadOrganizations()
-    await loadContacts()
-    await loadStats()
   }
 
   const signOut = () => {
@@ -804,7 +933,7 @@ function Dashboard({ onSignedOut }) {
 
   // Remounts the connection light when the business or its WhatsApp step
   // changes, so it never lags a minute behind what Setup just said.
-  const statusKey = `${selectedOrg || 'none'}-${setup?.done?.whatsapp ? 1 : 0}`
+  const statusKey = `${selectedOrg || 'none'}-${setup?.done?.whatsapp ? 1 : 0}-${waStatusTick}`
   const whatsappDropped = Boolean(setup?.hasOrg && setup.gate.whatsapp && !setup.done.whatsapp)
   const attentionCount =
     (waiting > 0 ? 1 : 0) +
@@ -840,20 +969,25 @@ function Dashboard({ onSignedOut }) {
       }}
       onSignOut={signOut}
       org={
+        <>
+        {switchError && (
+          <p role="alert" className="mb-2 rounded-lg bg-crit/10 px-2.5 py-1.5 text-2xs text-crit">
+            {switchError}
+          </p>
+        )}
         <OrgSelector
           organizations={organizations}
           selectedId={selectedOrg}
           onSelect={selectOrg}
           emptyLabel={setupKnown(setup) && !setup.hasOrg ? 'No business yet' : 'Loading…'}
           onSaved={async (saved) => {
-            await loadOrganizations()
-            if (saved?.id) {
-              setSelectedContact(null)
-              setThreads({})
-              await loadContacts()
-            }
+            // A business made with "+" becomes the active one: the last
+            // one's list, numbers and board go with it.
+            if (saved?.id && saved.id !== selectedOrgRef.current) leaveBusiness()
+            await loadOrganizations(saved?.id || null)
           }}
         />
+        </>
       }
       attention={
         <Attention
@@ -969,7 +1103,7 @@ function Dashboard({ onSignedOut }) {
                   </div>
                   <MetricWindow value={window_} onChange={setWindow_} />
                 </div>
-                <MetricStrip stats={stats} contacts={contacts} />
+                <MetricStrip stats={stats} contacts={allContacts} />
               </div>
 
               <div className="flex min-h-0 flex-1 gap-4 p-3 sm:px-6 lg:px-8 lg:pb-6 lg:pt-5">
@@ -1018,7 +1152,7 @@ function Dashboard({ onSignedOut }) {
 
           {view === 'board' && (
             <KanbanBoard
-              contacts={contacts}
+              contacts={allContacts}
               stages={stages}
               onChanged={loadContacts}
               onOpen={openConversation}
@@ -1027,7 +1161,7 @@ function Dashboard({ onSignedOut }) {
           {view === 'orders' && <Orders onOpenConversation={openConversation} />}
           {view === 'calendar' && (
             <Calendar
-              contacts={contacts}
+              contacts={allContacts}
               onOpenSetup={openSetup}
               onOpenConversation={openConversation}
             />
@@ -1038,11 +1172,18 @@ function Dashboard({ onSignedOut }) {
             <SettingsPage
               key={setupStep.n}
               initialStep={setupStep.key}
-              initialState={setupKnown(setup) ? setup : null}
-              onSaved={async () => {
+              // Only an answer about this business. One about the business
+              // just left, or the "no business yet" answer from before one
+              // was made, filled this business's form with the wrong details.
+              initialState={
+                setupKnown(setup) && setup.hasOrg && setup.org?.id === selectedOrg ? setup : null
+              }
+              onPipelineChanged={loadPipeline}
+              onAlertsChanged={checkAlerts}
+              onSaved={async (saved) => {
                 // A business created from Setup becomes the active one, and
                 // everything shown for the old "no business" has to be re-read.
-                await loadOrganizations()
+                await loadOrganizations(saved?.id || null)
                 await loadContacts()
                 await loadStats()
               }}

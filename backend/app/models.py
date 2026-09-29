@@ -985,14 +985,17 @@ class PushSubscription(Base):
     device, so it is scoped to an organization and deleted the moment that
     service says it has expired.
 
-    `endpoint` is unique rather than (organization, endpoint): the same browser
-    resubscribing must replace its old row, not accumulate them, or one
-    escalation arrives four times.
+    Unique per (organization, endpoint): the same browser resubscribing to a
+    business replaces its row there rather than accumulating them - or one
+    escalation arrives four times - and the same browser can be told about
+    each business it said yes to. It used to be unique by endpoint alone, so
+    opening a second business quietly moved the device to it, and the first
+    business's alerts stopped reaching the person who runs both.
     """
 
     __tablename__ = "push_subscriptions"
     __table_args__ = (
-        UniqueConstraint("endpoint", name="uq_push_endpoint"),
+        UniqueConstraint("organization_id", "endpoint", name="uq_push_org_endpoint"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)

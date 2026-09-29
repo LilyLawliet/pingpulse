@@ -27,7 +27,7 @@ const OUTCOMES = [
  * says how many are there. That is a better answer than a confirm dialog: the
  * question is not "are you sure" but "where would those people go".
  */
-export default function PipelineEditor() {
+export default function PipelineEditor({ onChanged }) {
   const [stages, setStages] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -74,7 +74,8 @@ export default function PipelineEditor() {
         })),
       )
       setStages(board.stages)
-      setNote('Saved. Reload to see the board change.')
+      setNote('Saved. The board shows the new columns now.')
+      onChanged?.()
     } catch (err) {
       setError(err.message)
     }

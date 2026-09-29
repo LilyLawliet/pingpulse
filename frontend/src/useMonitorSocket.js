@@ -28,10 +28,18 @@ const SILENCE_LIMIT_MS = 70000
  * caller can refetch with `useEffect(..., [generation])` and get the state it
  * missed while disconnected.
  */
-export default function useMonitorSocket() {
+export default function useMonitorSocket(organizationId = null) {
   const [connected, setConnected] = useState(false)
   const [generation, setGeneration] = useState(0)
   const [events, setEvents] = useState([])
+  // A number that only ever goes up, one per event. `events` is capped, so its
+  // length stops growing at the cap - and a caller that counted by length
+  // stopped seeing anything new after the 300th event, for good.
+  const seqRef = useRef(0)
+  // The business this socket watches. The server sends only that business's
+  // events, so switching business opens a new socket for the new one.
+  const orgRef = useRef(organizationId)
+  orgRef.current = organizationId
 
   const socketRef = useRef(null)
   const attemptRef = useRef(0)
@@ -59,7 +67,10 @@ export default function useMonitorSocket() {
 
     let socket
     try {
-      socket = new WebSocket(socketUrl(auth.token))
+      const org = orgRef.current
+      const url = socketUrl(auth.token)
+      const join = url.includes('?') ? '&' : '?'
+      socket = new WebSocket(org ? `${url}${join}organization=${encodeURIComponent(org)}` : url)
     } catch {
       timerRef.current = setTimeout(connect, 3000)
       return
@@ -81,8 +92,10 @@ export default function useMonitorSocket() {
       try {
         const event = JSON.parse(raw.data)
         if (event.type === 'pong') return
+        seqRef.current += 1
+        const seq = seqRef.current
         setEvents((prev) =>
-          [...prev, { ...event, id: `${Date.now()}-${Math.random()}` }].slice(-MAX_EVENTS),
+          [...prev, { ...event, seq, id: `${seq}-${Date.now()}` }].slice(-MAX_EVENTS),
         )
       } catch {
         // ignore malformed frames
@@ -90,6 +103,9 @@ export default function useMonitorSocket() {
     }
 
     socket.onclose = () => {
+      // A socket replaced on purpose (a business switch) says nothing about
+      // the connection that replaced it.
+      if (socketRef.current !== socket) return
       setConnected(false)
       if (closedByUs.current) return
       attemptRef.current += 1
@@ -155,9 +171,38 @@ export default function useMonitorSocket() {
       window.removeEventListener('online', wake)
       window.removeEventListener('focus', wake)
       document.removeEventListener('visibilitychange', onVisible)
-      socketRef.current?.close()
+      const socket = socketRef.current
+      socketRef.current = null
+      if (socket) {
+        // Detached first, so a close landing after the next socket opened
+        // cannot mark that one as disconnected.
+        socket.onclose = null
+        socket.onmessage = null
+        socket.onerror = null
+        socket.close()
+      }
     }
   }, [connect, reconnectNow])
+
+  // A different business: a fresh socket, and nothing kept from the old one.
+  const firstOrg = useRef(true)
+  useEffect(() => {
+    if (firstOrg.current) {
+      firstOrg.current = false
+      return
+    }
+    setEvents([])
+    const socket = socketRef.current
+    socketRef.current = null
+    if (socket) {
+      socket.onclose = null
+      socket.onmessage = null
+      socket.onerror = null
+      socket.close()
+    }
+    attemptRef.current = 0
+    connect()
+  }, [organizationId, connect])
 
   const clear = useCallback(() => setEvents([]), [])
 

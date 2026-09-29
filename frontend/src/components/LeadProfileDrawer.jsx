@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Bot,
   Check,
@@ -55,26 +55,54 @@ export default function LeadProfileDrawer({
   const [error, setError] = useState(null)
   const [note, setNote] = useState(null)
 
-  const reset = useCallback(() => {
-    if (!contact) return
+  const valuesOf = useCallback((person) => {
     const next = {}
     FIELDS.forEach(([key]) => {
-      next[key] = contact[key] || ''
+      next[key] = person[key] || ''
     })
-    next.name = contact.name || ''
-    next.notes = contact.notes || ''
+    next.name = person.name || ''
+    next.notes = person.notes || ''
     // Arrives as a string, because a decimal that round-trips through a float
     // is a decimal that eventually loses a penny.
-    next.deal_value = contact.deal_value == null ? '' : String(contact.deal_value)
-    next.pipeline_stage = contact.pipeline_stage
+    next.deal_value = person.deal_value == null ? '' : String(person.deal_value)
+    next.pipeline_stage = person.pipeline_stage
+    return next
+  }, [])
+
+  // What the draft was last filled from, to tell an edit from a refresh.
+  const shown = useRef({ id: null, values: {} })
+
+  const reset = useCallback(() => {
+    if (!contact) return
+    const next = valuesOf(contact)
+    shown.current = { id: contact.id, values: next }
     setDraft(next)
     setError(null)
     setNote(null)
-  }, [contact])
+  }, [contact, valuesOf])
 
+  // The contact list is re-read on every message and every save, and each
+  // re-read is a new object for the same person. That used to reset the
+  // form, so notes being typed vanished whenever a customer wrote. Now a new
+  // person resets it; the same person's fresh data fills in only the fields
+  // nobody has touched, and the "Saved." note stays.
   useEffect(() => {
-    reset()
-  }, [reset])
+    if (!contact) return
+    if (shown.current.id !== contact.id) {
+      reset()
+      return
+    }
+    const fresh = valuesOf(contact)
+    const before = shown.current.values
+    shown.current = { id: contact.id, values: fresh }
+    setDraft((draft) => {
+      const merged = { ...draft }
+      for (const key of Object.keys(fresh)) {
+        if ((draft[key] ?? '') === (before[key] ?? '')) merged[key] = fresh[key]
+      }
+      return merged
+    })
+  }, [contact, reset, valuesOf])
 
   if (!contact) return null
 

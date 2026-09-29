@@ -57,14 +57,22 @@ ORIGIN = uuid.uuid4().hex
 
 
 class ConnectionManager:
-    """Tracks live dashboard sockets and broadcasts JSON events to all of them.
+    """Tracks live dashboard sockets and sends each one its own business's events.
+
+    Every socket belongs to one business, checked against the account's
+    memberships when it connects, and an event goes only to the sockets of the
+    business it names. It used to go to every socket on the server: a dashboard
+    open on one shop received another shop's customer messages, and the inbox
+    jumped to a conversation that was not even its own. An event that names no
+    business goes to nobody.
 
     Broadcast never raises: a socket that fails mid-send is dropped so one dead
     dashboard tab can never break the webhook request that triggered the event.
     """
 
     def __init__(self) -> None:
-        self._connections: set[WebSocket] = set()
+        # Socket -> the business it is watching.
+        self._connections: dict[WebSocket, str] = {}
         self._lock = asyncio.Lock()
         self._history: list[dict[str, Any]] = []
         self._history_limit = 100
@@ -73,21 +81,24 @@ class ConnectionManager:
     def connection_count(self) -> int:
         return len(self._connections)
 
-    async def connect(self, websocket: WebSocket) -> None:
+    async def connect(self, websocket: WebSocket, organization_id: str) -> None:
         await websocket.accept()
         async with self._lock:
-            self._connections.add(websocket)
+            self._connections[websocket] = str(organization_id)
         logger.info("monitor client connected (total=%d)", len(self._connections))
-        # Replay recent events so a freshly opened tab is not blank.
-        for event in list(self._history[-25:]):
+        # Replay this business's recent events so a freshly opened tab is not
+        # blank - marked as replays, so the tab shows them without acting on
+        # them as if they had just happened.
+        mine = [e for e in self._history if _business_of(e) == str(organization_id)][-25:]
+        for event in mine:
             try:
-                await websocket.send_text(json.dumps(event, default=str))
+                await websocket.send_text(json.dumps({**event, "replay": True}, default=str))
             except Exception:  # noqa: BLE001 - replay is best effort
                 break
 
     async def disconnect(self, websocket: WebSocket) -> None:
         async with self._lock:
-            self._connections.discard(websocket)
+            self._connections.pop(websocket, None)
         logger.info("monitor client disconnected (total=%d)", len(self._connections))
 
     async def deliver(self, event: dict[str, Any]) -> dict[str, Any]:
@@ -102,8 +113,9 @@ class ConnectionManager:
             self._history = self._history[-self._history_limit :]
 
         message = json.dumps(event, default=str)
+        business = _business_of(event)
         async with self._lock:
-            targets = list(self._connections)
+            targets = [ws for ws, org in self._connections.items() if business and org == business]
 
         dead: list[WebSocket] = []
         for connection in targets:
@@ -115,7 +127,7 @@ class ConnectionManager:
         if dead:
             async with self._lock:
                 for connection in dead:
-                    self._connections.discard(connection)
+                    self._connections.pop(connection, None)
             logger.warning("dropped %d dead monitor socket(s)", len(dead))
 
         return event
@@ -133,6 +145,12 @@ class ConnectionManager:
         await self.deliver(event)
         await _publish(event)
         return event
+
+
+def _business_of(event: dict[str, Any]) -> str | None:
+    data = event.get("data") or {}
+    found = data.get("organization_id") if isinstance(data, dict) else None
+    return str(found) if found else None
 
 
 manager = ConnectionManager()

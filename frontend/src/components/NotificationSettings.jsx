@@ -13,6 +13,7 @@ import { api } from '../api.js'
 import { clockOf } from '../format.js'
 import {
   alertsDeclined,
+  noteBusiness,
   deviceSubscribed,
   subscribeWithPrompt,
   unsubscribe as unsubscribeDevice,
@@ -79,7 +80,9 @@ export default function NotificationSettings({ onChanged }) {
 
   const load = useCallback(async () => {
     try {
-      setState(await api.notificationSettings())
+      const found = await api.notificationSettings()
+      noteBusiness(found)
+      setState(found)
     } catch (err) {
       setError(saidPlainly(err))
       setState(null)

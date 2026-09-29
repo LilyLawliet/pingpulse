@@ -102,6 +102,9 @@ async def get_settings(
         "push_available": notifications.push_available(),
         "email_available": notifications.email_available(),
         "vapid_public_key": settings.vapid_public_key or None,
+        # Which business this answer is about, so a device's "turned off"
+        # choice is remembered for this business and not for every one.
+        "organization_id": str(tenant.id),
     }
 
 
@@ -162,15 +165,17 @@ async def subscribe(
 
     existing = (
         await db.execute(
-            select(PushSubscription).where(PushSubscription.endpoint == endpoint)
+            select(PushSubscription).where(
+                PushSubscription.endpoint == endpoint,
+                PushSubscription.organization_id == tenant.id,
+            )
         )
     ).scalar_one_or_none()
 
     if existing is not None:
-        # Including one belonging to another tenant: the same browser signing
-        # into a different business keeps one subscription, pointed at
-        # whichever business it last agreed to be told about.
-        existing.organization_id = tenant.id
+        # This browser, for this business, again: refreshed in place. The same
+        # browser's row for another business is left alone - it is still
+        # wanted there.
         existing.user_id = getattr(tenant.user, "id", None)
         existing.p256dh = p256dh
         existing.auth = auth

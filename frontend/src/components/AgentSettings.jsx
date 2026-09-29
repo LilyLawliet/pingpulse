@@ -284,6 +284,11 @@ export default function AgentSettings({ onCalendar, onChanged, onTimezone }) {
       setNote(
         `Put back: ${describeFields(result.undone || []).toLowerCase() || 'the last change'}.`,
       )
+      // An undo changes the hours as much as a save does: the tick, the
+      // sidebar count and whether booking can run all follow it.
+      onChanged?.({ hours: Object.keys(result.agent_config?.business_hours || {}).length > 0 })
+      const found = await api.getAgentConfig().catch(() => null)
+      if (found) setReadiness(found.booking || null)
     } catch (err) {
       setError(err.message)
     }

@@ -146,26 +146,42 @@ class Tenant:
 async def current_org(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
+    x_organization_id: str | None = Header(default=None),
 ) -> Tenant:
-    """Resolve the active organization and prove the caller belongs to it.
+    """Resolve the organization this request is for and prove the caller belongs to it.
 
     A membership row that has since been revoked fails here, so a stale
     `active_organization_id` cannot be used to keep reading a tenant's data.
+
+    The dashboard names the business on every request (X-Organization-Id).
+    The account's active business is kept on the server for the whole
+    account, so with two tabs open on two businesses, a switch in one used to
+    make the other read - and save into - the business it was not showing.
+    Without the header, the account's active business is used as before.
     """
-    if user.active_organization_id is None:
+    wanted = user.active_organization_id
+    if x_organization_id:
+        try:
+            wanted = uuid.UUID(x_organization_id.strip())
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="That is not a business id"
+            ) from None
+
+    if wanted is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="No active organization. Create one or switch to one first.",
         )
 
-    membership = await membership_of(db, user, user.active_organization_id)
+    membership = await membership_of(db, user, wanted)
     if membership is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are no longer a member of that organization",
         )
 
-    organization = await db.get(Organization, user.active_organization_id)
+    organization = await db.get(Organization, wanted)
     if organization is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found"
