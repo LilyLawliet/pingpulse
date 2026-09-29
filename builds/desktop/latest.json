@@ -1,11 +1,11 @@
 {
-  "version": "1.8.0",
-  "notes": "Orders: the agent works an order out in the chat from your own price list, asks for what is missing, and writes it down only when the customer replies YES. The order number, the total and the confirmation are read off the saved order, never written by the AI. A new Orders page to confirm, send, deliver, mark paid or cancel.",
-  "pub_date": "2026-09-29T19:33:51+00:00",
+  "version": "1.8.1",
+  "notes": "Orders of plans, seats and one-off services are no longer asked for a delivery address and are charged no delivery; anything that comes in a box still is, whatever it is called. The confirmation now gives your own account details for the method chosen. Cancel my demo and move the meeting are understood.",
+  "pub_date": "2026-09-29T20:39:06+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjIzbEVlL1dqSWxnL1hWWWh6Y1YyRjFmYU9LRk52WTZIOExQaXVNek5OZ2xRN0RCMzhVaFVEUkFkRHd4VE5EcjJrZU1xc24xRmhIaHo2ekNNNzd0NHdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzEwNDMwCWZpbGU6UGluZ1B1bHNlXzEuOC4wX3g2NC1zZXR1cC5leGUKYi9qMUtHWXRiVE9QMVFyTGxqcCs0dmNXR3JSNXloT052VFlEQk9kamVWV05rOHBQNDNidVU1dllzMnl2Zml6WWgwalFJSWV1YWJqNHczVHYrTnhNQVE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.8.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMi81cm1OWWw4cm1YWGIxSU1rcmlZRHB0NndFeThIS3dzMGlyOC9icWgrRm9odERiUHJnNzI0MTJhcnpUWE5ibHhSTlpJbmkwcy9sTGVZQzJsNjE2TFF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzE0MzQ2CWZpbGU6UGluZ1B1bHNlXzEuOC4xX3g2NC1zZXR1cC5leGUKVVZSNDRKU2RwcG1VNFNLbkV1eTdTU3A5dG9Scmp5L3h1a3NwOWFOUU1FSkoxdzl4d1lQRWhPeFg3R0hPUzlyN3Rpcmtsd3U0b0ZPU1pvd2VMa1lEQXc9PQo=",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.8.1_x64-setup.exe"
     }
   }
 }
