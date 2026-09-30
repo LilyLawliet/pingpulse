@@ -1,11 +1,11 @@
 {
-  "version": "1.9.0",
-  "notes": "Your live feed is yours alone: a dashboard was receiving every business's events, including another shop's customer messages. Each one now watches only its own business. Two tabs on two businesses no longer read or save into each other, saves show up without a reload, and browser alerts work for every business on the same browser.",
-  "pub_date": "2026-09-29T21:50:21+00:00",
+  "version": "1.10.0",
+  "notes": "The agent studies every document you upload, writing down how real customers would ask for each part - shorthand, typos, Roman Urdu - so a garbled question still finds the right answer, while only your document's own words ever reach a reply. It also learns from answers your team has already given, once you press Teach.",
+  "pub_date": "2026-09-30T00:55:18+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjBqdTRibHpnSElYYzJNS2F6dyt3TXJsK0RuaitubTEweEE3N292RW9QV0xXYUJRTXFyUlVRK05mRlA0S3I4dmNLVmVlVWNUZU9Jb1MwcWtqSFRzbUFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzE4NjIwCWZpbGU6UGluZ1B1bHNlXzEuOS4wX3g2NC1zZXR1cC5leGUKSGxqdW9FTXFiTWZWQ1NiYkdhQXM0ZzlHbURGZXYyek9wQ3BabkpCcWpoVjN2TDAwcW91b2MrNGtwVDBOcEYrKzVhYTVUcTMxbWx6Qzdra0NKcWxYQUE9PQo=",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.9.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjVuSFNIdThuN1hkVzVPdlFMNEQ4ZHBXcmh0UkM2WDFmUzRQdThLUnBjV2E3ZW5IWEhDRWhSaEl3VTFlZE9JYnlzRzlRNzdrMlZuaU5SWHBjLzNuUVFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzI5NzE3CWZpbGU6UGluZ1B1bHNlXzEuMTAuMF94NjQtc2V0dXAuZXhlCmVLQkVsdHEvakYrTmxDeGpUUENmVUNqdXZ0ODlCRnhodHJHcU8vWFJQV3VqdW5zWVlpT2RKR0d1ZUZJamhSeUhIMXU1UlRwbTNEQnRuMGM2MjdSUEN3PT0K",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.10.0_x64-setup.exe"
     }
   }
 }
