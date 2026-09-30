@@ -67,18 +67,26 @@ async def handle(db, organization, contact, question: str, asked: str) -> str:
     checked, so "passed to the team" is never said to nobody.
     """
     reachable = await notifications.can_reach(db, organization)
+    # Written down, so the reply a person gives can be taught to the agent.
+    from app.services import taught
+
+    await taught.record_question(db, organization.id, getattr(contact, "id", None), asked)
     who = getattr(contact, "name", None) or getattr(contact, "phone_number", None) or "A customer"
     await notifications.raise_and_send(
         db,
         organization,
         "unanswered",
-        "A question the agent could not answer",
-        f"{who} asked: {asked.strip()[:300]}"
-        + (f"\n\n(In short: {question})" if question and question != asked.strip()[:200] else "")
-        + "\n\nNothing in your documents answers it. Reply to them from the "
-        "conversation, and add the answer to your documents so the agent knows next time."
-        + ("" if reachable else "\n\nThey were NOT told a person would reply, because no "
-           "alert address or device is set up."),
+        f"{who} asked something your agent couldn't answer",
+        f"{who} asked:\n\n\u201c{asked.strip()[:300]}\u201d\n\n"
+        + (
+            "Your documents don't answer this, so they were told the team will reply. "
+            "Open the conversation to answer them."
+            if reachable
+            else "Your documents don't answer this. They were given your contact details, "
+            "not told the team would reply - no alert email or device was set up then."
+        )
+        + "\n\nNext time: once you've answered, your agent can learn that answer - "
+        "you'll find it waiting in Setup \u2192 Learning to approve.",
         contact_id=getattr(contact, "id", None),
     )
     if reachable:

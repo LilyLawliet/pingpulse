@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Sequence
@@ -460,6 +461,65 @@ async def _recent_history(
     return list(reversed(result.scalars().all()))
 
 
+async def _hand_over(db, organization, contact, channel, phone_number, body, escalation):
+    """Stop the agent for this conversation, tell the shop, and tell the customer.
+
+    Reached from the keyword check and from the model's reading of the message
+    alike - "put me with team", "insaan se baat karao" and "can u get me sm1"
+    all ask for a person, and no keyword list will ever hold every way of
+    asking. Whichever noticed, the same thing happens.
+    """
+    contact.ai_enabled = False
+    await db.commit()
+    await oplog.record(
+        db,
+        organization.id,
+        "contact.escalated",
+        resource_type="contact",
+        resource_id=contact.id,
+        changes={"trigger": escalation},
+    )
+    await db.commit()
+    await manager.broadcast(
+        ws_manager.EVENT_SYNC,
+        {"contact_id": str(contact.id), "organization_id": str(organization.id)},
+    )
+    # The reason this whole subsystem exists. The agent has just switched
+    # itself off for this conversation, and until now the only way to find
+    # that out was to have the dashboard open at the time.
+    await notifications.raise_and_send(
+        db,
+        organization,
+        "escalation",
+        "Someone needs a person",
+        f"{contact.name or phone_number} said: {body.strip()[:200]}"
+        "\n\nThe agent has stopped replying to them and is waiting for you.",
+        contact_id=contact.id,
+    )
+    await db.commit()
+
+    # Said before returning, because returning is all this branch used to
+    # do. A customer who asks for a person and hears nothing back has been
+    # handed over as far as the database is concerned and ignored as far
+    # as they are concerned.
+    acknowledged = await acknowledge_handoff(
+        db, organization, contact, channel, phone_number, body
+    )
+    await db.commit()
+    await manager.broadcast(
+        ws_manager.EVENT_SYNC,
+        {"contact_id": str(contact.id), "organization_id": str(organization.id)},
+    )
+
+    logger.info("handed %s to a person after %r", phone_number, escalation)
+    return {
+        "status": "escalated",
+        "reason": escalation,
+        "contact_id": str(contact.id),
+        "customer_told": acknowledged,
+    }
+
+
 async def process_inbound_message(
     db: AsyncSession,
     payload: TwilioWebhookPayload,
@@ -604,55 +664,7 @@ async def process_inbound_message(
     # sales-tuned model is inclined to smooth over with an offer.
     escalation = agent_config.needs_escalation(body, organization)
     if escalation and contact.ai_enabled:
-        contact.ai_enabled = False
-        await db.commit()
-        await oplog.record(
-            db,
-            organization.id,
-            "contact.escalated",
-            resource_type="contact",
-            resource_id=contact.id,
-            changes={"trigger": escalation},
-        )
-        await db.commit()
-        await manager.broadcast(
-            ws_manager.EVENT_SYNC,
-            {"contact_id": str(contact.id), "organization_id": str(organization.id)},
-        )
-        # The reason this whole subsystem exists. The agent has just switched
-        # itself off for this conversation, and until now the only way to find
-        # that out was to have the dashboard open at the time.
-        await notifications.raise_and_send(
-            db,
-            organization,
-            "escalation",
-            "Someone needs a person",
-            f"{contact.name or phone_number} said: {body.strip()[:200]}"
-            "\n\nThe agent has stopped replying to them and is waiting for you.",
-            contact_id=contact.id,
-        )
-        await db.commit()
-
-        # Said before returning, because returning is all this branch used to
-        # do. A customer who asks for a person and hears nothing back has been
-        # handed over as far as the database is concerned and ignored as far
-        # as they are concerned.
-        acknowledged = await acknowledge_handoff(
-            db, organization, contact, channel, phone_number, body
-        )
-        await db.commit()
-        await manager.broadcast(
-            ws_manager.EVENT_SYNC,
-            {"contact_id": str(contact.id), "organization_id": str(organization.id)},
-        )
-
-        logger.info("handed %s to a person after %r", phone_number, escalation)
-        return {
-            "status": "escalated",
-            "reason": escalation,
-            "contact_id": str(contact.id),
-            "customer_told": acknowledged,
-        }
+        return await _hand_over(db, organization, contact, channel, phone_number, body, escalation)
 
     if not consent.agent_may_reply(contact):
         reason = "opted out" if contact.opt_out else "a person has taken this conversation over"
@@ -702,6 +714,13 @@ async def process_inbound_message(
         else _no_order(),
     )
 
+    # Asking for a person in words the keyword list did not know. The model
+    # read it; the same hand-over follows.
+    if analysis.get("wants_person") and contact.ai_enabled:
+        return await _hand_over(
+            db, organization, contact, channel, phone_number, body, "asked for a person"
+        )
+
     memory = customer_memory.apply_analysis(contact.memory, analysis)
     contact.memory = memory
     contact.last_intent = analysis.get("intent")
@@ -729,7 +748,18 @@ async def process_inbound_message(
     # is skipped outright rather than fetched and ignored: whatever reaches the
     # prompt competes for attention, and the bug this fixes was the agent
     # replying to "can we book a call?" with store policy and a product FAQ.
-    booking_only = (
+    # Whether this message is about booking: said in it, or answering times
+    # just offered. The analyzer's intent reads the whole conversation, so on
+    # its own it kept every question after a booking in "booking only" -
+    # products, prices and policies left out, and the agent could only point
+    # at the meeting.
+    about_booking = (
+        booking.wants_booking(body)
+        or booking.wants_move(body)
+        or booking.wants_cancel(body)
+        or bool(booking.remembered_offer(contact))
+    )
+    booking_only = about_booking and (
         analysis.get("intent") == "book_call"
         or analysis.get("next_action") == "book_call"
     )
@@ -962,7 +992,12 @@ async def process_inbound_message(
             memory_block=customer_memory.as_prompt_block(
                 memory, contact, greeting=sales_policy.only_greeting(body)
             ),
-            policy_block=sales_policy.as_prompt_block(analysis, photos_available=photos_available),
+            policy_block=sales_policy.as_prompt_block(
+                analysis,
+                photos_available=photos_available,
+                photos_attached=bool(outbound_media),
+                about_booking=about_booking,
+            ),
             # What the reply is allowed to claim. A sentence announcing a booking,
             # a cancellation or a move survives only if one actually happened on
             # this turn - checked against these rather than against the prompt.
@@ -982,6 +1017,11 @@ async def process_inbound_message(
             # models are down is confirmed from its row, not buried under a quote.
             last_resort=appointment_turn.plain_reply(organization)
             or (
+                # "Ok" is answered with a short acknowledgement, not with a
+                # summary of the documents.
+                ""
+                if sales_policy.just_acknowledging(body)
+                else (
                 ""
                 if offer and offer.quote.unknown_place
                 else (offer.reply() if offer and offer.reply() else None)
@@ -994,6 +1034,7 @@ async def process_inbound_message(
                         message=body,
                     )
                 )
+                )
             ),
         )
 
@@ -1001,13 +1042,26 @@ async def process_inbound_message(
     # whoever runs this business should know the AI is down, once per
     # cool-off rather than once per message.
     if generation.provider == "none" and generation.error and "not configured" not in generation.error:
+        # The shop gets what it means for them, in plain words; the error
+        # codes are for whoever runs the server, and go to the log.
+        logger.warning("both AI providers failed for %s: %s", organization.id, generation.error)
+        busy = bool(re.search(r"429|rate|quota|too many|budget", generation.error, re.IGNORECASE))
         await notifications.raise_and_send(
             db,
             organization,
             "ai_down",
-            "The AI stopped answering",
-            "Replies are being put together from your documents alone, without the AI, "
-            f"because neither provider answered.\n\nWhat they said: {generation.error[:300]}",
+            "Replies are plainer for a moment",
+            (
+                "The AI your agent uses is busy right now - it has a limit on how many "
+                "messages it takes at once - "
+                if busy
+                else "The AI your agent uses isn't answering right now, "
+            )
+            + "so your agent is replying straight from your documents. Prices, delivery "
+            "and your policies are still exactly right; the replies are just plainer.\n\n"
+            "This usually sorts itself out within minutes, and there is nothing you need "
+            "to do. If it happens every day, ask whoever set PingPulse up to add a second "
+            "AI key, which raises the limit.",
         )
 
     # The agent did not have the answer. A person is alerted and the

@@ -34,7 +34,7 @@ from app.schemas import (
     OutboundMessageRequest,
 )
 from app.schemas_tenancy import CRMContactOut
-from app.services import analytics, outbox, pipelines, whatsapp, ws_manager
+from app.services import analytics, outbox, pipelines, taught, whatsapp, ws_manager
 from app.services.ws_manager import manager
 
 router = APIRouter(prefix="/api/v1", tags=["dashboard"])
@@ -191,6 +191,9 @@ async def send_manual_message(
     message.twilio_sid = delivery.reference
     sent = delivery.sent
     await db.flush()
+    # A person answering a question the agent could not: kept beside it, to
+    # be taught once approved in Setup > Learning.
+    await taught.capture_reply(db, tenant.id, contact.id, payload.content)
     await db.refresh(message)
 
     await manager.broadcast(

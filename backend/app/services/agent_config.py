@@ -137,7 +137,8 @@ _HUMAN_PATTERNS = (
     # object or an article is required: without that, "get staff discount"
     # reads as a request for staff.
     r"\b(?:put|get|send|give|find)\s+"
-    r"(?:me\s+(?:a\s+|an\s+|the\s+)?|a\s+|an\s+|the\s+)" + _PERSON,
+    r"(?:me\s+(?:(?:with|to|through\s+to|in\s+touch\s+with)\s+)?(?:a\s+|an\s+|the\s+|your\s+)?"
+    r"|a\s+|an\s+|the\s+)" + _PERSON,
     # "talk to them", where the customer has just been offered a team. "them"
     # is only read this way after an explicit wish, so "I'll talk to them and
     # come back to you" - a customer consulting their own household - does not

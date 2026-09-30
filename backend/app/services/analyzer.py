@@ -141,6 +141,10 @@ Return exactly these keys:
   "rejected_items": list of things they said they do NOT want — colours, fabrics,
                     styles or specific products ("I don't like blue" -> ["blue"]),
   "wants_meeting": true if they asked for a call, meeting, demo or to speak to someone,
+  "wants_person": true if their latest message asks to be put through to a real person -
+                  the team, staff, the owner, a human - in any language or spelling
+                  ("put me with team", "insaan se baat karao", "can i talk 2 sm1 real"),
+                  else false. Booking a demo or a call is NOT this.
   "next_action": one of ["answer_question","show_products","handle_objection",
                          "qualify","confirm_order","book_call","greet"]
 }}
@@ -363,6 +367,7 @@ def _coerce(raw: dict[str, Any], message: str, current_stage: str) -> dict[str, 
             booking or bool(raw.get("wants_meeting")) or fallback["wants_meeting"]
         ),
         "next_action": next_action,
+        "wants_person": raw.get("wants_person") is True,
         "source": "llm",
     }
 

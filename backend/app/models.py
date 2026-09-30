@@ -677,6 +677,41 @@ class Catalogue(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class LearnedAnswer(Base):
+    """A question the agent could not answer, and the answer the shop gave it.
+
+    How the agent learns without learning anything unsafe. Nothing here is
+    the agent's own words: the question is the customer's, the answer is what
+    a person at the shop wrote - replying from the dashboard, or typed in by
+    hand - and it only becomes something the agent knows when a person
+    presses "Teach". Until then it is a suggestion on a list.
+
+    waiting    the agent could not answer; nobody has replied yet
+    suggested  a person replied; the reply is waiting to be approved
+    taught     approved: a knowledge passage the agent now uses
+    dismissed  not worth keeping (a one-off, or personal to that customer)
+    """
+
+    __tablename__ = "learned_answers"
+    __table_args__ = (Index("ix_learned_org_status", "organization_id", "status"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=_uuid)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    contact_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("crm_contacts.id", ondelete="SET NULL")
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="waiting")
+    # The knowledge passage a taught answer became, removed with it.
+    knowledge_id: Mapped[uuid.UUID | None] = mapped_column(UUIDType)
+    asked_at: Mapped[datetime] = _now_column()
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    taught_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 # What an order can be. Placed is where every order starts: the customer said
 # yes to a summary worked out from the price list. Everything after that is a
 # person at the shop moving it along.

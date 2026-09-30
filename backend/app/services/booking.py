@@ -1076,6 +1076,12 @@ _DAY_MONTH = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s+(?:of\s+)?({_MONTH})\
 _MONTH_DAY = re.compile(rf"\b({_MONTH})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?\b(?!\s*(?:am|pm|:))")
 _ISO_DATE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 _WEEKDAY_NAMED = re.compile(rf"\b(next\s+|this\s+|coming\s+)?({_WEEKDAY})\b\.?")
+# "the 29th", "on 5th", "29th?" - a day of the month with no month. Not "the
+# 2nd one", which picks the second time offered.
+_DAY_ONLY = re.compile(
+    r"\b(\d{1,2})(?:st|nd|rd|th)\b(?!\s*(?:one|option|choice|slot|time|of\b|week|floor|grade|"
+    r"class|birthday|anniversary))"
+)
 _RELATIVE = re.compile(r"\b(day after tomorrow|tomorrow|tmrw|tmr|today|tonight)\b")
 
 _CLOCK_MERIDIEM = re.compile(
@@ -1155,6 +1161,25 @@ def named_time(text: str, zone: ZoneInfo, now: datetime | None = None) -> Named:
     for match in _RELATIVE.finditer(lowered):
         word = match.group(1)
         add(today + timedelta(days={"day after tomorrow": 2, "tomorrow": 1, "tmrw": 1, "tmr": 1}.get(word, 0)))
+    if not days:
+        for match in _DAY_ONLY.finditer(lowered):
+            number = int(match.group(1))
+            if not 1 <= number <= 31:
+                continue
+            # The next time the month reaches that day: this month if it is
+            # still ahead, else the first month after that has one.
+            year, month = today.year, today.month
+            for _ in range(13):
+                try:
+                    found = date(year, month, number)
+                except ValueError:
+                    found = None
+                if found is not None and found >= today:
+                    add(found)
+                    break
+                month += 1
+                if month > 12:
+                    year, month = year + 1, 1
     if not days:
         # A weekday next to a date names the same day twice ("Friday 3
         # October"); it only counts on its own.
@@ -1331,6 +1356,8 @@ def as_prompt_block(
             f"They have a confirmed {when}.\n"
             "If they ask, tell them exactly that. Do not restate it in a different "
             "form and do not add a time, a date or an address that is not in it.\n"
+            "It is with the team, not with you: never say you will be at it, and never "
+            "put off answering a question until it.\n"
             "To change or cancel it, ask them what they want and say you will see "
             "to it - do not state that it has been changed or cancelled."
         )
@@ -1615,6 +1642,13 @@ async def handle_turn(
         return TurnResult()
 
 
+# A question about the booking they already have.
+_ABOUT_THE_BOOKING = re.compile(
+    r"\b(booked|booking|appointment|meeting|demo|call|visit|consultation|confirm\w*|"
+    r"reschedul\w*|when is|what time|still on|see you|is it on)\b",
+    re.IGNORECASE,
+)
+
 _INSTEAD = re.compile(r"\b(instead|rather|swap|switch)\b", re.IGNORECASE)
 
 
@@ -1817,8 +1851,27 @@ async def _handle_turn(
             # A time named by somebody who already has one: a second
             # appointment or a move? Asked, never guessed.
             return await _put_to_them(db, organization, contact, moment, OFFER_MOVE, existing)
-        # They already have one. Answer from the record rather than offering
-        # a second appointment nobody asked for.
+        if named.days and (wants_booking(text) or wants_meeting):
+            # "Any dates on the 29th?" from somebody already booked: the times
+            # that day, as a move, rather than their booking read back.
+            slots = await slots_on(db, organization, list(named.days), kind=existing.kind)
+            remember_offer(contact, slots, OFFER_MOVE)
+            lead = "" if slots else (
+                "=== APPOINTMENTS ===\nNothing is free that day (the business is "
+                + ", ".join(hours_on(organization, day) for day in named.days)
+                + ")."
+            )
+            return TurnResult(
+                prompt_block=_offer_block(organization, slots, OFFER_MOVE, existing, lead),
+                appointment=existing,
+                offered=slots,
+            )
+        # They already have one. Answer from the record - but only when they
+        # are asking about it. Put in front of the model on every turn, it
+        # took over: "what do you sell?" got "we'll go through it at your
+        # meeting".
+        if not _ABOUT_THE_BOOKING.search(text or "") and not wants_booking(text):
+            return TurnResult(appointment=existing)
         return TurnResult(
             prompt_block=as_prompt_block(organization, contact, [], appointment=existing),
             appointment=existing,

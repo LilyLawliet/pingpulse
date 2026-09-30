@@ -196,6 +196,16 @@ export const api = {
   // changes what the agent believes, the other changes how it sounds, and
   // neither should arrive at a working shop without being looked at.
   learningSources: () => request('/learning/sources'),
+  // Answers the team gave to questions the agent couldn't answer.
+  listLearnedAnswers: () => request('/learning/answers'),
+  teachAnswer: (id, question, answer) =>
+    request(`/learning/answers/${id}/teach`, {
+      method: 'POST',
+      body: JSON.stringify({ question, answer }),
+    }),
+  teachNewAnswer: (question, answer) =>
+    request('/learning/answers', { method: 'POST', body: JSON.stringify({ question, answer }) }),
+  dismissLearnedAnswer: (id) => request(`/learning/answers/${id}/dismiss`, { method: 'POST' }),
   previewVoice: () => request('/learning/voice/preview', { method: 'POST' }),
   saveVoice: (style, examples) =>
     request('/learning/voice', { method: 'PUT', body: JSON.stringify({ style, examples }) }),

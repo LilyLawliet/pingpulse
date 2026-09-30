@@ -8,6 +8,7 @@ import {
   Undo2,
 } from 'lucide-react'
 import { api } from '../api.js'
+import TaughtAnswers from './TaughtAnswers.jsx'
 
 /**
  * Teaching the agent from what the shop has already said.
@@ -110,7 +111,9 @@ export default function LearningSettings() {
   const nothing = sources.replies.total === 0 && sources.exchanges === 0
 
   return (
-    <section className="space-y-4">
+    <div className="space-y-8">
+    <TaughtAnswers />
+    <section className="space-y-4 border-t border-edge pt-6">
       <header className="flex items-start gap-2.5">
         <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-xl bg-accent/10 ring-1 ring-inset ring-accent/20">
           <MessageSquareQuote size={14} className="text-accent" />
@@ -333,5 +336,6 @@ export default function LearningSettings() {
         )}
       </div>
     </section>
+    </div>
   )
 }

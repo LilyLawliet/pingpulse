@@ -121,6 +121,8 @@ function ThemeSwitch() {
  */
 function Attention({
   waiting,
+  toTeach = 0,
+  onTeach,
   alertsReach,
   alertsLost,
   whatsappDropped,
@@ -159,6 +161,16 @@ function Attention({
       title: `${waiting} never answered`,
       body: 'Messaged you and got no reply',
       onClick: onProspects,
+    })
+  }
+  if (toTeach > 0) {
+    items.push({
+      key: 'teach',
+      icon: Sparkles,
+      tone: 'text-accent bg-accent/10',
+      title: `${toTeach} answer${toTeach === 1 ? '' : 's'} to teach`,
+      body: 'Your team answered what the agent could not',
+      onClick: onTeach,
     })
   }
   if (alertsReach === false) {
@@ -551,6 +563,24 @@ function Dashboard({ onSignedOut }) {
   useEffect(() => {
     checkAlerts()
   }, [checkAlerts, selectedOrg])
+
+  // Answers the team gave that are waiting to be taught to the agent.
+  const [toTeach, setToTeach] = useState(0)
+  const teachSeq = useRef(0)
+  const countToTeach = useCallback(async () => {
+    teachSeq.current += 1
+    const mine = teachSeq.current
+    try {
+      const found = await api.listLearnedAnswers()
+      if (mine === teachSeq.current) setToTeach(found.suggested?.length || 0)
+    } catch {
+      if (mine === teachSeq.current) setToTeach(0)
+    }
+  }, [])
+
+  useEffect(() => {
+    countToTeach()
+  }, [countToTeach, selectedOrg, view])
 
   const waitingSeq = useRef(0)
   const countWaiting = useCallback(async () => {
@@ -992,6 +1022,8 @@ function Dashboard({ onSignedOut }) {
       attention={
         <Attention
           waiting={waiting}
+          toTeach={toTeach}
+          onTeach={() => openSetup('learning')}
           alertsReach={alertsReach}
           alertsLost={alertsLost}
           whatsappDropped={whatsappDropped}

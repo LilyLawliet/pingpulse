@@ -16,16 +16,18 @@ thing they will want to correct.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import WRITE_ROLES, Tenant, current_org
-from app.models import KnowledgeDocument, Organization
-from app.services import learning, retrieval, whatsapp
+from app.models import CRMContact, KnowledgeDocument, LearnedAnswer, Organization
+from app.services import learning, retrieval, taught, whatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -273,3 +275,101 @@ async def import_facts(
         len(previous),
     )
     return {"imported": len(chosen), "replaced": len(previous), "source": learning.LEARNED_SOURCE}
+
+
+# ------------------------------------------------ answers the team gave
+class AnswerIn(BaseModel):
+    question: str = Field(min_length=3, max_length=500)
+    answer: str = Field(min_length=1, max_length=1500)
+
+
+def _answer_row(row: LearnedAnswer, contact: CRMContact | None) -> dict:
+    return {
+        "id": str(row.id),
+        "status": row.status,
+        "question": row.question,
+        "answer": row.answer,
+        "asked_at": row.asked_at.isoformat() if row.asked_at else None,
+        "answered_at": row.answered_at.isoformat() if row.answered_at else None,
+        "taught_at": row.taught_at.isoformat() if row.taught_at else None,
+        "customer": (contact.name or contact.phone_number) if contact else None,
+        "contact_id": str(row.contact_id) if row.contact_id else None,
+        "watch_out": taught.watch_out(row.answer or "", contact.name if contact else None)
+        if row.status == taught.SUGGESTED
+        else [],
+    }
+
+
+async def _answer(db, tenant: Tenant, answer_id: uuid.UUID) -> LearnedAnswer:
+    row = (
+        await db.execute(
+            select(LearnedAnswer).where(
+                LearnedAnswer.id == answer_id, LearnedAnswer.organization_id == tenant.id
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return row
+
+
+@router.get("/answers")
+async def list_answers(tenant: Tenant = Depends(current_org), db: AsyncSession = Depends(get_db)):
+    """Questions the agent couldn't answer, the team's replies, and what it was taught."""
+    rows = (
+        await db.execute(
+            select(LearnedAnswer, CRMContact)
+            .join(CRMContact, CRMContact.id == LearnedAnswer.contact_id, isouter=True)
+            .where(
+                LearnedAnswer.organization_id == tenant.id,
+                LearnedAnswer.status != taught.DISMISSED,
+            )
+            .order_by(LearnedAnswer.asked_at.desc())
+            .limit(200)
+        )
+    ).all()
+    out = {"suggested": [], "waiting": [], "taught": []}
+    for row, contact in rows:
+        out.setdefault(row.status, []).append(_answer_row(row, contact))
+    return out
+
+
+@router.post("/answers", status_code=201)
+async def teach_new(
+    payload: AnswerIn, tenant: Tenant = Depends(current_org), db: AsyncSession = Depends(get_db)
+):
+    """Teach an answer typed in by hand."""
+    tenant.require_role(WRITE_ROLES)
+    row = LearnedAnswer(organization_id=tenant.id, question=payload.question.strip(), status=taught.WAITING)
+    db.add(row)
+    await db.flush()
+    await taught.teach(db, row, payload.question, payload.answer)
+    await db.commit()
+    return _answer_row(row, None)
+
+
+@router.post("/answers/{answer_id}/teach")
+async def teach_answer(
+    answer_id: uuid.UUID,
+    payload: AnswerIn,
+    tenant: Tenant = Depends(current_org),
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve an answer - as the team wrote it, or edited - so the agent knows it."""
+    tenant.require_role(WRITE_ROLES)
+    row = await _answer(db, tenant, answer_id)
+    await taught.teach(db, row, payload.question, payload.answer)
+    await db.commit()
+    return _answer_row(row, None)
+
+
+@router.post("/answers/{answer_id}/dismiss")
+async def dismiss_answer(
+    answer_id: uuid.UUID, tenant: Tenant = Depends(current_org), db: AsyncSession = Depends(get_db)
+):
+    """Set a suggestion aside, or take a taught answer back out of what the agent knows."""
+    tenant.require_role(WRITE_ROLES)
+    row = await _answer(db, tenant, answer_id)
+    await taught.untaught(db, row)
+    await db.commit()
+    return {"id": str(row.id), "status": row.status}

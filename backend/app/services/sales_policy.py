@@ -95,7 +95,12 @@ ACTION_DIRECTIVES = {
 }
 
 
-def directives(analysis: dict[str, Any], photos_available: bool = True) -> list[str]:
+def directives(
+    analysis: dict[str, Any],
+    photos_available: bool = True,
+    photos_attached: bool | None = None,
+    about_booking: bool = True,
+) -> list[str]:
     """Turn the analyzer's reading into instructions for the response step.
 
     A booking request short-circuits everything. Once someone has asked for a
@@ -105,7 +110,12 @@ def directives(analysis: dict[str, Any], photos_available: bool = True) -> list[
     """
     lines: list[str] = []
 
-    if analysis.get("intent") == "book_call" or analysis.get("next_action") == "book_call":
+    # Only while this message is about booking. The analyzer reads the whole
+    # conversation, so once a demo was on the table every later question -
+    # "what do you sell?", "show me pictures" - was read as booking too, and
+    # answered with "we'll walk you through it at your meeting".
+    wants_call = analysis.get("intent") == "book_call" or analysis.get("next_action") == "book_call"
+    if wants_call and about_booking:
         return [
             ACTION_DIRECTIVES["book_call"],
             "Do NOT list products, prices, delivery terms, payment terms, store policies "
@@ -130,10 +140,26 @@ def directives(analysis: dict[str, Any], photos_available: bool = True) -> list[
         )
 
     if analysis.get("wants_images"):
-        lines.append(
-            "They asked to see products. Product photos are being attached to this reply, "
-            "so introduce them briefly rather than describing every detail."
-        )
+        if photos_attached or (photos_attached is None and photos_available):
+            lines.append(
+                "They asked to see products. Product photos are being attached to this reply, "
+                "so introduce them briefly rather than describing every detail."
+            )
+        else:
+            # What used to happen: "photos are being attached" was said with
+            # none to attach, and the agent covered for it by deferring to a
+            # meeting. The honest answer is short and still useful.
+            lines.append(
+                "They asked for pictures. "
+                + (
+                    "None match what they asked for. "
+                    if photos_available
+                    else "This business has no product photos. "
+                )
+                + "Say so in one short sentence, then answer what they wanted to see: "
+                "name the products (and prices) from the details below. Never say a "
+                "picture is attached, and never put it off to a call or meeting."
+            )
     elif analysis.get("intent") in ("product_question", "price_question", "purchase"):
         lines.append(
             "Product details are listed below for reference. No photos are attached this "
@@ -146,8 +172,13 @@ def directives(analysis: dict[str, Any], photos_available: bool = True) -> list[
     return lines
 
 
-def as_prompt_block(analysis: dict[str, Any], photos_available: bool = True) -> str:
-    lines = directives(analysis, photos_available)
+def as_prompt_block(
+    analysis: dict[str, Any],
+    photos_available: bool = True,
+    photos_attached: bool | None = None,
+    about_booking: bool = True,
+) -> str:
+    lines = directives(analysis, photos_available, photos_attached, about_booking)
     if not lines:
         return ""
     return "=== WHAT TO DO ON THIS TURN ===\n" + "\n".join(f"- {line}" for line in lines)
@@ -309,6 +340,42 @@ def only_greeting(message: str) -> bool:
 
 
 _only_greeting = only_greeting
+
+
+# "Ok", "thanks", "great", "bye", "👍" - a customer acknowledging, not asking.
+# These have no answer to look up, so they are never "a question the agent
+# could not answer": "Ok" used to get "That's a good question, and I don't
+# have the answer to hand. I've passed it to the team."
+_ACK_WORD = (
+    r"(?:ok(?:ay)?|k+|okie|alright|all right|fine|cool|great|nice|perfect|sure|noted|got it|"
+    r"understood|thanks?|thank you|thx|ty|tysm|cheers|appreciate it|bye|goodbye|see you|"
+    r"good night|gn|no worries|np|hmm+|ah+|oh+|yes|yeah|yep|no|nope|nah|haan|han|ji|"
+    r"theek(?: hai)?|thik(?: hai)?|acha|achha|shukriya|shukria|jazakallah|jazak allah|"
+    r"khuda hafiz|allah hafiz|gracias|merci|danke|shukran|so much|a lot|very much|bro|sir|"
+    r"madam|dear|then|again|you|u)"
+)
+_ACKNOWLEDGING = re.compile(
+    rf"^[\s\W]*{_ACK_WORD}(?:[\s,.!]+{_ACK_WORD})*[\s\W]*$", re.IGNORECASE
+)
+_ONLY_SYMBOLS = re.compile(r"^[\s\W\d]*$")
+
+
+def just_acknowledging(message: str) -> bool:
+    """Whether the message is an acknowledgement or a sign-off, with nothing to answer."""
+    text = (message or "").strip()
+    if not text or "?" in text:
+        return False
+    return bool(_ACKNOWLEDGING.match(text)) or (len(text) <= 8 and bool(_ONLY_SYMBOLS.match(text)))
+
+
+def acknowledgement_reply(message: str) -> str:
+    """A short, warm reply to an acknowledgement. Never a promise, never a question."""
+    lowered = (message or "").lower()
+    if re.search(r"\b(bye|goodbye|good night|gn|khuda hafiz|allah hafiz|see you|no|nope|nah)\b", lowered):
+        return "Take care! Message us any time."
+    if re.search(r"thank|thx|\bty\b|tysm|cheers|shukri|jazak|gracias|merci|danke|shukran", lowered):
+        return "You're welcome! Anything else I can help with?"
+    return "Great! Anything else I can help with?"
 
 
 def _from_a_sentence_start(body: str) -> str:

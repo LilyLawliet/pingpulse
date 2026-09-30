@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 # Reasoning models spend part of this budget thinking before emitting text, so
 # it must comfortably exceed the length of the reply we actually want.
 MAX_OUTPUT_TOKENS = 2048
+# Gemini counts its thinking against the same budget, so it needs more room.
+GEMINI_OUTPUT_TOKENS = 8192
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GEMINI_URL_TEMPLATE = (
@@ -734,6 +736,8 @@ def build_prompt(
     if is_roman_urdu(latest_message) or is_roman_urdu(recent):
         sections.append(ROMAN_URDU_GUIDE)
 
+    sections.append(READING_CUSTOMERS)
+
     # What this specific turn must accomplish, then the standing rules.
     if policy_block:
         sections.append(policy_block)
@@ -829,7 +833,12 @@ async def _gemini_once(prompt: str, api_key: str) -> str:
         # Gemini 3.x spends several hundred "thinking" tokens before writing a
         # word, and they count against this budget. A tight cap here does not
         # produce a short reply — it produces a truncated one.
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": MAX_OUTPUT_TOKENS},
+        #
+        # 2048 still ran out: a busy prompt thought its way through the whole
+        # budget and returned nothing, which is what took the agent to its
+        # documents-only replies. Room for the thinking plus a full reply; how
+        # long the reply is stays set by the prompt, not by this cap.
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": GEMINI_OUTPUT_TOKENS},
     }
     async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
         response = await client.post(
@@ -864,8 +873,28 @@ NEEDS_TEAM_RULE = (
     "NEEDS_TEAM: <their question in a few words>\n"
     "and nothing else. The system will alert the team and tell the customer. "
     "Use this only when you truly have nothing to answer with; a partial "
-    "answer from the information above is always better."
+    "answer from the information above is always better. Never use it for a "
+    "greeting, a thanks, an \"ok\", small talk or a question that has nothing to do "
+    "with the business - answer those yourself, briefly and kindly."
 )
+
+# How to read people as they actually write. Customers type fast, misspell,
+# drop words, mix languages and wander off topic, and none of that is theirs
+# to fix: the agent works out what they mean, the way a good shop assistant
+# would. Principles, not phrases - nothing here names a message to expect.
+READING_CUSTOMERS = """=== HOW TO READ THE CUSTOMER ===
+- People type fast. Work out what they mean through typos, missing words, shorthand
+  ("pls", "u", "hw much"), voice-to-text mistakes and mixed languages. Never correct them
+  and never ask them to rephrase something you can reasonably understand.
+- Answer what they asked, first, from the information above. If they asked several
+  things, answer each one. Do not answer a different question from an earlier message.
+- If a message could mean two things, pick the likelier one and answer it; ask a short
+  question only when a wrong guess would matter (an order, a booking, a price).
+- Anything booked with the business - a demo, a call, a visit - is with the team, not
+  with you. Never put off answering until then when the answer is here.
+- Off-topic questions and small talk: a short, friendly line, then offer to help with
+  what the business does. Do not lecture and do not refuse rudely.
+- Never invent anything to fill a gap. Say what you do know, plainly."""
 
 
 def needs_team(text: str) -> str | None:
@@ -1215,8 +1244,14 @@ async def generate_reply(
     def left() -> float:
         return deadline - time.perf_counter()
 
+    acknowledging = sales_policy.just_acknowledging(latest_message)
+
     def finished(provider: str, text: str, fallback: bool, error: str | None = None) -> GenerationResult:
         asked = needs_team(text)
+        if asked is not None and acknowledging:
+            # "Ok" has nothing to pass to the team.
+            asked = None
+            text = sales_policy.acknowledgement_reply(latest_message)
         return GenerationResult(
             provider=provider,
             text=DONT_KNOW if asked is not None else text,
@@ -1230,6 +1265,18 @@ async def generate_reply(
     def gave_up(error: str) -> GenerationResult:
         # The worked-out answer if there is one; otherwise nothing was known,
         # and the caller alerts a person rather than sending a filler question.
+        # An acknowledgement needed no AI in the first place - unless it was
+        # a yes that did something (a booking made): that is said instead.
+        if acknowledging and not last_resort:
+            return GenerationResult(
+                provider="none",
+                text=sales_policy.acknowledgement_reply(latest_message),
+                prompt_used=prompt,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                fallback_used=True,
+                error=error,
+                needs_team=None,
+            )
         return GenerationResult(
             provider="none",
             text=last_resort or DONT_KNOW,
