@@ -20,6 +20,13 @@ minute, so firing three together had every key answer 429 and nothing was
 studied at all. Worse, that looked like success - the run printed "studied 0"
 and gave no reason. So the backfill asks for a few passages at a time, waits
 between rounds, and says plainly when the model refused.
+
+The ceiling is tighter than it looks: a call reserves its max_tokens against
+the same per-minute pool, so one study call costs its passages plus about four
+thousand reserved tokens, and roughly one call a minute fits. Extra keys do
+not help, because they share the one pool. A round that comes back empty is
+therefore usually the pool rather than the passages, so it is waited out and
+asked again instead of ending the run.
 """
 
 from __future__ import annotations
@@ -38,6 +45,11 @@ from sqlalchemy import select  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models import KnowledgeDocument  # noqa: E402
 from app.services import study, taught  # noqa: E402
+
+# Empty rounds in a row tolerated before giving up. The pool refills in about
+# a minute and each call reserves its max_tokens against it, so a quiet round
+# is ordinary rather than a failure.
+EMPTY_ROUNDS = 4
 
 
 async def _waiting(session) -> list:
@@ -60,27 +72,36 @@ async def main(dry_run: bool, slice_size: int, pause: float) -> int:
 
         done = 0
         rounds = 0
+        empty = 0
         while True:
             studied = await study.study_existing(session, limit=slice_size)
             await session.commit()
             rounds += 1
             if studied:
                 done += studied
+                empty = 0
                 print(f"  studied {done} of {total}")
-            else:
-                # Nothing came back. One more round would only ask again at the
-                # same rate, so stop and say so rather than printing a zero.
+                if done >= total:
+                    break
+                await asyncio.sleep(pause)
+                continue
+
+            # Nothing came back. Nearly always the per-minute pool rather than
+            # the passages, so wait longer and ask again; only a run of empty
+            # rounds means these passages genuinely cannot be studied.
+            empty += 1
+            if empty > EMPTY_ROUNDS:
                 print(
                     f"\nStopped after {done} of {total}. The model answered nothing "
-                    f"for the last {slice_size} passage(s) - usually the per-minute "
-                    "token limit, sometimes a passage it could not read. Nothing was "
-                    "changed for those, and they are still searched as they always "
-                    "were. Run this again to pick them up."
+                    f"in {EMPTY_ROUNDS + 1} rounds in a row - the per-minute token "
+                    "limit, or a passage it could not read. Nothing was changed for "
+                    "those, and they are still searched as they always were. Run this "
+                    "again to pick them up."
                 )
                 return 1 if done == 0 else 0
-            if done >= total:
-                break
-            await asyncio.sleep(pause)
+            wait = pause * (empty + 1)
+            print(f"  busy; waiting {wait:.0f}s and asking again ({empty}/{EMPTY_ROUNDS})")
+            await asyncio.sleep(wait)
 
         print(f"\nStudied all {done} passage(s) in {rounds} round(s).")
     return 0
