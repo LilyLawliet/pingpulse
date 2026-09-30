@@ -12,6 +12,41 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.10.0',
+    date: '30 September 2026',
+    items: [
+      {
+        title: 'It understands how your customers actually type',
+        body:
+          'When you upload a document the agent studies it, writing down how real '
+          + 'customers would ask for each part — shorthand, typos, Roman Urdu, other '
+          + 'languages. “yrly price??” now finds your annual billing line, '
+          + 'which shares not one word with it. Every message is also read for what it '
+          + 'most likely means before answering. Only your document’s own words ever '
+          + 'reach a reply, so a badly guessed question can make a passage easier to find '
+          + 'and can never add a fact.',
+      },
+      {
+        title: 'It learns from what your team already answered',
+        body:
+          'A question the agent could not answer is kept, and your team’s next reply '
+          + 'to that customer becomes a suggested answer in Setup › Learning. Nothing '
+          + 'is used until you press Teach, anything that looks like a personal detail is '
+          + 'pointed out first, and a taught answer can be forgotten in one press. '
+          + 'Teaching is optional — no reminder, no nudge.',
+      },
+      {
+        title: 'Plainer hand-overs and plainer alerts',
+        body:
+          '“Put me with the team” hands over. “Ok” and '
+          + '“thanks” get a short acknowledgement instead of “passed to '
+          + 'the team”. The agent no longer defers your answers “to the '
+          + 'meeting”, and alert emails about slowdowns and unanswered questions are '
+          + 'written for you rather than for an engineer.',
+      },
+    ],
+  },
+  {
     version: '1.9.0',
     date: '30 September 2026',
     items: [
