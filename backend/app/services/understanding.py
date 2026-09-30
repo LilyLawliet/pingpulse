@@ -41,6 +41,16 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:ge
 
 
 # ------------------------------------------------------------------ the call
+def groq_reasoning(model: str) -> dict:
+    """Extra request fields for a reasoning model on Groq, or none.
+
+    gpt-oss thinks before it writes, and the thinking counts against
+    max_tokens and against the reply deadline. A sales reply needs little of
+    it; left at the default, a busy prompt can think its way past both.
+    """
+    return {"reasoning_effort": "low"} if "gpt-oss" in (model or "") else {}
+
+
 # How long a refusal for being too busy (429/503) may be waited out before the
 # same key is asked again, and how many times.
 #
@@ -134,6 +144,7 @@ async def _groq_json(prompt: str, timeout: float) -> dict | None:
                 "temperature": 0,
                 "response_format": {"type": "json_object"},
                 "max_tokens": 4096,
+                **groq_reasoning(model),
             },
         )
 

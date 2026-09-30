@@ -24,6 +24,7 @@ from app.services import languages
 from app.services import offers
 from app.services import orders
 from app.services import sales_policy
+from app.services.understanding import groq_reasoning
 
 logger = logging.getLogger(__name__)
 
@@ -781,6 +782,7 @@ async def _groq_once(prompt: str, api_key: str) -> str:
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7,
         "max_tokens": MAX_OUTPUT_TOKENS,
+        **groq_reasoning(settings.groq_model),
     }
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
