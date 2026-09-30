@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from decimal import Decimal, InvalidOperation
@@ -27,6 +28,7 @@ from app.services import (
     documents,
     media_service,
     retrieval,
+    study,
     understanding,
     whatsapp,
 )
@@ -216,6 +218,21 @@ async def upload_document(
         await db.delete(old_passage)
     await db.flush()
 
+    # Two readings of the file at once, so the second costs no waiting:
+    # what it sells and on what terms (read by the model and checked against
+    # the file's own text, kept for quoting and for the owner to review), and
+    # how customers would ask for each passage, so a "yrly price??" finds the
+    # passage about annual billing (see `study`).
+    organization = await db.get(Organization, tenant.id)
+    reading, asked = await asyncio.gather(
+        understanding.read_document(
+            file.filename or "document",
+            extracted.text,
+            getattr(organization, "default_currency", None),
+        ),
+        study.questions_for(passages),
+    )
+
     stored = []
     for index, passage in enumerate(passages):
         document = await retrieval.index_document(
@@ -224,21 +241,14 @@ async def upload_document(
             title=documents.title_for(file.filename or "document", index, len(passages)),
             content=passage,
             source=file.filename,
+            asked_as=asked[index] if index < len(asked) else None,
         )
         document.doc_type = doc_type
         stored.append(document)
 
     photos = await _products_with_photos(db, tenant.id, extracted, file.filename or "document")
 
-    # What the file sells and on what terms, read once by the model and
-    # checked against the file's own text, kept for quoting and for the owner
-    # to review. Replaces any earlier reading of a file with the same name.
-    organization = await db.get(Organization, tenant.id)
-    reading = await understanding.read_document(
-        file.filename or "document",
-        extracted.text,
-        getattr(organization, "default_currency", None),
-    )
+    # Replaces any earlier reading of a file with the same name.
     await _replace_catalogue(db, tenant.id, file.filename or "document", reading)
 
     await db.flush()
@@ -265,6 +275,9 @@ async def upload_document(
         "pages": extracted.pages,
         "tables_found": extracted.tables,
         "passages_indexed": len(stored),
+        # How many passages the agent prepared customer questions for; 0 only
+        # when the AI was unreachable, and then search works as it always did.
+        "passages_studied": sum(1 for questions in asked if questions),
         "characters": len(extracted.text),
         "from_document": facts,
         # How many priced products were understood, so a shop can see at once

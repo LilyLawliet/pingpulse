@@ -36,6 +36,7 @@ from app.models import (
 )
 from app.schemas import GenerationResult
 from app.services import (
+    analyzer,
     orders,
     languages,
     notifications,
@@ -755,10 +756,18 @@ async def simulate(
         if isinstance(entry, dict)
     ]
 
-    chunks = await retrieval.search(db, tenant.id, message, limit=3, doc_type="policy")
+    # Read the way a live message is read: what they most likely mean, typos
+    # and all, searched alongside their own words.
+    analysis = await analyzer.analyse(history, message, pretend.sales_stage)
+    meaning = analysis.get("meaning")
+    chunks = await retrieval.search_readings(
+        db, tenant.id, [message, meaning], limit=3, doc_type="policy"
+    )
     knowledge = retrieval.as_prompt_block(chunks)
 
     escalation = agent_config.needs_escalation(message, organization)
+    if not escalation and analysis.get("wants_person"):
+        escalation = "asked for a person"
     if escalation:
         return {
             "reply": None,
@@ -766,9 +775,15 @@ async def simulate(
             "reason": escalation,
             "note": (
                 "A real conversation would stop here and wait for a person. "
-                f"The word that triggered it was '{escalation}'."
+                + (
+                    "The agent read the message as asking for a person."
+                    if escalation == "asked for a person"
+                    else f"The word that triggered it was '{escalation}'."
+                )
             ),
             "knowledge_used": [chunk.title for chunk in chunks],
+        # How the agent read the message, typos and all.
+        "understood": meaning,
         }
 
     # Booking, the way a live chat does it, against the real diary - inside a
@@ -915,6 +930,7 @@ async def simulate(
             # The sandbox sends nothing, pictures included.
             photos_attached=False,
             photos_available=await product_search.has_photos(db, tenant.id),
+            meaning=meaning,
             last_resort=booking_reply
             or (
                 ""
@@ -951,6 +967,8 @@ async def simulate(
         "latency_ms": generation.latency_ms,
         "fallback_used": generation.fallback_used,
         "knowledge_used": [chunk.title for chunk in chunks],
+        # How the agent read the message, typos and all.
+        "understood": meaning,
         # How the price list was read for this message, so a shop can see
         # which product and which sums the answer was built on.
         "quote": offers.as_dict(offer.quote),

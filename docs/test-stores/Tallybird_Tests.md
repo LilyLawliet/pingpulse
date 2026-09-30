@@ -198,3 +198,17 @@ unchanged.
 **An order in Urdu:** `mujhe growth plan chahiye, jazzcash se payment karunga`,
 then `haan`. The summary and the confirmation come back in Roman Urdu, and the
 figures, the order number and the JazzCash number are unchanged.
+
+### 11. Typos, shorthand and off-topic (nobody taught it these)
+Test agent shows *understood as:* under each reply: how the agent read the
+message. Nothing here is set up; it works from the document alone.
+
+| Send | Right answer |
+|---|---|
+| `hw mch yrly 4 grwth??` | PKR 65,000 a year (10 × 6,500), bank transfer only. *Understood as* is about the Growth plan's yearly price. |
+| `wat abt the busness 1` (after the Growth price) | The Business plan: PKR 14,000 per month, up to 15 users. |
+| `does it wrk offlne` | Yes, it keeps selling offline and syncs later. |
+| `saal ka kitna hai growth` | Roman Urdu: PKR 65,000 a year. |
+| `whats the weather in lahore` | A short, friendly line, then an offer to help with Tallybird. No alert, no "passed to the team". |
+| `ok` / `thanks` | A short acknowledgement. No alert. |
+| `put me with team` | Hands over, like section 9. |

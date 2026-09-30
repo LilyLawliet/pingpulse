@@ -176,6 +176,7 @@ export default function AgentSandbox() {
                     {turn.knowledge_used?.length > 0 && (
                       <span>read: {turn.knowledge_used.join(', ')}</span>
                     )}
+                    {turn.understood && <span>understood as: “{turn.understood}”</span>}
                   </p>
                 </div>
               )}

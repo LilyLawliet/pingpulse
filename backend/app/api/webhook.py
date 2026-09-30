@@ -766,13 +766,19 @@ async def process_inbound_message(
 
     # Policy documents only: product text reaches the prompt through the
     # compact product block below, never as a wall of catalogue copy.
+    # Searched twice: as typed, and as the analyzer read it - typos fixed,
+    # translated, "it" resolved - so "yrly price 4 it??" finds the passage on
+    # annual billing that the typed words share nothing with.
+    meaning = analysis.get("meaning")
     chunks = (
         []
         if booking_only
-        else await retrieval.search(
-            db, organization.id, search_terms, limit=3, doc_type="policy"
+        else await retrieval.search_readings(
+            db, organization.id, [search_terms, meaning], limit=3, doc_type="policy"
         )
     )
+    if meaning:
+        search_terms = f"{search_terms} {meaning}"
     knowledge = retrieval.as_prompt_block(chunks)
 
     # What is known about the job and the one gap worth closing. Empty until a
@@ -998,6 +1004,7 @@ async def process_inbound_message(
                 photos_attached=bool(outbound_media),
                 about_booking=about_booking,
             ),
+            meaning=meaning,
             # What the reply is allowed to claim. A sentence announcing a booking,
             # a cancellation or a move survives only if one actually happened on
             # this turn - checked against these rather than against the prompt.

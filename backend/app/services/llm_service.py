@@ -639,6 +639,7 @@ def build_prompt(
     knowledge: str = "",
     memory_block: str = "",
     policy_block: str = "",
+    meaning: str | None = None,
 ) -> str:
     """Stitch business rules, contact metadata, chat history and the new message.
 
@@ -728,7 +729,16 @@ def build_prompt(
     state, state_rules = describe_state(history, latest_message, getattr(contact, "name", None))
     sections.append("=== CONVERSATION STATE ===\n" + state)
 
-    sections.append(f"=== LATEST CUSTOMER MESSAGE ===\n{latest_message}")
+    latest = f"=== LATEST CUSTOMER MESSAGE ===\n{latest_message}"
+    if meaning and " ".join(meaning.lower().split()) != " ".join(latest_message.lower().split()):
+        # A reading of a hurried or garbled message, to answer from. The
+        # customer's own words stay above it and win if the two disagree; the
+        # reply is still in their language, not in this English.
+        latest += (
+            f"\n(Most likely meaning: {meaning} - answer that. If it does not fit their "
+            "words, go by their words. Reply in the language they wrote in.)"
+        )
+    sections.append(latest)
 
     # Roman Urdu is detected per message, not per organization: the same shop
     # gets English and Roman Urdu customers within the same hour.
@@ -932,6 +942,7 @@ async def generate_reply(
     known_quantities: Iterable[Any] = (),
     photos_attached: bool | None = None,
     photos_available: bool | None = None,
+    meaning: str | None = None,
 ) -> GenerationResult:
     """Build the prompt, try Groq, fall back to Gemini, and time both attempts.
 
@@ -941,7 +952,8 @@ async def generate_reply(
     are what lets a reply show a total without the guard refusing it.
     """
     prompt = build_prompt(
-        organization, contact, history, latest_message, knowledge, memory_block, policy_block
+        organization, contact, history, latest_message, knowledge, memory_block, policy_block,
+        meaning=meaning,
     )
     if not handoff_allowed:
         prompt = prompt.replace(

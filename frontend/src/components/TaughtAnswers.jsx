@@ -44,10 +44,10 @@ export default function TaughtAnswers() {
         <div className="min-w-0 flex-1">
           <h4 className="text-xs font-semibold text-ink">Answers from your team</h4>
           <p className="mt-0.5 text-2xs leading-relaxed text-dim">
-            When the agent can't answer something, the question comes here. Reply to the customer
-            from the dashboard and your reply appears beside it. Press <b>Teach</b> and the agent
-            answers it itself next time. It never learns from its own replies, and nothing is used
-            until you teach it.
+            Optional. The agent works from your documents on its own. This is only for things your
+            documents don't say: questions it couldn't answer come here, with your team's reply
+            beside them. Press <b>Teach</b> if you want it to answer that itself next time.
+            Nothing here is used until you do.
           </p>
         </div>
       </header>

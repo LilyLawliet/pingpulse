@@ -84,9 +84,7 @@ async def handle(db, organization, contact, question: str, asked: str) -> str:
             if reachable
             else "Your documents don't answer this. They were given your contact details, "
             "not told the team would reply - no alert email or device was set up then."
-        )
-        + "\n\nNext time: once you've answered, your agent can learn that answer - "
-        "you'll find it waiting in Setup \u2192 Learning to approve.",
+        ),
         contact_id=getattr(contact, "id", None),
     )
     if reachable:

@@ -146,7 +146,12 @@ Return exactly these keys:
                   ("put me with team", "insaan se baat karao", "can i talk 2 sm1 real"),
                   else false. Booking a demo or a call is NOT this.
   "next_action": one of ["answer_question","show_products","handle_objection",
-                         "qualify","confirm_order","book_call","greet"]
+                         "qualify","confirm_order","book_call","greet"],
+  "meaning": their latest message as one clear, complete question or sentence in
+             English - typos and shorthand fixed, any language translated, and words
+             like "it", "that one" or "the 2nd" replaced with what they refer to in the
+             conversation ("hw mch yrly 4 it" after the Growth plan was discussed ->
+             "How much is the Growth plan per year?"). Add nothing they did not say.
 }}
 
 Rules:
@@ -293,8 +298,16 @@ def heuristic_analysis(message: str, current_stage: str = "NEW") -> dict[str, An
         # BOOK_CALL_MARKERS catches outright ("talk to sales").
         "wants_meeting": intent == "book_call" or _contains(text, MEETING_MARKERS),
         "next_action": action,
+        "meaning": None,
         "source": "heuristic",
     }
+
+
+def _meaning(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split())[:300]
+    return text if len(text) >= 3 and text.lower() not in ("null", "none", "n/a") else None
 
 
 def _coerce(raw: dict[str, Any], message: str, current_stage: str) -> dict[str, Any]:
@@ -368,6 +381,9 @@ def _coerce(raw: dict[str, Any], message: str, current_stage: str) -> dict[str, 
         ),
         "next_action": next_action,
         "wants_person": raw.get("wants_person") is True,
+        # A reading used to search the business's documents and to help the
+        # reply make sense of a garbled message. Never quoted, never a fact.
+        "meaning": _meaning(raw.get("meaning")),
         "source": "llm",
     }
 

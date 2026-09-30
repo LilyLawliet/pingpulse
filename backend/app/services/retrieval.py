@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import KnowledgeDocument
 from app.schemas_tenancy import RetrievedChunk
+from app.services import study
 from app.services.embeddings import cosine_similarity, embed
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,11 @@ async def search(
         vector = cosine_similarity(query_vector, document.embedding)
         # Cosine runs -1..1; clamp so a negative cannot cancel a keyword hit.
         vector = max(0.0, vector)
-        keyword = keyword_score(query, f"{document.title}\n{document.content}")
+        # How customers ask for it counts as much as its own words: "yrly
+        # price" shares nothing with "billed at ten months".
+        keyword = keyword_score(
+            query, study.searchable(document.title, document.content, study.asked_as(document))
+        )
         combined = VECTOR_WEIGHT * vector + KEYWORD_WEIGHT * keyword
         if combined >= min_score:
             scored.append(
@@ -110,6 +115,33 @@ async def search(
 
     scored.sort(key=lambda chunk: chunk.score, reverse=True)
     return scored[:limit]
+
+
+async def search_readings(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    queries: list[str],
+    limit: int = 4,
+    min_score: float = 0.05,
+    doc_type: str | None = None,
+) -> list[RetrievedChunk]:
+    """Best chunks for any of several readings of one message.
+
+    The customer's own words and the analyzer's plain reading of them are
+    searched separately rather than glued together: "hw mch yrly" beside "What
+    is the yearly price?" halves the keyword score of both.
+    """
+    best: dict = {}
+    seen: set[str] = set()
+    for query in queries:
+        key = " ".join((query or "").lower().split())
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        for chunk in await search(db, organization_id, query, limit, min_score, doc_type):
+            if chunk.id not in best or chunk.score > best[chunk.id].score:
+                best[chunk.id] = chunk
+    return sorted(best.values(), key=lambda chunk: chunk.score, reverse=True)[:limit]
 
 
 def as_prompt_block(chunks: list[RetrievedChunk]) -> str:
@@ -128,9 +160,14 @@ async def index_document(
     title: str,
     content: str,
     source: str | None = None,
+    asked_as: list[str] | None = None,
 ) -> KnowledgeDocument:
-    """Embed and store one document against an organization."""
-    vector, model = await embed(f"{title}\n{content}")
+    """Embed and store one document against an organization.
+
+    `asked_as` is how customers would ask for this passage (see `study`); it
+    is searched along with the passage and never shown as its content.
+    """
+    vector, model = await embed(study.searchable(title, content, asked_as or []))
     document = KnowledgeDocument(
         organization_id=organization_id,
         title=title,
@@ -138,6 +175,7 @@ async def index_document(
         source=source,
         embedding=vector,
         embedding_model=model,
+        attributes={"asked_as": list(asked_as)} if asked_as else {},
     )
     db.add(document)
     await db.flush()
