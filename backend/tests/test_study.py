@@ -21,6 +21,22 @@ ANNUAL = "Annual plans are billed at ten months, so two months are free."
 DELIVERY = "Hardware ships in 3 to 5 working days to Karachi and 1 to 2 to Lahore."
 
 
+@pytest.fixture(autouse=True)
+def no_live_embeddings(monkeypatch):
+    """Retrieval judged on words alone, not on whoever has API keys today.
+
+    These tests are about what studying a passage adds to the search. With an
+    embedding provider configured - as a working .env has - every search also
+    made a live call to Gemini, and "yrly price??" already matched the annual
+    billing passage at 0.67 on meaning alone. The test then failed on the very
+    machine the software runs on, and passed only where no key was set.
+    """
+    async def flat(*args, **kwargs):
+        return [], "none"
+
+    monkeypatch.setattr("app.services.retrieval.embed", flat)
+
+
 @pytest.fixture
 def studies(monkeypatch):
     """The model's study of a document, as it would come back."""
