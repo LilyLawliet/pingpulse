@@ -1,11 +1,11 @@
 {
-  "version": "1.10.0",
-  "notes": "The agent studies every document you upload, writing down how real customers would ask for each part - shorthand, typos, Roman Urdu - so a garbled question still finds the right answer, while only your document's own words ever reach a reply. It also learns from answers your team has already given, once you press Teach.",
-  "pub_date": "2026-09-30T00:55:18+00:00",
+  "version": "1.10.1",
+  "notes": "Connecting WhatsApp works again, the agent knows your opening hours, and Setup stops ticking a step you have not done.",
+  "pub_date": "2026-09-30T22:26:21+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjVuSFNIdThuN1hkVzVPdlFMNEQ4ZHBXcmh0UkM2WDFmUzRQdThLUnBjV2E3ZW5IWEhDRWhSaEl3VTFlZE9JYnlzRzlRNzdrMlZuaU5SWHBjLzNuUVFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzI5NzE3CWZpbGU6UGluZ1B1bHNlXzEuMTAuMF94NjQtc2V0dXAuZXhlCmVLQkVsdHEvakYrTmxDeGpUUENmVUNqdXZ0ODlCRnhodHJHcU8vWFJQV3VqdW5zWVlpT2RKR0d1ZUZJamhSeUhIMXU1UlRwbTNEQnRuMGM2MjdSUEN3PT0K",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.10.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjB4TnFzWFdCTWhkSk9TeEcxaEtDYmQ2cWtvVWpYNlM5SDhTVmxNN1lkU1k3bzZ1QWd6b3pzbnJPRXp4WThDajNzeW9oVEdDRk9kZVlMWktydGlUZ2dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwODA3MTgwCWZpbGU6UGluZ1B1bHNlXzEuMTAuMV94NjQtc2V0dXAuZXhlCnpkaWhuRFBINWhvZHJ2VGNSWmtlVHBVUnFRWUgzaDRBRmVYV1F0ZWcralR0Q2pwMUVWQVNlYk9DMC9DY0wzL0RjOEQvcEdYaVp4cVd4eGsxcUNlcUNBPT0K",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.10.1_x64-setup.exe"
     }
   }
 }

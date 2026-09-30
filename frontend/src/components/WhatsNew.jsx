@@ -12,6 +12,39 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.10.1',
+    date: '1 October 2026',
+    items: [
+      {
+        title: 'Connecting WhatsApp works again',
+        body:
+          'The code on screen expired without ever linking, and pressing “Try '
+          + 'again” put the same error straight back up. A pairing nobody finished '
+          + 'was being kept and retried forever in the background, so WhatsApp turned '
+          + 'down the next person who tried. Abandoned attempts are now dropped, “Try '
+          + 'again” really does start over, and a code that is scanned is given the '
+          + 'moment it needs to finish linking.',
+      },
+      {
+        title: 'It knows your opening hours',
+        body:
+          '“What time do you open?” was answered with the hours being '
+          + 'unavailable — by shops whose hours were set and on screen. Every day is '
+          + 'now given to the agent by name, Sundays and closed days included, so it '
+          + 'answers with yours and never invents others. Hours read from your own '
+          + 'document count too, quoted as the document has them, while booking still '
+          + 'waits until you save them.',
+      },
+      {
+        title: 'Setup stops ticking a step you have not done',
+        body:
+          '“Prices and knowledge” ticked itself for a business that had written a '
+          + 'description and uploaded nothing — the one owner the step exists to '
+          + 'catch. It now waits for a real document.',
+      },
+    ],
+  },
+  {
     version: '1.10.0',
     date: '30 September 2026',
     items: [
