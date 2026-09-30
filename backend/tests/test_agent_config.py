@@ -111,6 +111,42 @@ def test_being_closed_is_stated_without_refusing_to_answer():
     assert "Answer the question anyway" in block
 
 
+def test_the_hours_themselves_reach_the_agent():
+    """The block used to carry only "CLOSED", never the days and times, so
+    "what are your timings?" was answered with "not available" by a shop
+    whose hours were set."""
+    config = {
+        "business_hours": {
+            "monday": {"open": "09:00", "close": "17:00"},
+            "saturday": {"open": "10:00", "close": "14:30"},
+        }
+    }
+    block = agent_config.as_prompt_block(_Org(config, "Asia/Karachi"))
+
+    assert "Monday 9:00 am to 5:00 pm" in block
+    assert "Saturday 10:00 am to 2:30 pm" in block
+    # A day not listed is said to be closed rather than left for a guess.
+    assert "Sunday closed" in block
+    assert "Asia/Karachi" in block
+    assert "Never say the hours are unavailable" in block
+
+
+def test_hours_read_from_a_document_are_repeated_before_they_are_confirmed():
+    config = {
+        agent_config.PROPOSED_KEY: {
+            "fields": {"business_hours": {"friday": {"open": "11:00", "close": "19:00"}}}
+        }
+    }
+    block = agent_config.as_prompt_block(_Org(config))
+
+    assert "Friday 11:00 am to 7:00 pm" in block
+    assert "document" in block
+
+
+def test_hours_with_nothing_usable_add_no_hours_line():
+    assert agent_config.hours_sentence({"monday": {"open": "late", "close": ""}}) == ""
+
+
 # ---------------------------------------------------------------- escalation
 def test_a_complaint_is_handed_to_a_person():
     assert agent_config.needs_escalation("I want a refund, this is unacceptable")

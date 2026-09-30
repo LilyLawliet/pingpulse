@@ -321,7 +321,9 @@ export default function KnowledgeSettings({ onChanged }) {
         </ul>
       )}
 
-      <CatalogueReview refreshKey={readAt} onChanged={() => onChanged?.({ knowledge: true })} />
+      {/* Re-read rather than ticked: confirming a reading says nothing about
+          whether a document is still there to quote from. */}
+      <CatalogueReview refreshKey={readAt} onChanged={() => onChanged?.()} />
 
       {sources.length === 0 && (
         <p className="text-2xs text-faint">

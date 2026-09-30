@@ -227,6 +227,40 @@ def is_open(organization, at: datetime | None = None) -> bool | None:
     return opens <= current <= closes
 
 
+def _say_clock(value) -> str | None:
+    parsed = _parse_time(value)
+    if parsed is None:
+        return None
+    return parsed.strftime("%I:%M %p").lstrip("0").lower()
+
+
+def hours_sentence(hours) -> str:
+    """Opening hours as one line a customer could be read, or "" for none.
+
+    Every day is named, closed ones included, so "are you open Sunday?" has
+    an answer in the prompt rather than a gap the model fills.
+    """
+    if not isinstance(hours, dict) or not hours:
+        return ""
+    parts: list[str] = []
+    any_open = False
+    for day in DAYS:
+        today = hours.get(day)
+        opens = _say_clock(today.get("open")) if isinstance(today, dict) else None
+        closes = _say_clock(today.get("close")) if isinstance(today, dict) else None
+        if opens and closes:
+            any_open = True
+            parts.append(f"{day.title()} {opens} to {closes}")
+        else:
+            parts.append(f"{day.title()} closed")
+    return "; ".join(parts) if any_open else ""
+
+
+def zone_label(organization) -> str:
+    zone = (getattr(organization, "timezone", None) or "").strip()
+    return f"local time, {zone}" if zone and zone.upper() != "UTC" else "local time"
+
+
 def needs_escalation(text: str, organization=None) -> str | None:
     """The phrase that means this conversation should reach a person, if any.
 
@@ -287,6 +321,32 @@ def as_prompt_block(organization, at: datetime | None = None) -> str:
     languages = [str(s).strip() for s in (config.get("languages") or []) if str(s).strip()]
     if languages:
         lines.append("Languages this business answers in: " + ", ".join(languages[:8]))
+
+    # The hours themselves. This block only ever said "CLOSED" at the moment
+    # the shop was shut; the days and times were never in the prompt at all.
+    # So "what are your timings?" reached a model that had not been told, and
+    # under the rule against inventing things it answered that the hours were
+    # not available - for a shop whose hours were set and on screen.
+    hours = config.get("business_hours") or {}
+    stated = hours_sentence(hours)
+    if stated:
+        lines.append(f"Opening hours ({zone_label(organization)}): {stated}")
+        lines.append(
+            "When asked about hours or timings, give exactly these. Never say the "
+            "hours are unavailable or unknown, and never state other hours."
+        )
+    else:
+        # Read from the shop's own document and not yet confirmed in Hours and
+        # booking. Booking stays off until a person saves them, but they are
+        # still what the business itself wrote, so the agent may repeat them.
+        pending = ((config.get(PROPOSED_KEY) or {}).get("fields") or {}).get("business_hours")
+        stated = hours_sentence(pending or {})
+        if stated:
+            lines.append(f"Opening hours, as the business's own document states them: {stated}")
+            lines.append(
+                "When asked about hours or timings, give exactly these. Never say the "
+                "hours are unavailable or unknown, and never state other hours."
+            )
 
     open_now = is_open(organization, at)
     if open_now is False:

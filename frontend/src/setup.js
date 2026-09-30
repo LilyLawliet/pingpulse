@@ -165,7 +165,12 @@ const RECOMMENDED_KEYS = ['alerts', 'hours', 'calendar']
  * Because it is the server's answer, removing the last document unticks the
  * step by itself.
  */
-const QUOTABLE = new Set(['ready', 'described'])
+//
+// `described` is absent too. It means a long description and no document at
+// all, and the step is "a price list, catalogue or document": it ticked for a
+// business that had uploaded nothing, which is exactly the owner the step is
+// there to stop.
+const QUOTABLE = new Set(['ready'])
 
 // What the server writes into "How it should sell" for a business that never
 // wrote its own. It is not an answer.

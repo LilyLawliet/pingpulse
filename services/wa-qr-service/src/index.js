@@ -19,7 +19,7 @@
  * official API access is in place rather than a permanent transport.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
 
@@ -133,6 +133,30 @@ const gaveUp = new Set()
 
 /** Live sessions, keyed by channel id. */
 const sessions = new Map()
+/**
+ * Starts in flight, keyed by channel id.
+ *
+ * startSession awaits the keys and the version before it records the socket,
+ * so two callers in that gap - "Show QR" and a retry timer, say - each built
+ * a connection. Two connections presenting the same fresh keys is exactly
+ * what WhatsApp answers with a 408, and the one nobody tracked went on
+ * spending codes in the background.
+ */
+const starting = new Map()
+/**
+ * Which pairing run a session is on. Bumped by POST /pair and /logout, and
+ * read by every retry timer before it fires: a retry scheduled by a run that
+ * somebody has since replaced must not start a connection beside the new one.
+ */
+const generation = new Map()
+
+function retryLater(sessionId, wait) {
+  const run = generation.get(sessionId) || 0
+  setTimeout(() => {
+    if ((generation.get(sessionId) || 0) !== run) return
+    startSession(sessionId).catch(() => {})
+  }, wait)
+}
 /**
  * Which sessions have an open connection right now.
  *
@@ -291,6 +315,9 @@ function forget(sessionId) {
   qrCycles.delete(sessionId)
   restarts.delete(sessionId)
   latest.delete(sessionId)
+  // Conversations synced by a phone that is no longer linked belong to
+  // nobody here any more.
+  history.delete(sessionId)
 }
 
 /** Whether keys from a real scan are on disk for this session. */
@@ -310,7 +337,15 @@ function scannedBefore(sessionId) {
  * Called both when a client asks to pair and on boot for every session already
  * on disk, which is what makes a restart invisible to a paired client.
  */
-async function startSession(sessionId) {
+function startSession(sessionId) {
+  if (sessions.has(sessionId)) return Promise.resolve(sessions.get(sessionId))
+  if (starting.has(sessionId)) return starting.get(sessionId)
+  const pending = openSession(sessionId).finally(() => starting.delete(sessionId))
+  starting.set(sessionId, pending)
+  return pending
+}
+
+async function openSession(sessionId) {
   if (sessions.has(sessionId)) return sessions.get(sessionId)
 
   // A pairing that has given up does not restart itself. Everything that
@@ -453,7 +488,7 @@ async function startSession(sessionId) {
           // resumes it instead of asking for another code.
           Promise.resolve(saveCreds())
             .catch(() => {})
-            .finally(() => setTimeout(() => startSession(sessionId).catch(() => {}), 300))
+            .finally(() => retryLater(sessionId, 300))
           return
         }
         // Asked to come straight back four times over. Whatever is wrong is
@@ -526,7 +561,7 @@ async function startSession(sessionId) {
         const wait = Math.min(3000 * 2 ** (tries - 1), RECONNECT_MAX_WAIT_MS)
         log.info({ sessionId, status, tries, wait }, 'connection dropped, reconnecting')
         reportStatus(sessionId, 'DISCONNECTED', { reason: 'reconnecting' })
-        setTimeout(() => startSession(sessionId).catch(() => {}), wait)
+        retryLater(sessionId, wait)
         return
       }
 
@@ -550,7 +585,7 @@ async function startSession(sessionId) {
         const last = latest.get(sessionId)
         log.info({ sessionId, cycles, status }, 'code expired unscanned; offering another round')
         notifyWatchers(sessionId, { type: 'status', status: 'QR_REFRESHING', qr: last?.qr || null })
-        setTimeout(() => startSession(sessionId).catch(() => {}), 1000)
+        retryLater(sessionId, 1000)
         return
       }
 
@@ -578,6 +613,10 @@ async function startSession(sessionId) {
         // Deliberately not cleared here. Resetting the count on the way out
         // is what let the next caller start the whole doomed cycle again.
         gaveUp.add(sessionId)
+        // Nothing from the failed run is kept: no keys (removed above), no
+        // stale code, no synced history. "Try again" then starts from zero.
+        latest.delete(sessionId)
+        history.delete(sessionId)
         log.error(
           { sessionId, status, tries },
           'giving up on this pairing — WhatsApp closed every attempt before offering a code',
@@ -586,9 +625,13 @@ async function startSession(sessionId) {
         return
       }
 
-      log.info({ sessionId, status, tries }, 'pairing attempt failed, trying again')
+      // Backed off, not every three seconds. A 408 before any code is WhatsApp
+      // declining to talk to this host for now, and five connections in
+      // fifteen seconds is how a short refusal turns into a long one.
+      const wait = Math.min(3000 * 2 ** (tries - 1), 30000)
+      log.info({ sessionId, status, tries, wait }, 'pairing attempt failed, trying again')
       reportStatus(sessionId, 'DISCONNECTED', { reason: 'reconnecting', code: status || null })
-      setTimeout(() => startSession(sessionId).catch(() => {}), 3000)
+      retryLater(sessionId, wait)
     }
   })
 
@@ -702,9 +745,14 @@ app.post('/pair', async (request, response) => {
     // attempt of every later try, and clicking again would do nothing.
     attempts.delete(sessionId)
     qrCycles.delete(sessionId)
+    restarts.delete(sessionId)
     // A person is at the screen asking, which is the only thing that earns a
     // dead pairing another go.
     gaveUp.delete(sessionId)
+    // Any retry the last run still had scheduled belongs to that run.
+    generation.set(sessionId, (generation.get(sessionId) || 0) + 1)
+    // A start still in flight from before is let finish, then replaced below.
+    await starting.get(sessionId)?.catch(() => {})
     // A pairing that is running but has not connected is replaced, not
     // reused: reusing it is how "Show QR" could return the same stuck
     // connection that never offered a code, forever.
@@ -712,6 +760,7 @@ app.post('/pair', async (request, response) => {
     if (existing && !ready.has(sessionId)) {
       sessions.delete(sessionId)
       latest.delete(sessionId)
+      // Removed from the map first, so its close is not read as this run's.
       try {
         existing.end(new Error('replaced by a new pairing'))
       } catch {
@@ -986,6 +1035,7 @@ app.post('/logout', async (request, response) => {
   // Whether or not a connection was running. Logging out only worked on a
   // live one, so a disconnect made while the session was down left its keys
   // on disk, and the next pairing loaded them and was refused.
+  generation.set(sessionId, (generation.get(sessionId) || 0) + 1)
   forget(sessionId)
   gaveUp.delete(sessionId)
   reportStatus(sessionId, 'DISCONNECTED', { reason: 'logged_out' })
@@ -1014,7 +1064,9 @@ wss.on('connection', (socket, request) => {
   socket.send(
     JSON.stringify({
       type: 'status',
-      status: sessions.has(sessionId) ? 'AUTHENTICATED' : 'GENERATING_QR',
+      // Open, not merely started: a pairing still waiting for its scan has a
+      // socket too, and was announced to the watcher as already linked.
+      status: ready.has(sessionId) ? 'AUTHENTICATED' : latest.get(sessionId)?.status || 'GENERATING_QR',
     }),
   )
 
@@ -1052,11 +1104,28 @@ async function restoreSessions() {
     return
   }
 
-  // A folder without creds.json was started but never scanned; reconnecting it
-  // would only produce a QR nobody is watching.
-  const paired = folders.filter((name) =>
-    existsSync(path.join(SESSIONS_DIR, name, 'creds.json')),
-  )
+  // Only a folder holding a real scan is a paired phone. creds.json alone is
+  // not one: Baileys writes it the moment a pairing starts, before any code,
+  // so every pairing ever abandoned on this host had one - and each boot
+  // brought all of them back, asking WhatsApp for codes nobody was there to
+  // scan. That is the traffic WhatsApp answers with a 408 for every session
+  // on the host, including the one somebody is actually trying to link.
+  //
+  // Those folders are nothing but leftovers, so they are removed rather than
+  // skipped: they held keys from a handshake that never finished.
+  const paired = []
+  for (const name of folders) {
+    if (scannedBefore(name)) {
+      paired.push(name)
+      continue
+    }
+    try {
+      rmSync(path.join(SESSIONS_DIR, name), { recursive: true, force: true })
+      log.info({ sessionId: name }, 'removed a pairing that was never scanned')
+    } catch (error) {
+      log.warn({ sessionId: name, err: error?.message }, 'could not remove an unscanned pairing')
+    }
+  }
 
   log.info({ found: folders.length, paired: paired.length }, 'restoring sessions')
   for (const sessionId of paired) {

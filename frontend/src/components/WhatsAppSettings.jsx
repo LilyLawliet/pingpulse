@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Check,
   Cloud,
@@ -31,6 +31,11 @@ export default function WhatsAppSettings({ onChanged }) {
   const [error, setError] = useState(null)
   const [copied, setCopied] = useState(false)
   const [pairing, setPairing] = useState(null) // { channelId, status, qr }
+  // Which request for a pairing is current. A poll that left before the
+  // latest "Try again" reached the bridge carries the run it replaced - "gave
+  // up", the old code - and landing it put the same error straight back on
+  // screen, so trying again looked like it did nothing.
+  const pairSeq = useRef(0)
   // Whether the other way of connecting is on screen.
   //
   // Somebody scanning a QR is doing one thing, and the Twilio chooser, the
@@ -120,9 +125,10 @@ export default function WhatsAppSettings({ onChanged }) {
 
     let cancelled = false
     const tick = async () => {
+      const seq = pairSeq.current
       try {
         const state = await api.pairingState(pairing.channelId)
-        if (cancelled) return
+        if (cancelled || seq !== pairSeq.current) return
         setPairing((current) =>
           current && current.channelId === pairing.channelId
             ? {
@@ -154,7 +160,7 @@ export default function WhatsAppSettings({ onChanged }) {
       } catch {
         // The bridge may still be starting, so one miss is not news - but
         // three in a row are said on screen rather than spun through.
-        if (!cancelled) {
+        if (!cancelled && seq === pairSeq.current) {
           setPairing((current) =>
             current && current.channelId === pairing.channelId
               ? { ...current, unreachable: (current.unreachable || 0) + 1 }
@@ -174,9 +180,12 @@ export default function WhatsAppSettings({ onChanged }) {
 
   const beginPairing = async (channelId, fresh = false) => {
     setError(null)
+    pairSeq.current += 1
     setPairing({ channelId, status: 'GENERATING_QR', qr: null, startedAt: Date.now() })
     try {
       await api.startPairing(channelId, fresh)
+      // Polls sent while the bridge was still resetting answered for the old run.
+      pairSeq.current += 1
     } catch (err) {
       setError(err.message || 'Could not start pairing.')
       setPairing(null)
