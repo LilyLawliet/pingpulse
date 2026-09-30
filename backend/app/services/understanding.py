@@ -41,59 +41,133 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:ge
 
 
 # ------------------------------------------------------------------ the call
-async def _groq_json(prompt: str, timeout: float) -> dict | None:
-    keys = settings.groq_api_keys
-    model = settings.understanding_model or settings.groq_model
+# How long a refusal for being too busy (429/503) may be waited out before the
+# same key is asked again, and how many times.
+#
+# Each key used to get exactly one try. A document upload sends its reading and
+# its study at once, several requests in the same second, and a free Groq key
+# answers a burst like that with 429 - so the first refusal ended the call, the
+# page said "the AI was not available", and the file was read by the pattern
+# reader alone. The limit resets within seconds; waiting for it is the fix.
+BUSY_RETRIES = 2
+BUSY_WAIT_CAP_SECONDS = 20.0
+
+
+def _busy_wait(response: httpx.Response, attempt: int) -> float:
+    """Seconds to wait before asking again: the server's own figure if given."""
+    header = response.headers.get("retry-after") or ""
+    try:
+        wait = float(header)
+    except ValueError:
+        wait = 2.0 * 2**attempt
+    return max(0.5, min(wait, BUSY_WAIT_CAP_SECONDS))
+
+
+async def _post_json(
+    provider: str,
+    keys: list[str],
+    send,
+    read,
+    timeout: float,
+) -> dict | None:
+    """Ask each key in turn, waiting out "too busy", until one gives an object.
+
+    A failure with one key - busy, refused, timed out, garbled - moves on to
+    the next rather than ending the call: one key over its limit is not the
+    AI being unavailable. Returns None only when every key has failed.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
     for index, key in enumerate(keys, start=1):
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    GROQ_URL,
-                    headers={"Authorization": f"Bearer {key}"},
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0,
-                        "response_format": {"type": "json_object"},
-                        "max_tokens": 4096,
-                    },
+        for attempt in range(BUSY_RETRIES + 1):
+            left = deadline - loop.time()
+            if left <= 0:
+                logger.warning("structured %s call ran out of time", provider)
+                return None
+            try:
+                async with httpx.AsyncClient(timeout=left) as client:
+                    response = await send(client, key)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("structured %s call failed (key %d): %s", provider, index, exc)
+                break
+            if response.status_code in (429, 503):
+                wait = _busy_wait(response, attempt)
+                if attempt < BUSY_RETRIES and wait < deadline - loop.time():
+                    logger.info(
+                        "structured %s call busy (key %d, %s); asking again in %.1fs",
+                        provider, index, response.status_code, wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.warning("structured %s call still busy (key %d)", provider, index)
+                break
+            if response.status_code >= 400:
+                # Worth reading in the log: a wrong model name or a dead key
+                # looks exactly like "not available" on the page.
+                logger.warning(
+                    "structured %s call refused (key %d): %s %s",
+                    provider, index, response.status_code, response.text[:300],
                 )
-            if response.status_code in (429, 503) and index < len(keys):
-                continue
-            response.raise_for_status()
-            return _as_object(response.json()["choices"][0]["message"]["content"])
-        except Exception as exc:  # noqa: BLE001
-            logger.info("structured Groq call failed: %s", exc)
-            return None
+                break
+            try:
+                found = _as_object(read(response.json()))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("structured %s answer unreadable (key %d): %s", provider, index, exc)
+                break
+            if found is not None:
+                return found
+            logger.warning("structured %s answer was not a JSON object (key %d)", provider, index)
+            break
     return None
+
+
+async def _groq_json(prompt: str, timeout: float) -> dict | None:
+    model = settings.understanding_model or settings.groq_model
+
+    def send(client, key):
+        return client.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {key}"},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+                "max_tokens": 4096,
+            },
+        )
+
+    return await _post_json(
+        "Groq",
+        settings.groq_api_keys,
+        send,
+        lambda body: body["choices"][0]["message"]["content"],
+        timeout,
+    )
 
 
 async def _gemini_json(prompt: str, timeout: float) -> dict | None:
-    keys = settings.gemini_api_keys
-    for index, key in enumerate(keys, start=1):
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(
-                    GEMINI_URL.format(model=settings.gemini_model),
-                    params={"key": key},
-                    json={
-                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                        "generationConfig": {
-                            "temperature": 0,
-                            "responseMimeType": "application/json",
-                            "maxOutputTokens": 8192,
-                        },
-                    },
-                )
-            if response.status_code in (429, 503) and index < len(keys):
-                continue
-            response.raise_for_status()
-            parts = response.json()["candidates"][0]["content"]["parts"]
-            return _as_object("".join(p.get("text", "") for p in parts))
-        except Exception as exc:  # noqa: BLE001
-            logger.info("structured Gemini call failed: %s", exc)
-            return None
-    return None
+    def send(client, key):
+        return client.post(
+            GEMINI_URL.format(model=settings.gemini_model),
+            params={"key": key},
+            json={
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0,
+                    "responseMimeType": "application/json",
+                    "maxOutputTokens": 8192,
+                },
+            },
+        )
+
+    return await _post_json(
+        "Gemini",
+        settings.gemini_api_keys,
+        send,
+        lambda body: "".join(p.get("text", "") for p in body["candidates"][0]["content"]["parts"]),
+        timeout,
+    )
 
 
 def _as_object(text: str) -> dict | None:
@@ -118,12 +192,17 @@ async def structured(prompt: str, timeout: float) -> dict | None:
 
 
 async def _structured(prompt: str, timeout: float) -> dict | None:
+    # With Gemini behind it, Groq waiting out its limit must leave Gemini time
+    # to answer: both share the one timeout the caller gave.
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
     if settings.groq_api_keys:
-        found = await _groq_json(prompt, timeout)
+        share = timeout * 0.75 if settings.gemini_api_keys else timeout
+        found = await _groq_json(prompt, share)
         if found is not None:
             return found
     if settings.gemini_api_keys:
-        return await _gemini_json(prompt, timeout)
+        return await _gemini_json(prompt, max(0.5, deadline - loop.time()))
     return None
 
 
