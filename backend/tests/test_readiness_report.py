@@ -470,3 +470,21 @@ async def test_readers_run_at_zero_and_replies_do_not(monkeypatch):
     assert seen == [0.0, 0.0, 0.0, 0.0], seen
 
     assert llm_service._temperature.get() == llm_service.REPLY_TEMPERATURE == 0.7
+
+
+# --------------------------------------------------------------- found on replay
+def test_a_number_in_an_address_does_not_pick_a_time():
+    """ "Unit 4" booked the fourth time offered."""
+    offered = [datetime(2026, 10, 1, 13 + i, tzinfo=timezone.utc) for i in range(6)]
+    assert booking.chosen_slot("The condo is 1200 Brickell Ave, Unit 4, Miami", offered, MIAMI) is None
+    assert booking.chosen_slot("I have 2 bathrooms to redo", offered, MIAMI) is None
+    assert booking.chosen_slot("2", offered, MIAMI) == offered[1]
+    assert booking.chosen_slot("option 3 please", offered, MIAMI) == offered[2]
+    assert booking.chosen_slot("#4", offered, MIAMI) == offered[3]
+
+
+def test_where_they_are_and_where_the_job_is(beluga):
+    organization, _ = beluga
+    place = booking.place_in("I am in California but the property is in Miami.")
+    assert booking.in_area(organization, place) is True
+    assert booking.in_area(organization, booking.place_in("my house in Seattle, Washington.")) is False

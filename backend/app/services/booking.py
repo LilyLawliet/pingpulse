@@ -792,6 +792,14 @@ _BOOKING_CLAIMS = re.compile(
     r"|see you (on|at|then)"
     r"|we('ll| will) see you"
     r"|your (visit|estimate|consultation|appointment) (is|on) "
+    # "Your 9:00 AM on October 1 consultation for the Brickell remodel is
+    # confirmed" and "we have a bathroom estimate scheduled for Thursday"
+    # both reached the tester about visits nothing had booked: the thing and
+    # the verb, with the details in between.
+    r"|(consultation|estimate|visit|appointment|booking|meeting|inspection)\b[^.!?]{0,80}?\b"
+    r"(is|are|has been|have been) (now )?(confirmed|booked|scheduled|reserved|set for)\b"
+    r"|(we|i)('ve| have| has)? (got |now )?(a|an|the|your)\b[^.!?]{0,50}?\b"
+    r"(scheduled|booked|confirmed|reserved) (for|on)\b"
     r")",
     re.IGNORECASE,
 )
@@ -1065,7 +1073,20 @@ def chosen_slot(text: str, offered: list[datetime], zone: ZoneInfo) -> datetime 
 
     # "the first one", "number 2", "the last one".
     for word, index in _ORDINALS:
-        if re.search(rf"\b{re.escape(word)}\b", lowered):
+        if word.isdigit():
+            # A bare digit picks a slot only when it is the whole answer or
+            # is said as one: "2", "option 2", "number 2", "#2". Anywhere
+            # else it counts something - "Unit 4" in an address booked the
+            # fourth time offered, and "2 bathrooms" would have booked the
+            # second.
+            found = re.search(
+                rf"^\W*(?:(?:option|number|no\.?|slot|choice)\s*|#\s*)?{word}\W*(?:please|pls|plz|thanks|thank you)?\W*$"
+                rf"|\b(?:option|number|slot|choice)\s*{word}\b|#\s*{word}\b",
+                lowered,
+            )
+        else:
+            found = re.search(rf"\b{re.escape(word)}\b", lowered)
+        if found:
             try:
                 return offered[index]
             except IndexError:
@@ -1856,18 +1877,26 @@ _CITY_STATE = re.compile(r"\b([A-Z][\w'.-]+(?:\s+[A-Z][\w'.-]+){0,2}),\s*([A-Z]{
 
 
 def place_in(text: str) -> str | None:
-    """A place named in this message, or None."""
+    """Every place named in this message, joined, or None.
+
+    All of them, not the first: "I am in California but the property is in
+    Miami" names where the customer is and where the job is, and reading
+    only the first refused a Miami job as out of area. The job counts as in
+    the area when any place named is.
+    """
     text = text or ""
-    found = _CITY_STATE.search(text)
-    if found:
-        return found.group(0)
+    places: list[str] = []
+    for found in _CITY_STATE.finditer(text):
+        places.append(found.group(0))
     for match in _PLACE_AFTER.finditer(text):
         words = match.group(1).split()
         while words and words[-1].lower().strip(".") in _NOT_PLACES:
             words.pop()
         if words and words[0].lower() not in _NOT_PLACES:
-            return " ".join(words).strip(".,")
-    return None
+            place = " ".join(words).strip(".,")
+            if not any(place in seen for seen in places):
+                places.append(place)
+    return "; ".join(places) or None
 
 
 def note_where(contact, text: str) -> None:
