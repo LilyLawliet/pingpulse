@@ -426,14 +426,15 @@ async def derive_voice(material: Material) -> dict | None:
     if len(material.replies) < MIN_REPLIES_FOR_VOICE:
         return None
 
-    from app.services.llm_service import _call_groq
+    from app.services.llm_service import _call_groq, exact
 
     sample = spread(material.replies, MAX_REPLIES_SAMPLED)
     prompt = VOICE_PROMPT.format(
         messages="\n".join(f"- {reply.text}" for reply in sample)
     )
     try:
-        parsed = _parse_json(await _call_groq(prompt))
+        with exact():
+            parsed = _parse_json(await _call_groq(prompt))
     except Exception as exc:  # noqa: BLE001
         logger.warning("could not derive a voice: %s", exc)
         return None
@@ -458,7 +459,7 @@ async def extract_facts(material: Material) -> list[dict]:
     if not material.exchanges:
         return []
 
-    from app.services.llm_service import _call_groq
+    from app.services.llm_service import _call_groq, exact
 
     sample = spread(material.exchanges, MAX_EXCHANGES_SAMPLED)
     rendered = "\n\n".join(
@@ -466,7 +467,8 @@ async def extract_facts(material: Material) -> list[dict]:
     )
     prompt = FACTS_PROMPT.format(exchanges=rendered, limit=MAX_FACTS)
     try:
-        parsed = _parse_json(await _call_groq(prompt))
+        with exact():
+            parsed = _parse_json(await _call_groq(prompt))
     except Exception as exc:  # noqa: BLE001
         logger.warning("could not extract facts: %s", exc)
         return []

@@ -445,3 +445,28 @@ async def test_the_test_agent_takes_the_same_path(org_a, monkeypatch):
     ).json()
     assert body["booking"]["performed"] is None, body
     assert body["booking"]["note"] is None or "would have" not in body["booking"]["note"]
+
+
+# --------------------------------------------------------------- temperature
+@pytest.mark.asyncio
+async def test_readers_run_at_zero_and_replies_do_not(monkeypatch):
+    """The same message must be read the same way; replies keep their voice."""
+    from app.services import analyzer, summarise
+
+    seen = []
+
+    async def groq(prompt):
+        seen.append(llm_service._temperature.get())
+        return "{}"
+
+    monkeypatch.setattr(llm_service, "_call_groq", groq)
+    monkeypatch.setattr(analyzer, "_call_groq", groq)
+
+    shop = Organization(name="x", agent_config={})
+    await qualification.extract(shop, [], "a bathroom in Miami")
+    await analyzer.analyse([], "can I book Friday?")
+    await summarise.write([], "hello")
+    await llm_service.extract_profile([], "size 42")
+    assert seen == [0.0, 0.0, 0.0, 0.0], seen
+
+    assert llm_service._temperature.get() == llm_service.REPLY_TEMPERATURE == 0.7

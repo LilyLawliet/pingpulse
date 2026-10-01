@@ -150,7 +150,7 @@ async def extract(organization, history, latest_message: str) -> dict:
     any failure returns {} — qualification is an enhancement and must never
     break the reply path.
     """
-    from app.services.llm_service import _call_groq, format_history
+    from app.services.llm_service import _call_groq, exact, format_history
 
     slots = slots_for(organization)
     keys = "{" + ", ".join(f'"{name}": null' for name, _asks in slots) + "}"
@@ -159,7 +159,8 @@ async def extract(organization, history, latest_message: str) -> dict:
     )
 
     try:
-        raw = await _call_groq(prompt)
+        with exact():
+            raw = await _call_groq(prompt)
     except Exception as exc:  # noqa: BLE001
         logger.info("qualification extraction failed: %s", exc)
         return {}

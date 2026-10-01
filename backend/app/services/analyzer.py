@@ -19,6 +19,7 @@ import re
 from typing import Any, Iterable, Sequence
 
 from app.config import settings
+from app.services import llm_service
 from app.services.llm_service import _call_groq, format_history
 
 logger = logging.getLogger(__name__)
@@ -395,7 +396,9 @@ async def analyse(
     prompt = ANALYZER_PROMPT.format(history=format_history(history), message=message)
 
     try:
-        raw_text = await asyncio.wait_for(_call_groq(prompt), settings.analyzer_timeout_seconds)
+        # Read at temperature 0: the same message, the same reading.
+        with llm_service.exact():
+            raw_text = await asyncio.wait_for(_call_groq(prompt), settings.analyzer_timeout_seconds)
     except Exception as exc:  # noqa: BLE001
         logger.warning("analyzer call failed (%s); using the keyword reading", exc)
         return heuristic_analysis(message, current_stage)

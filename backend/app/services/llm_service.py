@@ -6,6 +6,8 @@ Final Prompt = Organization Prompt + Customer Metadata + Chat History + Latest M
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 
 import json
 import re
@@ -776,11 +778,37 @@ def _is_exhausted(error: Exception) -> bool:
     return False
 
 
+# How much the wording may vary. Replies to customers keep some, so they read
+# like a person rather than a form letter. The readers that turn a
+# conversation into fields - intent, qualification answers, profile facts,
+# summaries - get none: the same message must be read the same way every
+# time, and the Test agent showed the same Seattle prompt read two ways.
+REPLY_TEMPERATURE = 0.7
+EXACT_TEMPERATURE = 0.0
+_temperature: contextvars.ContextVar[float] = contextvars.ContextVar(
+    "llm_temperature", default=REPLY_TEMPERATURE
+)
+
+
+@contextlib.contextmanager
+def exact():
+    """Inside this block, model calls are made at temperature 0.
+
+    A scope rather than an argument, so every caller keeps calling
+    `_call_groq(prompt)` exactly as before.
+    """
+    token = _temperature.set(EXACT_TEMPERATURE)
+    try:
+        yield
+    finally:
+        _temperature.reset(token)
+
+
 async def _groq_once(prompt: str, api_key: str) -> str:
     payload = {
         "model": settings.groq_model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7,
+        "temperature": _temperature.get(),
         "max_tokens": MAX_OUTPUT_TOKENS,
         **groq_reasoning(settings.groq_model),
     }
@@ -850,7 +878,7 @@ async def _gemini_once(prompt: str, api_key: str) -> str:
         # budget and returned nothing, which is what took the agent to its
         # documents-only replies. Room for the thinking plus a full reply; how
         # long the reply is stays set by the prompt, not by this cap.
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": GEMINI_OUTPUT_TOKENS},
+        "generationConfig": {"temperature": _temperature.get(), "maxOutputTokens": GEMINI_OUTPUT_TOKENS},
     }
     async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
         response = await client.post(
@@ -1372,7 +1400,8 @@ async def extract_profile(
         conversation=format_history(history), latest=latest_message
     )
     try:
-        raw = await _call_groq(prompt)
+        with exact():
+            raw = await _call_groq(prompt)
     except Exception as exc:  # noqa: BLE001
         logger.warning("profile extraction failed: %s", exc)
         return {}

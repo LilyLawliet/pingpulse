@@ -68,14 +68,15 @@ def is_due(message_count: int, had_summary: bool) -> bool:
 
 async def write(history, latest_message: str = "") -> dict:
     """Produce {"summary", "next_action"}. Never raises; {} on any failure."""
-    from app.services.llm_service import _call_groq, format_history
+    from app.services.llm_service import _call_groq, exact, format_history
 
     conversation = format_history(history)
     if latest_message:
         conversation = f"{conversation}\nCustomer: {latest_message}"
 
     try:
-        raw = await _call_groq(PROMPT.format(conversation=conversation))
+        with exact():
+            raw = await _call_groq(PROMPT.format(conversation=conversation))
     except Exception as exc:  # noqa: BLE001
         logger.info("could not summarise the conversation: %s", exc)
         return {}
