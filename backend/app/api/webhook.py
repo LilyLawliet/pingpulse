@@ -724,7 +724,7 @@ async def process_inbound_message(
 
     # Asking for a person in words the keyword list did not know. The model
     # read it; the same hand-over follows.
-    if analysis.get("wants_person") and contact.ai_enabled:
+    if booking.heard_as_a_person(analysis, body) and contact.ai_enabled:
         return await _hand_over(
             db, organization, contact, channel, phone_number, body, "asked for a person"
         )

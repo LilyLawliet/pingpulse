@@ -154,3 +154,37 @@ async def test_a_pretend_booking_can_be_moved_and_cancelled(org_a, monkeypatch):
         select(func.count(Appointment.id)).where(Appointment.organization_id == organization.id)
     )
     assert kept == 0
+
+
+@pytest.mark.asyncio
+async def test_a_booking_the_analyzer_reads_as_wanting_a_person_is_not_handed_over(org_a, monkeypatch):
+    """ "book one with ahmed name" was handed to a person in the Test agent on October 1."""
+    from app.api import operations
+
+    session = _session_for(org_a._client)
+    organization = await session.get(Organization, uuid.UUID(org_a.organization_id))
+    organization.timezone = "UTC"
+    organization.agent_config = {
+        "business_hours": EVERY_DAY,
+        "appointments": {"min_notice_minutes": 0, "duration_minutes": 60, "default_kind": "onsite"},
+    }
+    await session.flush()
+
+    real = operations.analyzer.analyse
+
+    async def reads_a_person(history, message, stage="NEW"):
+        analysis = await real(history, message, stage)
+        return {**analysis, "wants_person": True}
+
+    async def groq(prompt):
+        return "Here are the times."
+
+    monkeypatch.setattr(operations.analyzer, "analyse", reads_a_person)
+    monkeypatch.setattr(llm_service, "_call_groq", groq)
+
+    body = (await org_a.post("/api/v1/agent/simulate", json={"message": "book one with ahmed name"})).json()
+    assert body["escalated"] is False, body
+    assert body["booking"]["offered"], "the booking request was not answered with times"
+
+    person = (await org_a.post("/api/v1/agent/simulate", json={"message": "can I talk to Ahmed please"})).json()
+    assert person["escalated"] is True, "a request for a person must still be handed over"

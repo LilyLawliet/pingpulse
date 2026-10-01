@@ -766,7 +766,7 @@ async def simulate(
     knowledge = retrieval.as_prompt_block(chunks)
 
     escalation = agent_config.needs_escalation(message, organization)
-    if not escalation and analysis.get("wants_person"):
+    if not escalation and booking.heard_as_a_person(analysis, message):
         escalation = "asked for a person"
     if escalation:
         return {

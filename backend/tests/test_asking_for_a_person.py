@@ -133,3 +133,31 @@ def test_a_tenants_own_words_still_win_first():
     knowing something about their trade that these patterns do not."""
     organization = type("Org", (), {"agent_config": {"escalate_on": ["asbestos"]}})()
     assert agent_config.needs_escalation("we found asbestos", organization) == "asbestos"
+
+
+# ------------------------------------------- a booking is not a request for a person
+from app.services import booking as _booking  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "book one with ahmed name",
+        "book it under Ahmed",
+        "can you book a visit for my husband Carlos",
+        "schedule an estimate with my name, Jamie",
+    ],
+)
+def test_a_booking_read_as_wanting_a_person_is_still_a_booking(text):
+    """The analyzer said "a person"; the message asks to book. It is not handed over."""
+    assert not _booking.heard_as_a_person({"wants_person": True}, text)
+
+
+@pytest.mark.parametrize("text", ["insaan se baat karao", "can i talk 2 sm1 real", "put me with team"])
+def test_a_person_is_still_heard_when_nothing_is_being_booked(text):
+    assert _booking.heard_as_a_person({"wants_person": True}, text)
+
+
+def test_explicit_words_for_a_person_win_even_while_booking():
+    """The keyword list runs before the analyzer's reading and is not affected."""
+    assert agent_config.needs_escalation("I want to speak to a human to book my visit", None)

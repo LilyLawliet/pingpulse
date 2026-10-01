@@ -1792,6 +1792,20 @@ def wants_booking(text: str) -> bool:
     return bool(_WANTS_BOOKING.search(_without_refusals(text)))
 
 
+def heard_as_a_person(analysis: dict, text: str) -> bool:
+    """Whether the analyzer's "wants a person" should hand this conversation over.
+
+    Not when the message is itself a booking request. "book one with ahmed
+    name" - book it under the name Ahmed - was read as asking for somebody
+    called Ahmed, and handed over: on WhatsApp that stops the agent, so a
+    customer asking to book got the hand-over line and silence. The reading
+    is loose in the same way the meeting flag was. The explicit words for a
+    person ("a real person", "a human", "the manager") are checked before
+    this and still hand over whatever else the message says.
+    """
+    return bool(analysis.get("wants_person")) and not wants_booking(text)
+
+
 # ------------------------------------------------------- where the visit is
 # A site visit is somebody driving to a house. Booked without an address it
 # is a van with nowhere to go, and booked outside the area the business
