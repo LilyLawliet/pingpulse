@@ -15,6 +15,21 @@ nothing: the hand-written version caught 10 of the first 14, the JSON one all
 Each mutation must match booking.py exactly once, or the run stops: one that
 no longer matches would silently test nothing. When booking.py is changed,
 update the strings here. The file is restored afterwards whatever happens.
+
+It exits non-zero when any fault survives every file it was run with, so CI
+can run it (cloudbuild.yaml does). Two things would make that lie, and both
+are refused rather than reported:
+
+- A file already failing before anything is broken reads RED for every
+  fault. The files are run once untouched first, and must pass.
+- Only a test failure counts as catching a fault (pytest exit 1). A file that
+  collects nothing or cannot be imported also exits non-zero, and is an
+  error, not a catch.
+
+    python tests/mutate_booking.py --together tests/a.py tests/b.py
+
+runs the files as one pytest call per fault: the question CI asks is whether
+anything catches each one, not which file does, and it is six times faster.
 """
 import subprocess, sys, pathlib
 
@@ -133,7 +148,30 @@ MUTATIONS = {
     ),
 }
 
-files = sys.argv[1:]
+args = sys.argv[1:]
+together = "--together" in args
+files = [a for a in args if a != "--together"]
+if not files:
+    sys.exit("name the test files to run against each fault")
+# One column per file, or one column for all of them.
+columns = {" + ".join(pathlib.Path(f).stem for f in files): files} if together else {f: [f] for f in files}
+
+
+def _run(paths):
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", *paths],
+        capture_output=True, text=True,
+    )
+
+
+for column, paths in columns.items():
+    baseline = _run(paths)
+    if baseline.returncode != 0:
+        sys.exit(
+            f"{column} fails with nothing broken (pytest exit {baseline.returncode}); "
+            "every fault would read as caught. Fix it first.\n" + baseline.stdout[-2000:]
+        )
+
 results = {}
 try:
     for name, mutation in MUTATIONS.items():
@@ -146,18 +184,29 @@ try:
             _write(other, text)
         _write(path, original.replace(old, new))
         row = {}
-        for f in files:
-            proc = subprocess.run(
-                [sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", f],
-                capture_output=True, text=True,
-            )
-            row[f] = "RED" if proc.returncode else "green"
+        for column, paths in columns.items():
+            proc = _run(paths)
+            if proc.returncode not in (0, 1):
+                raise SystemExit(
+                    f"{column} could not run with {name!r} applied (pytest exit {proc.returncode}); "
+                    "that is a broken mutation, not a caught one.\n" + proc.stdout[-2000:]
+                )
+            row[column] = "RED" if proc.returncode == 1 else "green"
         results[name] = row
 finally:
     for path, text in SOURCES.items():
         _write(path, text)
 
 width = max(len(n) for n in results)
-print(" " * width, " | ".join(pathlib.Path(f).stem for f in files))
+heads = {c: (c if together else pathlib.Path(c).stem) for c in columns}
+print(" " * width, " | ".join(heads.values()))
 for name, row in results.items():
-    print(name.ljust(width), " | ".join(row[f].ljust(len(pathlib.Path(f).stem)) for f in files))
+    print(name.ljust(width), " | ".join(row[c].ljust(len(heads[c])) for c in columns))
+
+survivors = [name for name, row in results.items() if "RED" not in row.values()]
+if survivors:
+    print(f"\n{len(survivors)} fault(s) no test catches:")
+    for name in survivors:
+        print(f"  - {name}")
+    sys.exit(1)
+print(f"\nAll {len(results)} faults caught.")

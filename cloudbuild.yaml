@@ -27,6 +27,14 @@ steps:
         set -euo pipefail
         pip install --quiet --no-cache-dir -r backend/requirements.txt
         cd backend && python -m pytest tests -q
+        # A green suite says nothing about what it would catch. Each booking
+        # fault fixed since the September 30 readiness test is put back, one
+        # at a time, and the build fails if no test notices one. It caught
+        # coverage moving during a rewrite that left the suite green.
+        python tests/mutate_booking.py --together \
+          tests/test_readiness_replay.py tests/test_readiness_report.py \
+          tests/test_confirm_before_booking.py tests/test_sandbox_booking.py \
+          tests/test_calendar_turns.py tests/test_booking_conversation.py
 
   # ---------------------------------------------------------------- frontend
   # A build, not a lint. The dashboard has no test suite, so this catches what
