@@ -1081,7 +1081,13 @@ def chosen_slot(text: str, offered: list[datetime], zone: ZoneInfo) -> datetime 
             # second.
             found = re.search(
                 rf"^\W*(?:(?:option|number|no\.?|slot|choice)\s*|#\s*)?{word}\W*(?:please|pls|plz|thanks|thank you)?\W*$"
-                rf"|\b(?:option|number|slot|choice)\s*{word}\b|#\s*{word}\b",
+                rf"|\b(?:option|number|slot|choice)\s*{word}\b|#\s*{word}\b"
+                # "I'll take 2", "let's do 2" - a choosing verb, with the
+                # number last. Anchored at the end on purpose: "I want 2
+                # bathrooms" and "we need 2 units" are the counting case
+                # again, and they do not end there.
+                rf"|\b(?:do|take|go with|pick|choose|have)\s+#?\s*{word}"
+                rf"\W*(?:please|pls|plz|thanks|thank you)?\W*$",
                 lowered,
             )
         else:

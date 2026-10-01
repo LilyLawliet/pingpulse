@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import pytest
 
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
 from app.services import booking
 from app.services.analyzer import _coerce, heuristic_analysis, wants_to_book
 from app.services.sales_policy import contains_handoff, directives
@@ -211,3 +214,37 @@ def test_a_plain_booking_is_not_mistaken_for_deferring(message):
     """The cost of this failing is the opposite one: a customer who asked to
     book is told nothing was booked."""
     assert booking.holding_off(message) is False, message
+
+
+# --------------------------------------------------------------------------
+# A digit picks a slot only when it is the choice
+# --------------------------------------------------------------------------
+# "Unit 4" in an address booked the fourth time offered. Tightening that to
+# a bare digit alone also dropped "I'll take 2", which used to work, so a
+# choosing verb counts when the number is last: "I want 2 bathrooms" is the
+# counting case again and does not end there.
+
+_WHEN = datetime(2026, 10, 5, 14, 0, tzinfo=timezone.utc)
+_OFFERED = [_WHEN + timedelta(hours=n) for n in range(4)]
+_ZONE = ZoneInfo("America/New_York")
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["2", "option 2", "#2", "2 please", "let us do 2", "ill take 2",
+     "go with 2", "lets do 2 please", "the second one"],
+)
+def test_choosing_the_second_time_picks_it(message):
+    assert booking.chosen_slot(message, _OFFERED, _ZONE) == _OFFERED[1], message
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["Unit 4, 220 Ocean Drive", "2 bathrooms need doing", "I want 2 bathrooms",
+     "we need 2 units installed", "we have 3 kids", "my number is 0300 1234567",
+     "I have 2 dogs", "apartment 3b", "the quote was 2500", "I work until 4",
+     "can you do 2 bathrooms"],
+)
+def test_a_number_that_counts_something_picks_nothing(message):
+    """A pick here books a time the customer never chose."""
+    assert booking.chosen_slot(message, _OFFERED, _ZONE) is None, message
