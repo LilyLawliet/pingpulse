@@ -1134,6 +1134,95 @@
           "check": "is_a_site_visit"
         }
       ]
+    },
+    {
+      "name": "Read back, then corrected",
+      "contact_metadata": {
+        "visit_address": "100 Test Avenue, Miami, FL 33101, unit 2"
+      },
+      "steps": [
+        {
+          "say": "Please book a site visit for Monday October 5 at 10 AM",
+          "added_because": "the read-back gate: every reply after a read-back except a plain yes must write nothing",
+          "expect": {
+            "performed": null,
+            "proposed": "book"
+          }
+        },
+        {
+          "say": "actually make it Monday October 5 at 11 AM instead",
+          "added_because": "a correction is read back afresh, not taken as a yes to 10",
+          "expect": {
+            "performed": null,
+            "proposed": "book",
+            "rows": {
+              "total": 0
+            }
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "the yes books the corrected time",
+          "expect": {
+            "performed": "booked",
+            "slot": "2026-10-05 11:00"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Read back, then no",
+      "contact_metadata": {
+        "visit_address": "100 Test Avenue, Miami, FL 33101, unit 2"
+      },
+      "steps": [
+        {
+          "say": "Please book a site visit for Monday October 5 at 10 AM",
+          "added_because": "the read-back gate: every reply after a read-back except a plain yes must write nothing",
+          "expect": {
+            "performed": null,
+            "proposed": "book"
+          }
+        },
+        {
+          "say": "no",
+          "added_because": "a no drops what was read back",
+          "expect": {
+            "performed": null,
+            "refusal": "declined",
+            "rows": {
+              "total": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Read back, then yes to another time",
+      "contact_metadata": {
+        "visit_address": "100 Test Avenue, Miami, FL 33101, unit 2"
+      },
+      "steps": [
+        {
+          "say": "Please book a site visit for Monday October 5 at 10 AM",
+          "added_because": "the read-back gate: every reply after a read-back except a plain yes must write nothing",
+          "expect": {
+            "performed": null,
+            "proposed": "book"
+          }
+        },
+        {
+          "say": "Yes, but make it Monday October 5 at 11 AM",
+          "added_because": "agreement to 11 is not a yes to the 10 that was read back",
+          "expect": {
+            "performed": null,
+            "proposed": "book",
+            "rows": {
+              "total": 0
+            }
+          }
+        }
+      ]
     }
   ]
 }
