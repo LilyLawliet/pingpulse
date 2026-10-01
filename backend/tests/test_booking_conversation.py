@@ -51,6 +51,9 @@ async def remodeller(db_session):
         name="ZO",
         pipeline_stage="NEW_LEAD",
         qualification={},
+        # A site visit is booked to somewhere. The address she gave earlier
+        # in the conversation, the way a live contact carries it.
+        contact_metadata={"visit_address": "1200 Brickell Ave, Unit 4, Miami"},
     )
     db_session.add(contact)
     await db_session.flush()
@@ -362,7 +365,8 @@ async def test_the_contact_record_shows_the_appointment(client, org_a, db_sessio
         "appointments": {"min_notice_minutes": 0, "default_kind": "onsite"},
     }
     contact = CRMContact(
-        organization_id=organization.id, phone_number="+15550123", name="Dana"
+        organization_id=organization.id, phone_number="+15550123", name="Dana",
+        contact_metadata={"visit_address": "88 Ocean Drive, Miami Beach"},
     )
     db_session.add(contact)
     await db_session.flush()

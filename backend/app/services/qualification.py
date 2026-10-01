@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +69,28 @@ def slots_for(organization) -> tuple[tuple[str, str], ...]:
     return tuple(out)
 
 
+# An answer that says there is no answer. "Refused to give address" was being
+# stored as the address and counted as one, which put a lead that had told us
+# nothing into Qualified.
+_NO_ANSWER = re.compile(
+    r"^\W*(null|none|nil|unknown|n/?a|not (stated|given|provided|known|sure|shared)|no|nope|"
+    r"-+|tbd|tbc|later|ask later)\W*$"
+    r"|\b(refus\w*|declin\w*|won'?t (say|give|share|tell)|will not (say|give|share|tell)|"
+    r"(doesn'?t|does not|didn'?t|did not|don'?t|do not) (want to )?(say|give|share|provide|tell)|"
+    r"prefer(s|red)? not|rather not|not willing|unwilling|withheld|no address|not provided)\b",
+    re.IGNORECASE,
+)
+
+
+def usable(value) -> bool:
+    """Whether a stored answer actually answers the question."""
+    text = str(value or "").strip()
+    return bool(text) and not _NO_ANSWER.search(text)
+
+
 def missing(organization, collected: dict | None) -> list[tuple[str, str]]:
     """The slots still unanswered, in the order they were configured."""
-    have = {k for k, v in (collected or {}).items() if v}
+    have = {k for k, v in (collected or {}).items() if usable(v)}
     return [(name, asks) for name, asks in slots_for(organization) if name not in have]
 
 
@@ -81,7 +101,7 @@ def as_prompt_block(organization, collected: dict | None) -> str:
     a model handed a list of six gaps asks for all six, and a customer who
     wanted a price receives a form.
     """
-    known = {k: v for k, v in (collected or {}).items() if v}
+    known = {k: v for k, v in (collected or {}).items() if usable(v)}
     outstanding = missing(organization, collected)
     if not known and not outstanding:
         return ""
@@ -167,7 +187,7 @@ async def extract(organization, history, latest_message: str) -> dict:
             value = str(value)
         if isinstance(value, str):
             value = value.strip()
-            if value and value.lower() not in ("null", "none", "unknown", "n/a", "not stated"):
+            if usable(value):
                 found[key] = value[:MAX_SLOT_CHARS]
     return found
 
@@ -181,6 +201,6 @@ def merge(collected: dict | None, learned: dict) -> dict:
     """
     merged = dict(collected or {})
     for key, value in (learned or {}).items():
-        if value and not merged.get(key):
+        if usable(value) and not usable(merged.get(key)):
             merged[key] = value
     return merged

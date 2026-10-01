@@ -531,7 +531,7 @@ export default function AgentSettings({ onCalendar, onChanged, onTimezone }) {
       />
       <TextList
         label="Areas you serve"
-        hint="One per line. Anywhere else, it says so rather than promising to check."
+        hint="One per line - cities, neighbourhoods or ZIP codes (331 covers every ZIP starting 331). A site visit is only booked at an address that names one of these; anywhere else, it says so and offers no times."
         value={lines('service_areas')}
         onChange={(value) => setLines('service_areas', value)}
       />

@@ -129,6 +129,7 @@ def evaluate_stage(
     customer_message: str,
     organization=None,
     collected: dict | None = None,
+    contact=None,
 ) -> str:
     """Return the stage the contact should be in after this message.
 
@@ -171,6 +172,13 @@ def evaluate_stage(
         # not the same as every question answered.
         if wanted and not qualification.missing(organization, collected):
             target = CONVERSATIONAL_CEILING
+        # A business that drives to the customer cannot act on a lead with
+        # nowhere to drive to. "In Miami" filled the location question and
+        # put a lead with no address, a refused address or a job in Seattle
+        # into Qualified, where it read as work the team could go and do.
+        if target == CONVERSATIONAL_CEILING and contact is not None:
+            if booking.lacks_for_a_visit(organization, contact):
+                target = current_stage
 
     current_index = STAGE_ORDER.index(current_stage)
     target_index = STAGE_ORDER.index(target)
@@ -1237,7 +1245,7 @@ async def process_inbound_message(
     previous_stage = contact.pipeline_stage
     from_analyzer = analyzer.STAGE_TO_PIPELINE.get(contact.sales_stage, previous_stage)
     new_stage = evaluate_stage(
-        previous_stage, body, organization, contact.qualification
+        previous_stage, body, organization, contact.qualification, contact
     )
 
     # The one thing that may put a lead in the column meaning "booked": a row

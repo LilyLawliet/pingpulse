@@ -853,7 +853,11 @@ async def simulate(
                     await db.flush()
             except (KeyError, TypeError, ValueError, IntegrityError):
                 pass
-        turn = await booking.handle_turn(db, organization, probe, message)
+        # The same arguments the live webhook passes, so the Test agent
+        # exercises the decision a real customer's message would get.
+        turn = await booking.handle_turn(
+            db, organization, probe, message, wants_meeting=bool(analysis.get("wants_meeting"))
+        )
         booking_reply = turn.plain_reply(organization)
         performed = turn.performed
         if turn.appointment is not None:

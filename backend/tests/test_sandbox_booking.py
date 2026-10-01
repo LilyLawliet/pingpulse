@@ -42,7 +42,7 @@ async def test_times_are_offered_one_is_booked_and_nothing_is_kept(org_a, monkey
 
     monkeypatch.setattr(llm_service, "_call_groq", groq)
 
-    first = (await org_a.post("/api/v1/agent/simulate", json={"message": "Can I book an appointment tomorrow?"})).json()
+    first = (await org_a.post("/api/v1/agent/simulate", json={"message": "Can I book an appointment tomorrow? It's at 1200 Brickell Ave, Miami"})).json()
     assert first["booking"]["offered"], first
     assert "APPOINTMENTS" in prompts[-1], "the offered times did not reach the prompt"
 
@@ -57,7 +57,7 @@ async def test_times_are_offered_one_is_booked_and_nothing_is_kept(org_a, monkey
             json={
                 "message": "The first one please",
                 "history": [
-                    {"sender": "user", "content": "Can I book an appointment tomorrow?"},
+                    {"sender": "user", "content": "Can I book an appointment tomorrow? It's at 1200 Brickell Ave, Miami"},
                     {"sender": "agent", "content": first["reply"]},
                 ],
                 "booking_state": first["booking_state"],
@@ -108,7 +108,7 @@ async def test_a_pretend_booking_can_be_moved_and_cancelled(org_a, monkeypatch):
             )
         ).json()
 
-    first = await say("Can I book an appointment?", {})
+    first = await say("Can I book an appointment? The house is 1200 Brickell Ave, Miami", {})
     booked = await say("the first one", first["booking_state"])
     assert booked["booking"]["performed"] == "booked", booked
     assert "sandbox_appointment" in booked["booking_state"]
