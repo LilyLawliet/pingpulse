@@ -2148,7 +2148,14 @@ async def _handle_turn(
     # the shop's meeting kind and length, not as the visit a retail customer
     # gets, and it keeps what it was about.
     details = offer_details(contact)
-    asked_meeting = is_meeting(text) or wants_meeting
+    # The analyzer's "wants a meeting" is a reading, and a loose one: it says
+    # yes to nearly any booking request, and "I'll take 2" after a list of
+    # times came back as a meeting. A meeting is a phone call, so for a shop
+    # that drives to its customers it skipped the address and the area - and
+    # a remodeller's customer was booked a phone consultation nobody asked
+    # for, with nowhere on record to go. For those shops only the customer's
+    # own words make it a call.
+    asked_meeting = is_meeting(text) or (wants_meeting and not does_site_visits(organization))
     meeting = existing is None and (asked_meeting or bool(offered and details.get("meeting")))
     new_kind = None
     about = None

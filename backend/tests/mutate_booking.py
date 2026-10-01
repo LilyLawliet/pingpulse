@@ -9,7 +9,8 @@ runs the given test files against each. Every row should read RED. A row
 that reads green is a fault the tests would let back in.
 
 It was used to prove the move of the replay's expectations into JSON lost
-nothing: the hand-written version caught 10 of these, the JSON one all 14.
+nothing: the hand-written version caught 10 of the first 14, the JSON one all
+14. Entries naming llm_service.py break the reply step rather than booking.
 
 Each mutation must match booking.py exactly once, or the run stops: one that
 no longer matches would silently test nothing. When booking.py is changed,
@@ -18,7 +19,8 @@ update the strings here. The file is restored afterwards whatever happens.
 import subprocess, sys, pathlib
 
 SRC = pathlib.Path("app/services/booking.py")
-ORIGINAL = SRC.read_text()
+LLM = pathlib.Path("app/services/llm_service.py")
+SOURCES = {path: path.read_text() for path in (SRC, LLM)}
 
 MUTATIONS = {
     "holding_off ignored": (
@@ -82,16 +84,33 @@ MUTATIONS = {
         "def contact_problems(text: str) -> list[str]:\n",
         "def contact_problems(text: str) -> list[str]:\n    return []\n",
     ),
+    "analyzer meeting flag trusted": (
+        "    asked_meeting = is_meeting(text) or (wants_meeting and not does_site_visits(organization))",
+        "    asked_meeting = is_meeting(text) or wants_meeting",
+    ),
+    # Entries for another file name it first.
+    "Roman Urdu matched inside words": (LLM,
+        '    hits = sum(1 for marker in _ROMAN_URDU_WORDS if marker.search(lowered))',
+        '    hits = sum(1 for marker in ROMAN_URDU_MARKERS if marker in f" {lowered} ")',
+    ),
+    "a booking need not be confirmed": (LLM,
+        "    done = \"booked\" if did_book else \"moved\" if did_move else \"cancelled\" if did_cancel else None",
+        "    done = None",
+    ),
 }
 
 files = sys.argv[1:]
 results = {}
 try:
-    for name, (old, new) in MUTATIONS.items():
-        count = ORIGINAL.count(old)
+    for name, mutation in MUTATIONS.items():
+        path, old, new = mutation if len(mutation) == 3 else (SRC, *mutation)
+        original = SOURCES[path]
+        count = original.count(old)
         if count != 1:
-            sys.exit(f"mutation {name!r} matches {count} times; fix the harness")
-        SRC.write_text(ORIGINAL.replace(old, new))
+            sys.exit(f"mutation {name!r} matches {count} times in {path}; fix the harness")
+        for other, text in SOURCES.items():
+            other.write_text(text)
+        path.write_text(original.replace(old, new))
         row = {}
         for f in files:
             proc = subprocess.run(
@@ -101,7 +120,8 @@ try:
             row[f] = "RED" if proc.returncode else "green"
         results[name] = row
 finally:
-    SRC.write_text(ORIGINAL)
+    for path, text in SOURCES.items():
+        path.write_text(text)
 
 width = max(len(n) for n in results)
 print(" " * width, " | ".join(pathlib.Path(f).stem for f in files))

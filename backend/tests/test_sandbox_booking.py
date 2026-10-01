@@ -66,7 +66,33 @@ async def test_times_are_offered_one_is_booked_and_nothing_is_kept(org_a, monkey
     ).json()
     assert second["booking"]["performed"] == "booked", second
     assert "Nothing was saved" in second["booking"]["note"]
-    assert second["reply"] == "You're booked in.", "a real booking may be announced"
+    # "You're booked in." says nothing about when. A booking the reply does
+    # not state is replaced by the confirmation rendered from the row.
+    assert second["reply"].startswith("You're booked:"), second["reply"]
+    assert " at " in second["reply"]
+
+    async def with_the_time(prompt):
+        import re
+
+        when = re.search(r"BOOKED, just now, successfully: (.+?)\. Confirm", prompt).group(1)
+        return f"Done - your {when} is confirmed."
+
+    monkeypatch.setattr(llm_service, "_call_groq", with_the_time)
+    again = (
+        await org_a.post(
+            "/api/v1/agent/simulate",
+            json={
+                "message": "The first one please",
+                "history": [
+                    {"sender": "user", "content": "Can I book an appointment tomorrow? It's at 1200 Brickell Ave, Miami"},
+                    {"sender": "agent", "content": first["reply"]},
+                ],
+                "booking_state": first["booking_state"],
+            },
+        )
+    ).json()
+    assert again["booking"]["performed"] == "booked", again
+    assert again["reply"].startswith("Done - your "), "a reply that states the booking is used as written"
 
     kept = await session.scalar(
         select(func.count(Appointment.id)).where(Appointment.organization_id == organization.id)
