@@ -366,5 +366,661 @@
       "trace_then": "This would have moved site visit on Monday 5 October at 11:00 am for a real customer. Nothing was saved.",
       "assessment": "Cancellation request produces a simulated move, not a cancellation."
     }
+  ],
+  "how_to_read": "'turns' is the tester's evidence exactly as sent: prompt, the reply the agent gave, the action trace. Nothing in it is an expectation. 'conversations' is the spec, written and reviewed by a person: each conversation is played in order against one customer, and every step says what the backend must do. A step names an evidence turn ('turn') or, when it is ours rather than the tester's, gives the message ('say') and why it was added ('added_because'). 'expect' uses only the keys the runner knows - any other key fails the run - and 'check' names a Python check in test_readiness_replay.py for what the keys cannot say. Every turn is also held to the invariants in the runner, whatever its expect says.",
+  "shop": {
+    "now": "2026-09-30T10:00:00-04:00",
+    "timezone": "America/New_York",
+    "agent_config": {
+      "business_hours": {
+        "monday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "tuesday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "wednesday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "thursday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "friday": {
+          "open": "09:00",
+          "close": "20:00"
+        }
+      },
+      "service_areas": [
+        "Miami",
+        "Miami Beach",
+        "Miami-Dade",
+        "Brickell",
+        "Hialeah",
+        "Dania Beach",
+        "Fort Lauderdale",
+        "330",
+        "331",
+        "333"
+      ],
+      "appointments": {
+        "default_kind": "onsite",
+        "duration_minutes": 60
+      }
+    },
+    "note": "Set up the way this business should be: its own description says South Florida, and the areas list is what the agent can check."
+  },
+  "conversations": [
+    {
+      "name": "T01 books nothing",
+      "steps": [
+        {
+          "turn": "T01",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T06 books nothing",
+      "steps": [
+        {
+          "turn": "T06",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T07 books nothing",
+      "steps": [
+        {
+          "turn": "T07",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T08 books nothing",
+      "steps": [
+        {
+          "turn": "T08",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T09R books nothing",
+      "steps": [
+        {
+          "turn": "T09R",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T10 books nothing",
+      "steps": [
+        {
+          "turn": "T10",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T11 books nothing",
+      "steps": [
+        {
+          "turn": "T11",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T13 books nothing",
+      "steps": [
+        {
+          "turn": "T13",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T14 books nothing",
+      "steps": [
+        {
+          "turn": "T14",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T15 books nothing",
+      "steps": [
+        {
+          "turn": "T15",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T16 books nothing",
+      "steps": [
+        {
+          "turn": "T16",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T17 books nothing",
+      "steps": [
+        {
+          "turn": "T17",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T18 books nothing",
+      "steps": [
+        {
+          "turn": "T18",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T19 books nothing",
+      "steps": [
+        {
+          "turn": "T19",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T20 books nothing",
+      "steps": [
+        {
+          "turn": "T20",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T23 books nothing",
+      "steps": [
+        {
+          "turn": "T23",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T25 books nothing",
+      "steps": [
+        {
+          "turn": "T25",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T34 books nothing",
+      "steps": [
+        {
+          "turn": "T34",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T36 books nothing",
+      "steps": [
+        {
+          "turn": "T36",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "T37 books nothing",
+      "steps": [
+        {
+          "turn": "T37",
+          "expect": {
+            "performed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Brickell lead, no street address",
+      "steps": [
+        {
+          "turn": "T01",
+          "expect": {
+            "performed": null
+          }
+        },
+        {
+          "turn": "T02",
+          "expect": {
+            "performed": null,
+            "refusal": "closed",
+            "offered": "some"
+          }
+        },
+        {
+          "turn": "T03",
+          "expect": {
+            "performed": null,
+            "refusal": "needs_address",
+            "rows": {
+              "total": 0
+            },
+            "guard_blocks_reply_then": true
+          }
+        },
+        {
+          "turn": "T04",
+          "expect": {
+            "performed": null,
+            "rows": {
+              "total": 0
+            },
+            "guard_blocks_reply_then": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Brickell lead, address given, books then moves",
+      "steps": [
+        {
+          "turn": "T01",
+          "expect": {
+            "performed": null
+          }
+        },
+        {
+          "turn": "T02",
+          "expect": {
+            "performed": null
+          }
+        },
+        {
+          "say": "The condo is 1200 Brickell Ave, Unit 4, Miami FL 33131",
+          "added_because": "the tester never gave a street address; this is the same lead when they do, and 'Unit 4' once picked the fourth slot",
+          "expect": {
+            "performed": null,
+            "rows": {
+              "total": 0
+            }
+          }
+        },
+        {
+          "turn": "T03",
+          "expect": {
+            "performed": "booked",
+            "slot": "2026-10-01 09:00",
+            "location_contains": "1200 Brickell Ave"
+          }
+        },
+        {
+          "turn": "T04",
+          "expect": {
+            "performed": "moved",
+            "slot": "2026-10-02 10:00",
+            "rows": {
+              "confirmed": 1,
+              "cancelled": 1,
+              "total": 2
+            }
+          },
+          "check": "move_chains_to_the_original"
+        }
+      ]
+    },
+    {
+      "name": "Seattle T12",
+      "steps": [
+        {
+          "turn": "T12",
+          "expect": {
+            "performed": null,
+            "refusal": "outside_area",
+            "offered": "none"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Seattle T26-T27",
+      "steps": [
+        {
+          "turn": "T26",
+          "expect": {
+            "performed": null,
+            "refusal": "outside_area",
+            "offered": "none"
+          }
+        },
+        {
+          "turn": "T27",
+          "expect": {
+            "performed": null,
+            "offered": "none",
+            "rows": {
+              "total": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Seattle T38-T39",
+      "steps": [
+        {
+          "turn": "T38",
+          "expect": {
+            "performed": null,
+            "refusal": "outside_area",
+            "offered": "none"
+          }
+        },
+        {
+          "turn": "T39",
+          "expect": {
+            "performed": null,
+            "offered": "none",
+            "rows": {
+              "total": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sunday",
+      "steps": [
+        {
+          "turn": "T21",
+          "expect": {
+            "performed": null,
+            "refusal": "closed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "An hour that runs past closing",
+      "steps": [
+        {
+          "turn": "T35",
+          "expect": {
+            "performed": null,
+            "refusal": "closed"
+          }
+        }
+      ]
+    },
+    {
+      "name": "7 p.m. Pacific is 10 p.m. in Miami",
+      "steps": [
+        {
+          "turn": "T24",
+          "expect": {
+            "performed": null,
+            "refusal": "closed",
+            "prompt_contains": [
+              "10:00 pm",
+              "America/Los_Angeles"
+            ],
+            "guard_blocks_reply_then": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Yesterday",
+      "steps": [
+        {
+          "turn": "T22",
+          "expect": {
+            "performed": null,
+            "refusal": "past",
+            "offered": "some"
+          }
+        }
+      ]
+    },
+    {
+      "name": "September 29: offered, accepted, cancelled",
+      "steps": [
+        {
+          "turn": "T28",
+          "expect": {
+            "performed": null,
+            "refusal": "past"
+          }
+        },
+        {
+          "turn": "T29",
+          "expect": {
+            "performed": null,
+            "refusal": "past"
+          }
+        },
+        {
+          "turn": "T30",
+          "expect": {
+            "performed": null,
+            "refusal": "not_found",
+            "rows": {
+              "total": 0
+            },
+            "guard_blocks_reply_then": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "A past day with no time",
+      "steps": [
+        {
+          "say": "Do you have any times on September 29?",
+          "added_because": "T22 and T28 name a time, so the save-time check refuses them anyway; a day alone is only stopped by the up-front past-date check",
+          "expect": {
+            "performed": null,
+            "refusal": "past",
+            "offered": "some"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Nothing on file to cancel",
+      "steps": [
+        {
+          "turn": "T31",
+          "expect": {
+            "performed": null,
+            "refusal": "not_found"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Do not book it yet",
+      "contact_metadata": {
+        "visit_address": "100 Test Avenue, Miami, FL 33101, unit 2"
+      },
+      "steps": [
+        {
+          "turn": "T32",
+          "expect": {
+            "performed": null,
+            "refusal": "holding_off",
+            "rows": {
+              "total": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invalid details, no address",
+      "steps": [
+        {
+          "turn": "T33",
+          "expect": {
+            "performed": null,
+            "refusal": "needs_address",
+            "rows": {
+              "total": 0
+            },
+            "guard_blocks_reply_then": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invalid details, address given",
+      "steps": [
+        {
+          "say": "Book a bathroom site visit for October 2, 2026, at 10 AM at 100 Test Avenue, Miami, FL 33101, unit 2. My name is Jamie QA, my phone is 123 and my email is not-an-email.",
+          "added_because": "T33 also refused an address, so the address check answered first and the contact-details check was never reached",
+          "expect": {
+            "performed": null,
+            "refusal": "contact_invalid",
+            "rows": {
+              "total": 0
+            }
+          }
+        },
+        {
+          "say": "Sorry - phone is 202-555-0101 and email is jamie.qa@example.com",
+          "added_because": "the corrected details book the time they chose",
+          "expect": {
+            "performed": "booked",
+            "slot": "2026-10-02 10:00",
+            "location_contains": "100 Test Avenue"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Full details, book, then cancel without rescheduling",
+      "steps": [
+        {
+          "turn": "T40",
+          "expect": {
+            "performed": "booked",
+            "slot": "2026-10-05 11:00",
+            "location_contains": "100 Test Avenue"
+          }
+        },
+        {
+          "turn": "T41",
+          "expect": {
+            "performed": "cancelled",
+            "rows": {
+              "confirmed": 0,
+              "cancelled": 1,
+              "total": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cancel naming the appointment's own time",
+      "steps": [
+        {
+          "turn": "T40",
+          "expect": {
+            "performed": "booked",
+            "slot": "2026-10-05 11:00"
+          }
+        },
+        {
+          "say": "Cancel my Monday, October 5, 2026, 11 AM appointment.",
+          "added_because": "T41 also says 'I do not want to reschedule', which on its own stops the move; without it, naming the appointment's time must still identify it, not move it",
+          "expect": {
+            "performed": "cancelled",
+            "rows": {
+              "confirmed": 0,
+              "cancelled": 1,
+              "total": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "A move to the time it already has",
+      "steps": [
+        {
+          "turn": "T40",
+          "expect": {
+            "performed": "booked",
+            "slot": "2026-10-05 11:00"
+          }
+        },
+        {
+          "say": "Please move my appointment to Monday, October 5 at 11 AM.",
+          "added_because": "a move that changes nothing used to be reported as moved",
+          "expect": {
+            "performed": null,
+            "refusal": "unchanged",
+            "rows": {
+              "confirmed": 1,
+              "total": 1
+            }
+          }
+        }
+      ]
+    }
   ]
 }
