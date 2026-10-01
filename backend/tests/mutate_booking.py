@@ -18,7 +18,20 @@ update the strings here. The file is restored afterwards whatever happens.
 import subprocess, sys, pathlib
 
 SRC = pathlib.Path("app/services/booking.py")
-ORIGINAL = SRC.read_text()
+
+# Read and write the bytes ourselves. read_text() decodes with the platform's
+# encoding, which is cp1252 on Windows and cannot read this file at all; and
+# the mutation strings below are written with \n, so the text has to be
+# normalised to match them. Whatever line ending the file actually uses is
+# put back, so a checkout with CRLF is restored as it was rather than
+# rewritten wholesale.
+_RAW = SRC.read_bytes().decode("utf-8")
+_ENDING = "\r\n" if "\r\n" in _RAW else "\n"
+ORIGINAL = _RAW.replace("\r\n", "\n")
+
+
+def _put(text: str) -> None:
+    SRC.write_bytes(text.replace("\n", _ENDING).encode("utf-8"))
 
 MUTATIONS = {
     "holding_off ignored": (
@@ -91,7 +104,7 @@ try:
         count = ORIGINAL.count(old)
         if count != 1:
             sys.exit(f"mutation {name!r} matches {count} times; fix the harness")
-        SRC.write_text(ORIGINAL.replace(old, new))
+        _put(ORIGINAL.replace(old, new))
         row = {}
         for f in files:
             proc = subprocess.run(
@@ -101,7 +114,7 @@ try:
             row[f] = "RED" if proc.returncode else "green"
         results[name] = row
 finally:
-    SRC.write_text(ORIGINAL)
+    _put(ORIGINAL)
 
 width = max(len(n) for n in results)
 print(" " * width, " | ".join(pathlib.Path(f).stem for f in files))
