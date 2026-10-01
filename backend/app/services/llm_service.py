@@ -1408,10 +1408,16 @@ async def extract_profile(
 # Provider reachability (used by /health)
 # --------------------------------------------------------------------------
 async def probe_groq() -> tuple[bool, str]:
-    """Reachability AND availability of the configured model.
+    """Reachability, availability AND whether the model will actually answer.
 
     Checking only that the endpoint answers is not enough: a valid key with a
     decommissioned model name still 404s on every generation.
+
+    Nor is listing the models enough. Listing costs no generation quota, so it
+    keeps answering 200 while every real call is refused - which is exactly
+    what happened: /health reported Groq "ok" while all three keys returned
+    429 and the agent was running on its no-model fallback. The only honest
+    way to report that generation works is to generate.
     """
     keys = settings.groq_api_keys
     if not keys:
@@ -1431,9 +1437,41 @@ async def probe_groq() -> tuple[bool, str]:
                 f"model '{settings.groq_model}' is not available on this key "
                 f"({len(available)} models offered)"
             )
-        return True, f"model '{settings.groq_model}' available, {len(keys)} key(s)"
+
+        ok, detail = await _probe_groq_generates(keys[0])
+        if not ok:
+            return False, f"model '{settings.groq_model}' {detail}"
+        return True, f"model '{settings.groq_model}' answering, {len(keys)} key(s)"
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)
+
+
+async def _probe_groq_generates(key: str) -> tuple[bool, str]:
+    """Ask for the smallest possible completion. 200 is the whole answer.
+
+    `max_tokens` is kept tiny because Groq reserves it against the
+    per-minute token pool: a health check must not eat the budget it reports
+    on. What came back does not matter - only that the model would speak.
+    """
+    body = {
+        "model": settings.groq_model,
+        "messages": [{"role": "user", "content": "ok"}],
+        "max_tokens": 1,
+        **groq_reasoning(settings.groq_model),
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        answer = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}"},
+            json=body,
+        )
+    if answer.status_code == 200:
+        return True, "answering"
+    if answer.status_code in (429, 503):
+        # True and worth saying: the model is fine, the account is at its
+        # limit. Replies still work, slowly; a backfill will crawl.
+        return False, "is at its rate limit right now (429) - replies may be slow"
+    return False, f"will not generate: HTTP {answer.status_code} {answer.text[:120]}"
 
 
 async def probe_gemini() -> tuple[bool, str]:

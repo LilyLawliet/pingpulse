@@ -210,6 +210,55 @@ async def default_org(db_session):
     return organization
 
 
+#: Addresses a test may always reach: the loopback the event loop itself uses
+#: for its self-pipe, and nothing else.
+_LOCAL = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "", None}
+
+
+@pytest.fixture(autouse=True)
+def no_outbound_network(monkeypatch, request):
+    """A test that reaches the real internet fails, saying so.
+
+    `offline_by_default` below stubs the providers it knew about, by name.
+    That is the wrong shape of guard: it covers the call sites that existed
+    when it was written, so every module added since - understanding,
+    embeddings, study - opened the hole again. Three tests in one afternoon
+    were found calling Groq and Gemini for real, each billed, each slow, and
+    each quietly passing or failing on somebody else's uptime.
+
+    This one sits under all of them, at the socket, so it holds for call sites
+    nobody has written yet. A test that genuinely needs the network says so:
+
+        @pytest.mark.allow_network
+    """
+    if "allow_network" in request.keywords:
+        return
+
+    import socket
+
+    real_connect = socket.socket.connect
+
+    def guarded_connect(self, address, *args, **kwargs):
+        # Guarded here, at the connection, rather than at the name lookup.
+        # Resolving an address reaches nobody, and the SSRF guards resolve on
+        # purpose - `_fetchable` and `_public` ask what an address resolves to
+        # precisely so they can refuse the internal ones. Blocking the lookup
+        # broke six of those tests while adding no protection: reaching a
+        # provider takes a connection, and this is where connections are made.
+        #
+        # Unix sockets and the like pass a plain string or a bare fd; only
+        # AF_INET/AF_INET6 carry a (host, port) pair worth checking.
+        if isinstance(address, tuple) and address and address[0] not in _LOCAL:
+            raise RuntimeError(
+                f"This test tried to connect to {address[0]!r}. Unit tests must "
+                "not use the network: stub the call, or mark the test "
+                "@pytest.mark.allow_network if reaching out is the point of it."
+            )
+        return real_connect(self, address, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+
+
 @pytest.fixture(autouse=True)
 def offline_by_default(monkeypatch):
     """Unit tests must not touch the network or the broker.
