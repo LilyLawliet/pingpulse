@@ -1,26 +1,33 @@
-"""The tester's forty turns, replayed against the real booking code.
+"""Every readiness report in `corpus/`, replayed against the real booking code.
 
-`corpus/readiness_2026_09_30.json` is the evidence a client's tester sent on
-September 30: every prompt they typed into the Test agent, what it replied,
-and what the action trace said it would have done. Here each conversation is
-played again, in the order they played it, with the clock stopped on the
-morning they ran it, against a shop set up the way that business is - Miami,
-weekdays 9 to 8, site visits, the areas it covers.
+A report is a JSON file `corpus/readiness_*.json` with three parts:
 
-What is asserted is the record: what was booked, moved or cancelled, and what
-was offered. The replies a model writes cannot be replayed offline, but the
-ones they got are checked against the reply guard, so a sentence that claimed
-something that never happened is one the guard now stops.
+- `turns`: the tester's evidence as sent - prompt, the reply the agent gave,
+  the action trace. Not an expectation; often a record of the bug.
+- `shop`: the business it was run against, and the moment it was run.
+- `conversations`: the spec. Written by a person and reviewed before it is
+  trusted - a tester's "expected" is a view, not a given. Each conversation
+  plays in order against one customer; each step names an evidence turn
+  (`turn`) or gives a message of our own (`say`, with `added_because`).
 
-When a new report arrives, add its turns to the corpus and its conversations
-here. A failure in this file is a customer-facing fault somebody has already
-found once.
+Each step's `expect` uses only the keys in `EXPECT_KEYS`. An unknown key
+fails the run rather than being ignored, because an assertion that silently
+does nothing is the fault this suite exists to catch. What the keys cannot
+say goes in a named Python check (`check`, see `CHECKS`) rather than into a
+growing schema.
+
+On top of that, every step is held to `invariants` - what must be true of
+any turn, including ones nobody has written an expectation for yet.
+
+Adding a report: drop its JSON in `corpus/`, write its `conversations`, run
+this file. Nothing here changes.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -36,271 +43,306 @@ from app.models import (
 )
 from app.services import booking
 
-MIAMI = ZoneInfo("America/New_York")
-# The morning of the test. "Tomorrow" in their prompts is October 1.
-THEN = datetime(2026, 9, 30, 10, 0, tzinfo=MIAMI)
+REPORTS = sorted((Path(__file__).parent / "corpus").glob("readiness_*.json"))
 
-CORPUS = json.loads(
-    (Path(__file__).parent / "corpus" / "readiness_2026_09_30.json").read_text(encoding="utf-8")
-)
-TURNS = {turn["id"]: turn for turn in CORPUS["turns"]}
-
-SHOP = {
-    "business_hours": {
-        day: {"open": "09:00", "close": "20:00"}
-        for day in ("monday", "tuesday", "wednesday", "thursday", "friday")
-    },
-    # What the business covers, as its owner would list it. Its own
-    # description says South Florida; the list is what the agent can check.
-    "service_areas": [
-        "Miami", "Miami Beach", "Miami-Dade", "Brickell", "Hialeah", "Dania Beach",
-        "Fort Lauderdale", "330", "331", "333",
-    ],
-    "appointments": {"default_kind": "onsite", "duration_minutes": 60},
-}
+STEP_KEYS = {"turn", "say", "added_because", "expect", "check", "note"}
+CONVERSATION_KEYS = {"name", "steps", "contact_metadata", "note"}
 
 
-class _Then(datetime):
-    """`datetime` whose now() is the morning of the test."""
+def _load(path: Path) -> dict:
+    report = json.loads(path.read_text(encoding="utf-8"))
+    report["_turns"] = {turn["id"]: turn for turn in report["turns"]}
+    return report
 
+
+def _cases():
+    for path in REPORTS:
+        report = _load(path)
+        for index, conversation in enumerate(report["conversations"]):
+            yield pytest.param(path, index, id=f"{path.stem}:{conversation['name']}")
+
+
+# ------------------------------------------------------------- the clock
+class _Clock:
+    now: datetime | None = None
+
+
+class _Frozen(datetime):
     @classmethod
     def now(cls, tz=None):
-        moment = THEN.astimezone(timezone.utc)
+        moment = _Clock.now.astimezone(timezone.utc)
         return moment.astimezone(tz) if tz else moment.replace(tzinfo=None)
 
 
-@pytest.fixture(autouse=True)
-def that_morning(monkeypatch):
-    monkeypatch.setattr(booking, "datetime", _Then)
-
-
-@pytest.fixture
-async def shop(db_session):
-    organization = Organization(name=CORPUS["business"], sales_prompt="Construction and remodeling.")
-    organization.timezone = "America/New_York"
-    organization.agent_config = json.loads(json.dumps(SHOP))
-    db_session.add(organization)
-    await db_session.flush()
-    return organization
-
-
-@pytest.fixture
-def customer(db_session, shop):
-    made = []
-
-    async def new() -> CRMContact:
-        contact = CRMContact(
-            organization_id=shop.id,
-            phone_number=f"1305555{len(made):04d}",
-            name="Test customer",
-            pipeline_stage="NEW_LEAD",
-            qualification={},
-            contact_metadata={},
-        )
-        db_session.add(contact)
-        await db_session.flush()
-        made.append(contact)
-        return contact
-
-    return new
-
-
-async def say(db, shop, contact, turn_id: str):
-    return await booking.handle_turn(db, shop, contact, TURNS[turn_id]["prompt"])
-
-
-async def count(db, contact, status=None) -> int:
-    query = select(func.count(Appointment.id)).where(Appointment.contact_id == contact.id)
-    if status:
-        query = query.where(Appointment.status == status)
-    return await db.scalar(query)
-
-
-def local(moment) -> datetime:
-    return booking._aware(moment).astimezone(MIAMI)
-
-
-def test_the_corpus_is_the_whole_report():
-    assert len(CORPUS["turns"]) == 40
-    assert {t["verdict_then"] for t in CORPUS["turns"]} == {"PASS", "FAIL", "REVIEW"}
-
-
-# ------------------------------------------------- nothing here books anything
-# Questions, pressure, handoffs, opt-outs: none of them may touch the diary.
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "turn_id",
-    ["T01", "T06", "T07", "T08", "T09R", "T10", "T11", "T13", "T14", "T15", "T16", "T17",
-     "T18", "T19", "T20", "T23", "T25", "T34", "T36", "T37"],
+# ------------------------------------------------------------- invariants
+# Written from what a customer and the shop are owed, not from how the code
+# decides it, so that a change to the code cannot quietly change them too.
+_NO_GO = re.compile(
+    r"\b(do not|don'?t|dont)\s+(book|schedule|reserve|confirm)\b|\bnot (yet|ready)\b|"
+    r"\b(ask|check with|talk to)\s+my\s+(spouse|wife|husband|partner)\b|\bhold off\b",
+    re.IGNORECASE,
 )
-async def test_no_write(turn_id, db_session, shop, customer):
-    contact = await customer()
-    turn = await say(db_session, shop, contact, turn_id)
-    assert turn.performed is None, f"{turn_id}: {TURNS[turn_id]['scenario']}"
-    assert await count(db_session, contact) == 0
+# What a sentence claiming each action looks like to a person reading it.
+_SAYS_BOOKED = re.compile(
+    r"\b(is|are|been)\s+(now\s+)?(confirmed|booked|scheduled|reserved|set for)\b|\bscheduled for\b",
+    re.IGNORECASE,
+)
+_SAYS_CANCELLED = re.compile(r"\b(cancell?ed|removed|deleted)\b", re.IGNORECASE)
+_SAYS_MOVED = re.compile(r"\b(moved|rescheduled)\b", re.IGNORECASE)
 
 
-# ------------------------------------------------- T01-T04, the Brickell lead
-@pytest.mark.asyncio
-async def test_brickell_lead_without_an_address(db_session, shop, customer):
-    contact = await customer()
-    await say(db_session, shop, contact, "T01")
-
-    # T02: 1am is refused; what is offered is inside the hours.
-    turn = await say(db_session, shop, contact, "T02")
-    assert turn.performed is None
-    assert turn.refusal is not None and turn.refusal.reason == "closed"
-    assert turn.offered and all(9 <= local(s).hour < 20 for s in turn.offered)
-
-    # T03: "the Brickell bathroom project" is a neighbourhood, not somewhere
-    # to drive to. Asked for the address; nothing booked.
-    turn = await say(db_session, shop, contact, "T03")
-    assert turn.performed is None
-    assert turn.refusal.reason == "needs_address"
-    assert await count(db_session, contact) == 0
-
-    # T04: nothing to move, and still nowhere to go.
-    turn = await say(db_session, shop, contact, "T04")
-    assert turn.performed is None
-    assert await count(db_session, contact) == 0
+def _open_at(shop, start: datetime, end: datetime) -> bool:
+    zone = ZoneInfo(shop.timezone)
+    local_start, local_end = start.astimezone(zone), end.astimezone(zone)
+    hours = shop.agent_config["business_hours"].get(local_start.strftime("%A").lower())
+    if not hours or local_start.date() != local_end.date():
+        return False
+    return hours["open"] <= local_start.strftime("%H:%M") and local_end.strftime("%H:%M") <= hours["close"]
 
 
-@pytest.mark.asyncio
-async def test_brickell_lead_with_an_address_books_then_moves(db_session, shop, customer):
-    contact = await customer()
-    await say(db_session, shop, contact, "T01")
-    await say(db_session, shop, contact, "T02")
-    await booking.handle_turn(db_session, shop, contact, "The condo is 1200 Brickell Ave, Unit 4, Miami FL 33131")
+async def invariants(db, shop, contact, message: str, turn, evidence: dict | None, live):
+    now = _Clock.now
+    length = timedelta(minutes=booking.duration_minutes(shop, "onsite"))
+    where = booking.job_place(contact)
 
-    turn = await say(db_session, shop, contact, "T03")
-    assert turn.performed == "booked", turn.prompt_block
-    assert (local(turn.appointment.starts_at).date().isoformat(), local(turn.appointment.starts_at).hour) == ("2026-10-01", 9)
-    assert "1200 Brickell Ave" in turn.appointment.location
+    # Told not to book: nothing is booked.
+    if _NO_GO.search(message):
+        assert not turn.booked, "booked after being told not to"
 
-    turn = await say(db_session, shop, contact, "T04")
-    assert turn.performed == "moved", turn.prompt_block
-    assert (local(turn.appointment.starts_at).date().isoformat(), local(turn.appointment.starts_at).hour) == ("2026-10-02", 10)
-    assert await count(db_session, contact, APPOINTMENT_CONFIRMED) == 1
+    # Nothing offered that has passed, that the shop is shut for, or to a job
+    # outside the area.
+    for slot in turn.offered:
+        assert slot > now, f"offered {slot}, which has passed"
+        assert _open_at(shop, slot, slot + length), f"offered {slot}, outside opening hours"
+    if booking.in_area(shop, where) is False:
+        assert turn.offered == [], f"offered times to a job in {where}"
+        assert not turn.booked
 
+    # Anything written is in the future, inside the hours, at an address in
+    # the area.
+    if turn.performed in ("booked", "moved"):
+        made = turn.appointment
+        starts, ends = booking._aware(made.starts_at), booking._aware(made.ends_at)
+        assert starts > now and _open_at(shop, starts, ends), f"wrote {starts} outside hours or in the past"
+        if made.kind == "onsite":
+            assert made.location, "a site visit with nowhere to go"
+            assert booking.in_area(shop, made.location) is not False, f"a visit at {made.location}"
 
-# ------------------------------------------------- Seattle, three times over
-@pytest.mark.asyncio
-@pytest.mark.parametrize("opening, acceptance", [("T12", None), ("T26", "T27"), ("T38", "T39")])
-async def test_seattle_is_never_offered_or_booked(opening, acceptance, db_session, shop, customer):
-    contact = await customer()
-    turn = await say(db_session, shop, contact, opening)
-    assert turn.offered == [], f"{opening} offered times to a Seattle job"
-    assert turn.refusal is not None and turn.refusal.reason == "outside_area"
-    if acceptance:
-        turn = await say(db_session, shop, contact, acceptance)
-        assert turn.performed is None
-        assert turn.offered == []
-    assert await count(db_session, contact) == 0
-
-
-# ------------------------------------------------- hours, days, dates
-@pytest.mark.asyncio
-@pytest.mark.parametrize("turn_id", ["T21", "T35"])
-async def test_closed_times_are_refused(turn_id, db_session, shop, customer):
-    contact = await customer()
-    turn = await say(db_session, shop, contact, turn_id)
-    assert turn.performed is None
-    assert turn.refusal is not None and turn.refusal.reason == "closed", turn.prompt_block
-    assert await count(db_session, contact) == 0
-
-
-@pytest.mark.asyncio
-async def test_seven_pacific_is_ten_eastern_and_closed(db_session, shop, customer):
-    contact = await customer()
-    turn = await say(db_session, shop, contact, "T24")
-    assert turn.performed is None
-    assert turn.refusal.reason == "closed"
-    assert "10:00 pm" in turn.prompt_block and "America/Los_Angeles" in turn.prompt_block
-    assert await count(db_session, contact) == 0
-
-
-@pytest.mark.asyncio
-async def test_yesterday_is_past(db_session, shop, customer):
-    contact = await customer()
-    turn = await say(db_session, shop, contact, "T22")
-    assert turn.performed is None
-    assert turn.refusal.reason == "past"
-    assert all(local(s) > THEN for s in turn.offered)
-
-
-@pytest.mark.asyncio
-async def test_september_29_offered_accepted_cancelled(db_session, shop, customer):
-    contact = await customer()
-
-    turn = await say(db_session, shop, contact, "T28")
-    assert turn.refusal.reason == "past"
-    assert all(local(s) > THEN for s in turn.offered), "a past time was offered"
-
-    turn = await say(db_session, shop, contact, "T29")
-    assert turn.performed is None
-    assert turn.refusal.reason == "past"
-
-    # T30: there is nothing to cancel, and the reply they got - "has been
-    # removed" - is one the guard now refuses.
-    turn = await say(db_session, shop, contact, "T30")
-    assert turn.performed is None
-    assert turn.refusal.reason == "not_found"
-    assert booking.unverified_claims(TURNS["T30"]["reply_then"], cancelled=False)
-    assert await count(db_session, contact) == 0
-
-
-@pytest.mark.asyncio
-async def test_nothing_on_file_to_cancel(db_session, shop, customer):
-    contact = await customer()
-    turn = await say(db_session, shop, contact, "T31")
-    assert turn.performed is None
-    assert turn.refusal.reason == "not_found"
-
-
-# ------------------------------------------------- consent and details
-@pytest.mark.asyncio
-async def test_do_not_book_it_yet(db_session, shop, customer):
-    contact = await customer()
-    contact.contact_metadata = {"visit_address": "100 Test Avenue, Miami, FL 33101, unit 2"}
-    turn = await say(db_session, shop, contact, "T32")
-    assert turn.performed is None
-    assert turn.refusal.reason == "holding_off"
-    assert await count(db_session, contact) == 0
-
-
-@pytest.mark.asyncio
-async def test_invalid_details_and_no_address(db_session, shop, customer):
-    contact = await customer()
-    turn = await say(db_session, shop, contact, "T33")
-    assert turn.performed is None
-    assert turn.refusal.reason in ("needs_address", "contact_invalid")
-    assert await count(db_session, contact) == 0
-    # The confirmation they were sent is one the guard refuses.
-    assert booking.unverified_claims(TURNS["T33"]["reply_then"], appointment=None)
-
-
-# ------------------------------------------------- T40-T41, book then cancel
-@pytest.mark.asyncio
-async def test_full_details_book_and_cancel_cancels(db_session, shop, customer):
-    contact = await customer()
-
-    turn = await say(db_session, shop, contact, "T40")
-    assert turn.performed == "booked", turn.prompt_block
-    starts = local(turn.appointment.starts_at)
-    assert (starts.date().isoformat(), starts.hour) == ("2026-10-05", 11)
-    assert "100 Test Avenue" in turn.appointment.location
-
-    turn = await say(db_session, shop, contact, "T41")
-    assert turn.performed == "cancelled", turn.prompt_block
-    assert await count(db_session, contact, APPOINTMENT_CANCELLED) == 1
-    assert await count(db_session, contact, APPOINTMENT_CONFIRMED) == 0
-    assert await count(db_session, contact) == 1, "a replacement appointment was written"
-
-
-# ------------------------------------------------- what they were told
-@pytest.mark.parametrize("turn_id", ["T03", "T24", "T33"])
-def test_false_confirmations_they_received_are_now_refused(turn_id):
-    """Each of these confirmed a visit the record, as it now stands, would not hold."""
-    assert booking.unverified_claims(TURNS[turn_id]["reply_then"], appointment=None), (
-        TURNS[turn_id]["reply_then"]
+    # One live appointment per customer, at most.
+    confirmed = await db.scalar(
+        select(func.count(Appointment.id)).where(
+            Appointment.contact_id == contact.id, Appointment.status == APPOINTMENT_CONFIRMED
+        )
     )
+    assert confirmed <= 1, f"{confirmed} live appointments for one customer"
+
+    # The reply they got then: if it said something happened that did not
+    # happen now, the guard must refuse it.
+    said = (evidence or {}).get("reply_then") or ""
+    if said:
+        claims = (
+            (_SAYS_BOOKED.search(said) and live is None)
+            or (_SAYS_CANCELLED.search(said) and not turn.cancelled)
+            or (_SAYS_MOVED.search(said) and not turn.moved)
+        )
+        if claims:
+            assert booking.unverified_claims(
+                said, appointment=live, cancelled=turn.cancelled, moved=turn.moved
+            ), f"the guard lets through: {said!r}"
+
+
+# ------------------------------------------------------------- named checks
+async def move_chains_to_the_original(db, shop, contact, turn, history):
+    """A move cancels the old row and points the new one at it: one change, both halves."""
+    assert turn.previous is not None, "no previous appointment recorded for the move"
+    assert turn.appointment.replaces_id == turn.previous.id
+    assert turn.previous.status == APPOINTMENT_CANCELLED
+
+
+CHECKS = {"move_chains_to_the_original": move_chains_to_the_original}
+
+
+# ------------------------------------------------------------- the runner
+async def _rows(db, contact) -> dict:
+    async def count(status=None):
+        query = select(func.count(Appointment.id)).where(Appointment.contact_id == contact.id)
+        if status:
+            query = query.where(Appointment.status == status)
+        return await db.scalar(query)
+
+    return {
+        "confirmed": await count(APPOINTMENT_CONFIRMED),
+        "cancelled": await count(APPOINTMENT_CANCELLED),
+        "total": await count(),
+    }
+
+
+# One handler per expect key, and the keys a step may use are exactly these.
+# A key that is accepted and never asserted is the silent pass this suite is
+# here to catch - and it happened: "guard_blocks_reply_then" was written on
+# five steps and read by nothing, until a run with the invariants switched
+# off showed two reverted fixes going unnoticed. Declaring a key now means
+# writing its handler.
+class Seen:
+    """What a step's expectations are checked against."""
+
+    def __init__(self, db, shop, contact, turn, live, evidence, where):
+        self.db, self.shop, self.contact, self.turn = db, shop, contact, turn
+        self.live, self.evidence, self.where = live, evidence, where
+
+
+def _performed(seen, wanted):
+    """null | "booked" | "moved" | "cancelled". Required on every step."""
+    assert seen.turn.performed == wanted, (
+        f"{seen.where}: performed {seen.turn.performed!r}\n{seen.turn.prompt_block}"
+    )
+
+
+def _refusal(seen, wanted):
+    """The Refusal reason, or null for none."""
+    got = seen.turn.refusal.reason if seen.turn.refusal is not None else None
+    assert got == wanted, f"{seen.where}: refusal {got!r}\n{seen.turn.prompt_block}"
+
+
+def _offered(seen, wanted):
+    """"none" | "some"."""
+    assert wanted in ("none", "some"), f"{seen.where}: offered is 'none' or 'some'"
+    assert bool(seen.turn.offered) == (wanted == "some"), f"{seen.where}: offered {seen.turn.offered}"
+
+
+def _slot(seen, wanted):
+    """"YYYY-MM-DD HH:MM" in the shop's zone, of this turn's appointment."""
+    assert seen.turn.appointment is not None, f"{seen.where}: no appointment to have a slot"
+    local = booking._aware(seen.turn.appointment.starts_at).astimezone(ZoneInfo(seen.shop.timezone))
+    assert local.strftime("%Y-%m-%d %H:%M") == wanted, f"{seen.where}: slot {local}"
+
+
+def _location_contains(seen, wanted):
+    """A substring of this turn's appointment's location."""
+    assert seen.turn.appointment is not None, f"{seen.where}: no appointment to have a location"
+    assert wanted in (seen.turn.appointment.location or ""), (
+        f"{seen.where}: location {seen.turn.appointment.location!r}"
+    )
+
+
+async def _rows_are(seen, wanted):
+    """{"confirmed": n, "cancelled": n, "total": n} for this customer, after the step."""
+    rows = await _rows(seen.db, seen.contact)
+    unknown = set(wanted) - set(rows)
+    assert not unknown, f"{seen.where}: rows has only {sorted(rows)}"
+    for key, count in wanted.items():
+        assert rows[key] == count, f"{seen.where}: {key} rows {rows[key]}, wanted {count}"
+
+
+def _prompt_contains(seen, wanted):
+    """Strings the agent's instructions for this turn must include."""
+    for text in wanted:
+        assert text in seen.turn.prompt_block, f"{seen.where}: {text!r} not in\n{seen.turn.prompt_block}"
+
+
+def _guard_blocks_reply_then(seen, wanted):
+    """true: the reply the tester received on this turn is refused by the guard now."""
+    assert wanted is True, f"{seen.where}: guard_blocks_reply_then only takes true"
+    said = (seen.evidence or {}).get("reply_then")
+    assert said, f"{seen.where}: no reply_then in the evidence to check"
+    assert booking.unverified_claims(
+        said, appointment=seen.live, cancelled=seen.turn.cancelled, moved=seen.turn.moved
+    ), f"{seen.where}: the guard lets through {said!r}"
+
+
+EXPECT = {
+    "performed": _performed,
+    "refusal": _refusal,
+    "offered": _offered,
+    "slot": _slot,
+    "location_contains": _location_contains,
+    "rows": _rows_are,
+    "prompt_contains": _prompt_contains,
+    "guard_blocks_reply_then": _guard_blocks_reply_then,
+}
+
+
+async def _expect(seen: Seen, expect: dict):
+    unknown = set(expect) - set(EXPECT)
+    assert not unknown, (
+        f"{seen.where}: unknown expect keys {sorted(unknown)} - add a handler to EXPECT or use a check"
+    )
+    assert "performed" in expect, f"{seen.where}: every step must say what was performed (null for nothing)"
+    for key, wanted in expect.items():
+        result = EXPECT[key](seen, wanted)
+        if hasattr(result, "__await__"):
+            await result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path, index", list(_cases()))
+async def test_conversation(path, index, db_session, monkeypatch):
+    report = _load(path)
+    conversation = report["conversations"][index]
+    assert not set(conversation) - CONVERSATION_KEYS, f"unknown conversation keys in {conversation['name']}"
+
+    _Clock.now = datetime.fromisoformat(report["shop"]["now"])
+    monkeypatch.setattr(booking, "datetime", _Frozen)
+
+    shop = Organization(name=report["business"], sales_prompt="")
+    shop.timezone = report["shop"]["timezone"]
+    shop.agent_config = json.loads(json.dumps(report["shop"]["agent_config"]))
+    db_session.add(shop)
+    await db_session.flush()
+    contact = CRMContact(
+        organization_id=shop.id,
+        phone_number="13055550000",
+        name="Test customer",
+        pipeline_stage="NEW_LEAD",
+        qualification={},
+        contact_metadata=dict(conversation.get("contact_metadata") or {}),
+    )
+    db_session.add(contact)
+    await db_session.flush()
+
+    history = []
+    for number, step in enumerate(conversation["steps"], start=1):
+        assert not set(step) - STEP_KEYS, f"unknown step keys {sorted(set(step) - STEP_KEYS)}"
+        assert ("turn" in step) != ("say" in step), "a step names an evidence turn or says something, not both"
+        if "say" in step:
+            assert step.get("added_because"), "a step of our own says why it was added"
+        evidence = report["_turns"].get(step["turn"]) if "turn" in step else None
+        assert "turn" not in step or evidence, f"no evidence turn {step.get('turn')}"
+        message = evidence["prompt"] if evidence else step["say"]
+        where = f"{conversation['name']}, step {number} ({step.get('turn') or 'ours'})"
+        assert "expect" in step or "check" in step, f"{where}: nothing is asserted"
+
+        turn = await booking.handle_turn(db_session, shop, contact, message)
+        live = await booking.upcoming_for(db_session, contact.id)
+        history.append(turn)
+
+        await invariants(db_session, shop, contact, message, turn, evidence, live)
+        if "expect" in step:
+            await _expect(Seen(db_session, shop, contact, turn, live, evidence, where), step["expect"])
+        if "check" in step:
+            assert step["check"] in CHECKS, f"{where}: no check called {step['check']!r}"
+            await CHECKS[step["check"]](db_session, shop, contact, turn, history)
+
+
+def test_every_evidence_turn_is_specified():
+    """A turn in the evidence with no step is a finding nobody decided about."""
+    for path in REPORTS:
+        report = _load(path)
+        used = {step.get("turn") for c in report["conversations"] for step in c["steps"]}
+        missing = sorted(set(report["_turns"]) - used)
+        assert not missing, f"{path.name}: no conversation plays {missing}"
+
+
+@pytest.mark.asyncio
+async def test_the_runner_refuses_what_it_does_not_know():
+    """An expect key the runner does not read must fail, not pass."""
+    seen = Seen(None, None, None, None, None, None, "probe")
+    with pytest.raises(AssertionError, match="unknown expect keys"):
+        await _expect(seen, {"performed": None, "booked_at": "x"})
+
+
+def test_every_key_in_the_corpus_has_a_handler():
+    for path in REPORTS:
+        for conversation in _load(path)["conversations"]:
+            for step in conversation["steps"]:
+                assert set(step.get("expect", {})) <= set(EXPECT), (path.name, conversation["name"], step)
