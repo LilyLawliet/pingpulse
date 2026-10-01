@@ -54,7 +54,7 @@ from app.services import (
     ws_manager,
 )
 from app.schemas import GenerationResult
-from app.services import analytics, invites, notifications, oplog, orders, outbox, pipelines, whatsapp
+from app.services import analytics, handover_question, invites, notifications, oplog, orders, outbox, pipelines, whatsapp
 from app.services.twilio_service import (
     Sender,
     signature_url,
@@ -216,9 +216,14 @@ async def acknowledge_handoff(
     Recorded as a message like any other, so the dashboard shows the operator
     exactly what the customer was told before they picked the conversation up.
     """
+    text = await languages.in_customer_language(handoff_reply(organization), customer_message)
+    return await _send_fixed(db, organization, contact, channel, phone_number, text)
+
+
+async def _send_fixed(db, organization, contact, channel, phone_number: str, text: str) -> bool:
+    """Send a reply that no model wrote, recorded like any other. Never raises."""
     from app.services import outbox
 
-    text = await languages.in_customer_language(handoff_reply(organization), customer_message)
     try:
         outbound = Message(
             organization_id=organization.id,
@@ -244,7 +249,7 @@ async def acknowledge_handoff(
         await db.flush()
         return bool(delivery.sent or delivery.queued)
     except Exception as exc:  # noqa: BLE001 - the handover matters more
-        logger.warning("could not acknowledge the handoff to %s: %s", phone_number, exc)
+        logger.warning("could not send a fixed reply to %s: %s", phone_number, exc)
         return False
 
 
@@ -674,6 +679,16 @@ async def process_inbound_message(
     if escalation and contact.ai_enabled:
         return await _hand_over(db, organization, contact, channel, phone_number, body, escalation)
 
+    # They were asked whether to be passed to the team. A yes hands over;
+    # anything else is a message like any other, and the question lapses.
+    if handover_question.asked(contact.contact_metadata) and contact.ai_enabled:
+        contact.contact_metadata = handover_question.forget(contact.contact_metadata)
+        if booking.agreed_to_it(body):
+            return await _hand_over(
+                db, organization, contact, channel, phone_number, body,
+                "agreed to be passed to the team",
+            )
+
     if not consent.agent_may_reply(contact):
         reason = "opted out" if contact.opt_out else "a person has taken this conversation over"
         await manager.broadcast(
@@ -723,11 +738,19 @@ async def process_inbound_message(
     )
 
     # Asking for a person in words the keyword list did not know. The model
-    # read it; the same hand-over follows.
+    # read it, and a reading is a guess: it is put to them as a question, and
+    # their yes hands over. Handing over stops the agent, so a misread
+    # booking used to end in silence.
     if booking.heard_as_a_person(analysis, body) and contact.ai_enabled:
-        return await _hand_over(
-            db, organization, contact, channel, phone_number, body, "asked for a person"
+        contact.contact_metadata = handover_question.ask(contact.contact_metadata)
+        text = await languages.in_customer_language(handover_question.question(organization), body)
+        told = await _send_fixed(db, organization, contact, channel, phone_number, text)
+        await db.commit()
+        await manager.broadcast(
+            ws_manager.EVENT_SYNC,
+            {"contact_id": str(contact.id), "organization_id": str(organization.id)},
         )
+        return {"status": "asked_about_handover", "contact_id": str(contact.id), "customer_told": told}
 
     memory = customer_memory.apply_analysis(contact.memory, analysis)
     contact.memory = memory

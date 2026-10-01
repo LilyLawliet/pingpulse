@@ -1374,7 +1374,8 @@ def named_moment(organization, named: Named, kind: str | None = None) -> datetim
 _YES = re.compile(
     r"^\W*(yes|yes please|yeah|yep|yup|ok|okay|ok please|sure|confirm|confirmed|book it|"
     r"go ahead|please do|perfect|great|sounds good|that works|works for me|done|"
-    r"haan|han|ji|ji haan|theek hai|thik hai|sahi hai|si|sí|claro|confirmo|dale|oui|ja)\b[\s\W]*"
+    r"haan ji|han ji|ji haan|ji bilkul|bilkul|haan|han|ji|theek hai|thik hai|sahi hai|"
+    r"si|sí|claro|confirmo|dale|oui|ja)\b[\s\W]*"
     # "ok, go ahead and book it" is still only a yes.
     r"(?:(?:and\s+)?(?:please|thanks|thank you|go ahead|book it|do it|kar do|kardo)\b[\s\W]*){0,3}$",
     re.IGNORECASE,

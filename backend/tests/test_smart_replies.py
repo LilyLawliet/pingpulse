@@ -93,12 +93,25 @@ async def test_a_request_for_a_person_the_keywords_missed_still_hands_over(db_se
     monkeypatch.setattr("app.api.webhook.llm_service.generate_reply", generate)
     monkeypatch.setattr(notifications, "raise_and_send", record)
 
-    payload = TwilioWebhookPayload.model_validate(
-        {"From": "whatsapp:+923009990000", "To": "whatsapp:+16602075318",
-         "Body": "bhai kisi banday se baat karwa do", "MessageSid": "SMp1"}
-    )
-    result = await process_inbound_message(db_session, payload)
-    assert result["status"] == "escalated"
-    assert "escalation" in raised
+    async def say(text, sid):
+        payload = TwilioWebhookPayload.model_validate(
+            {"From": "whatsapp:+923009990000", "To": "whatsapp:+16602075318",
+             "Body": text, "MessageSid": sid}
+        )
+        return await process_inbound_message(db_session, payload)
+
+    # The keywords missed it and the model read it. A reading is a guess, so
+    # it is asked first: handing over stops the agent.
+    result = await say("bhai kisi banday se baat karwa do", "SMp1")
+    assert result["status"] == "asked_about_handover", result
+    assert result["customer_told"] is True
+    assert "escalation" not in raised
     contact = (await db_session.execute(select(CRMContact))).scalars().first()
+    assert contact.ai_enabled is True
+
+    # Their yes is what hands it over.
+    result = await say("haan ji", "SMp2")
+    assert result["status"] == "escalated", result
+    assert "escalation" in raised
+    await db_session.refresh(contact)
     assert contact.ai_enabled is False

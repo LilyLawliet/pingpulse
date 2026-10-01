@@ -174,7 +174,8 @@ async def test_a_booking_the_analyzer_reads_as_wanting_a_person_is_not_handed_ov
 
     async def reads_a_person(history, message, stage="NEW"):
         analysis = await real(history, message, stage)
-        return {**analysis, "wants_person": True}
+        # What the analyzer did on October 1: a name read as a person.
+        return {**analysis, "wants_person": "ahmed" in message.lower()}
 
     async def groq(prompt):
         return "Here are the times."
@@ -186,5 +187,23 @@ async def test_a_booking_the_analyzer_reads_as_wanting_a_person_is_not_handed_ov
     assert body["escalated"] is False, body
     assert body["booking"]["offered"], "the booking request was not answered with times"
 
+    # A guess that they want a person is asked, not acted on; their yes hands over.
     person = (await org_a.post("/api/v1/agent/simulate", json={"message": "can I talk to Ahmed please"})).json()
-    assert person["escalated"] is True, "a request for a person must still be handed over"
+    assert person["escalated"] is False and person["provider"] == "handover", person
+    assert "pass this conversation to the team" in person["reply"]
+    yes = (
+        await org_a.post(
+            "/api/v1/agent/simulate", json={"message": "yes", "booking_state": person["booking_state"]}
+        )
+    ).json()
+    assert yes["escalated"] is True, yes
+
+    # Anything but a yes lets the question lapse.
+    other = (await org_a.post("/api/v1/agent/simulate", json={"message": "can I talk to Ahmed please"})).json()
+    moved_on = (
+        await org_a.post(
+            "/api/v1/agent/simulate",
+            json={"message": "actually what are your hours?", "booking_state": other["booking_state"]},
+        )
+    ).json()
+    assert moved_on["escalated"] is False and "pending_handover" not in moved_on["booking_state"]

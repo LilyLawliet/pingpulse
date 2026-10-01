@@ -37,6 +37,7 @@ from app.models import (
 from app.schemas import GenerationResult
 from app.services import (
     analyzer,
+    handover_question,
     orders,
     languages,
     notifications,
@@ -765,9 +766,37 @@ async def simulate(
     )
     knowledge = retrieval.as_prompt_block(chunks)
 
+    state = payload.get("booking_state") if isinstance(payload.get("booking_state"), dict) else {}
     escalation = agent_config.needs_escalation(message, organization)
+    # The same order as a live chat: their own words for a person hand over;
+    # a yes to "shall I pass you to the team?" hands over; a guess asks.
+    if not escalation and handover_question.asked(state) and booking.agreed_to_it(message):
+        escalation = "agreed to be passed to the team"
+    state = handover_question.forget(state)
     if not escalation and booking.heard_as_a_person(analysis, message):
-        escalation = "asked for a person"
+        return {
+            "reply": await languages.in_customer_language(handover_question.question(organization), message),
+            "escalated": False,
+            "provider": "handover",
+            "latency_ms": 0,
+            "fallback_used": False,
+            "knowledge_used": [chunk.title for chunk in chunks],
+            "understood": meaning,
+            "quote": None,
+            "why": None,
+            "needs_team": None,
+            "booking": {
+                "note": (
+                    "The agent thinks they may want a person, so it asks first. On WhatsApp "
+                    "nothing is handed over until they say yes - try it."
+                ),
+                "offered": [],
+                "performed": None,
+            },
+            "order": {"note": None},
+            "booking_state": handover_question.ask(state),
+            "sent": False,
+        }
     if escalation:
         return {
             "reply": None,
@@ -800,7 +829,6 @@ async def simulate(
     order_reply = None
     turn_reply = None
     order_note = None
-    state = payload.get("booking_state") if isinstance(payload.get("booking_state"), dict) else {}
     if booking.wants_booking(message) and not booking.booking_enabled(organization):
         reachable = await notifications.can_reach(db, organization)
         booking_note = (

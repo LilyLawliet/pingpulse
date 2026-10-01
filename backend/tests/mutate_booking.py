@@ -35,6 +35,7 @@ import subprocess, sys, pathlib
 
 SRC = pathlib.Path("app/services/booking.py")
 LLM = pathlib.Path("app/services/llm_service.py")
+HANDOVER = pathlib.Path("app/services/handover_question.py")
 
 
 # Read and write the bytes ourselves. read_text() decodes with the platform's
@@ -52,7 +53,7 @@ def _read(path: pathlib.Path) -> tuple[str, str]:
 
 SOURCES: dict[pathlib.Path, str] = {}
 ENDINGS: dict[pathlib.Path, str] = {}
-for _path in (SRC, LLM):
+for _path in (SRC, LLM, HANDOVER):
     SOURCES[_path], ENDINGS[_path] = _read(_path)
 
 
@@ -132,6 +133,14 @@ MUTATIONS = {
     "a no is not heard as a no": (
         "    if held is not None and _NO.match(text or \"\"):",
         "    if False:",
+    ),
+    "a booking read as a person is asked about": (
+        "    return bool(analysis.get(\"wants_person\")) and not wants_booking(text)",
+        "    return bool(analysis.get(\"wants_person\"))",
+    ),
+    "a yes to the handover question is ignored": (HANDOVER,
+        "    return datetime.now(timezone.utc) - made <= timedelta(minutes=VALID_MINUTES)",
+        "    return False",
     ),
     "analyzer meeting flag trusted": (
         "    asked_meeting = is_meeting(text) or (wants_meeting and not does_site_visits(organization))",
