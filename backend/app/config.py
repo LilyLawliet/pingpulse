@@ -38,7 +38,11 @@ class Settings(BaseSettings):
     gemini_api_key_5: str = ""
 
     embedding_model: str = "gemini-embedding-001"
-    groq_model: str = "llama-3.3-70b-versatile"
+    # Groq decommissioned llama-3.3-70b-versatile on 2026-08-16. Every call to
+    # it since has been a 404, so the agent ran on its no-model fallback:
+    # sentences read out of the documents, and "passed it to the team" for
+    # anything they did not literally contain. This is Groq's own replacement.
+    groq_model: str = "openai/gpt-oss-120b"
     # The 1.5 models are being retired; a retired name 404s on every call and
     # turns every fallback into a failure. Flash, because the fallback only
     # runs when a customer is already waiting.

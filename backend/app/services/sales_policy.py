@@ -294,6 +294,12 @@ def _stems(text: str) -> set[str]:
     return {w[:5] for w in re.findall(r"[a-z']{3,}", (text or "").lower()) if w not in _COMMON}
 
 
+_TO_THE_AGENT = re.compile(
+    r"\bthe agent\b|\bagents?\s+(?:must|should|can|may)\b|^(?:never|do not|don'?t|only quote|quote only)\b",
+    re.IGNORECASE,
+)
+
+
 def relevant_sentences(message: str, knowledge_chunks: list[Any], limit: int = 2) -> str:
     """The sentences of the retrieved passages that are about this message.
 
@@ -313,6 +319,11 @@ def relevant_sentences(message: str, knowledge_chunks: list[Any], limit: int = 2
         for sentence in re.split(offers_text.SENTENCE_END + r"|\n+", body):
             sentence = sentence.strip()
             if len(sentence.split()) < 5 or "|" in sentence or not sentence[:1].isalnum():
+                continue
+            # Written to the agent, not to the customer: "Outside business
+            # hours, the agent can still answer questions..." was read out
+            # word for word as a reply.
+            if _TO_THE_AGENT.search(sentence):
                 continue
             hits = sum(1 for stem in asked if any(s.startswith(stem) for s in _stems(sentence)))
             if hits:

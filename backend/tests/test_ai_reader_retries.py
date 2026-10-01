@@ -70,3 +70,27 @@ async def test_every_key_failing_is_still_none():
         return _answer(429)
 
     assert await understanding._post_json("Groq", ["k1", "k2"], send, _read, 30) is None
+
+
+def test_the_default_groq_model_is_not_the_retired_one():
+    from app.config import Settings
+
+    assert Settings.model_fields["groq_model"].default != "llama-3.3-70b-versatile"
+    assert understanding.groq_reasoning("openai/gpt-oss-120b") == {"reasoning_effort": "low"}
+    assert understanding.groq_reasoning("some-other-model") == {}
+
+
+def test_the_fallback_never_reads_out_a_line_written_to_the_agent():
+    from types import SimpleNamespace
+
+    from app.services import sales_policy
+
+    passage = SimpleNamespace(
+        content=(
+            "Who it is for: Property managers, business owners, and commercial developers. "
+            "Outside business hours, the agent can still answer questions and collect project details."
+        )
+    )
+    answer = sales_policy.relevant_sentences("business hours for commercial work?", [passage])
+
+    assert "the agent" not in answer
