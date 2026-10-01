@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.services import booking
 from app.services.analyzer import _coerce, heuristic_analysis, wants_to_book
 from app.services.sales_policy import contains_handoff, directives
 
@@ -162,3 +163,51 @@ def test_offline_fallback_is_not_written_for_a_clothing_shop():
     for reply in (generic, images):
         assert "outfit" not in reply.lower()
         assert "colour" not in reply.lower()
+
+
+# --------------------------------------------------------------------------
+# Deferring in the words a trade customer uses
+# --------------------------------------------------------------------------
+# `holding_off` is the only thing between "I named a time" and a booking: in
+# book(), a named time with no hold and no question is taken outright. The
+# first list of people to defer to was domestic - spouse, wife, husband,
+# landlord, HOA - and the shops on this product are trade suppliers and POS
+# vendors. "Tuesday at 3 works, but let me run it by my team" named a time,
+# matched no hold, and was booked.
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "tuesday at 3 works, but let me check with my team first",
+        "3pm thursday is good, I just need to run it by my team",
+        "friday 10am suits me, but I need approval from finance first",
+        "book tuesday 2pm once I confirm with my colleagues",
+        "wednesday at 11 maybe, let me sleep on it",
+        "thursday 4pm, I'll get back to you to confirm",
+        "pencil me in for monday at 9",
+        "monday at 2 looks right, let me run it by the board",
+        "I'll take friday 9am after I check with procurement",
+    ],
+)
+def test_naming_a_time_while_deferring_books_nothing(message):
+    assert booking.holding_off(message) is True, message
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "book it",
+        "yes please book tuesday at 3",
+        "go ahead and confirm",
+        "that works, lock it in",
+        "schedule me for friday",
+        "I want to book a site visit",
+        "monday does not work, book tuesday instead",
+        "I'm not free monday but book me tuesday",
+    ],
+)
+def test_a_plain_booking_is_not_mistaken_for_deferring(message):
+    """The cost of this failing is the opposite one: a customer who asked to
+    book is told nothing was booked."""
+    assert booking.holding_off(message) is False, message

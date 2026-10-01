@@ -1714,10 +1714,26 @@ _HOLDING_OFF = re.compile(
     r"|\b(?:hold(?:ing)? off|wait(?:ing)? (?:until|till|for|to)|before (?:i|we) (?:book|commit|"
     r"decide|confirm))\b"
     r"|\b(?:ask|check with|talk to|talk with|speak to|speak with|discuss (?:it |this |that )?with|"
-    r"run (?:it|this|that) by|confirm with|consult)\s+(?:my|our|the)\s+"
-    r"(?:spouse|wife|husband|partner|family|boss|landlord|hoa|manager|other half)\b"
+    # "check with procurement" names no "my" or "our"; the determiner is
+    # optional because the list below is specific enough to carry it alone.
+    r"run (?:it|this|that) by|confirm with|consult)\s+(?:(?:my|our|the)\s+)?"
+    # The people a customer defers to. The domestic half was here already;
+    # the working half was not, and the shops using this are trade suppliers
+    # and POS vendors whose customers say "my team", not "my wife". "Tuesday
+    # at 3 works, but let me run it by my team" named a time, failed every
+    # hold, and was booked outright.
+    r"(?:spouse|wife|husband|partner|partners|family|boss|landlord|hoa|manager|other half|"
+    r"team|colleague|colleagues|co-?workers?|finance|accountant|procurement|board|"
+    r"head office|supervisor|director|client|supplier)\b"
+    r"|\bneed (?:an? )?(?:approval|sign-?off|the go-?ahead|clearance) from\b"
     r"|\b(?:considering|thinking (?:about|of)|just (?:looking|asking|checking|curious|wondering)|"
-    r"tentative\w*|pencil(?:led)? in)\b",
+    r"tentative\w*)\b"
+    # "pencil me in", "pencil us in" - the words between were not allowed for.
+    r"|\bpencil(?:led)?\s+(?:me\s+|us\s+|it\s+|them\s+)?in\b"
+    # Plainly deferring. A hold that fires wrongly costs one more message; a
+    # booking that fires wrongly costs an appointment nobody agreed to.
+    r"|\b(?:sleep on it|get back to (?:you|u)|revert to you|"
+    r"give me (?:a|another|some|a few) (?:day|days|time|while)|let me think)\b",
     re.IGNORECASE,
 )
 
