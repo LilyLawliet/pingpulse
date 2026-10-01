@@ -143,8 +143,8 @@ MUTATIONS = {
         "    return False",
     ),
     "analyzer meeting flag trusted": (
-        "    asked_meeting = is_meeting(text) or (wants_meeting and not does_site_visits(organization))",
-        "    asked_meeting = is_meeting(text) or wants_meeting",
+        "    asked_meeting = is_meeting(text)\n",
+        "    asked_meeting = is_meeting(text) or wants_meeting\n",
     ),
     # Entries for another file name it first.
     "Roman Urdu matched inside words": (LLM,

@@ -382,3 +382,46 @@ def test_asking_to_talk_is_a_meeting(text):
 )
 def test_demos_and_meetings_can_be_cancelled_and_moved_by_name(text, move):
     assert (booking.wants_move(text) if move else booking.wants_cancel(text)), text
+
+
+@pytest.mark.asyncio
+async def test_the_analyzer_does_not_turn_a_booking_into_a_call(db_session):
+    """ "my name is ahmad, book for me", then "9:00 AM", was read back as a phone
+    consultation at a remodeller that had not set its appointment type yet:
+    the analyzer marked the booking request as a meeting."""
+    from app.models import CRMContact, Organization
+
+    shop = Organization(name="Constrivo Group", sales_prompt="Remodeling.")
+    shop.timezone = "America/New_York"
+    shop.agent_config = {
+        "business_hours": {
+            d: {"open": "09:00", "close": "20:00"}
+            for d in ("monday", "tuesday", "wednesday", "thursday", "friday")
+        },
+        "appointments": {"min_notice_minutes": 0},
+    }
+    db_session.add(shop)
+    await db_session.flush()
+    contact = CRMContact(
+        organization_id=shop.id, phone_number="13055550142", name="Ahmad",
+        pipeline_stage="NEW_LEAD", qualification={}, contact_metadata={},
+    )
+    db_session.add(contact)
+    await db_session.flush()
+
+    offer = await booking.handle_turn(db_session, shop, contact, "my name is ahmad, book for me", wants_meeting=True)
+    assert offer.offered and not offer.meeting
+    picked = await booking.handle_turn(db_session, shop, contact, "the first one", wants_meeting=True)
+    assert picked.proposed and picked.proposed["kind"] == "onsite", picked.proposed
+    assert "phone" not in picked.reply
+
+    # The customer's own words still make it a call.
+    other = CRMContact(
+        organization_id=shop.id, phone_number="13055550143", name="Sam",
+        pipeline_stage="NEW_LEAD", qualification={}, contact_metadata={},
+    )
+    db_session.add(other)
+    await db_session.flush()
+    await booking.handle_turn(db_session, shop, other, "can we set up a quick phone call?")
+    call = await booking.handle_turn(db_session, shop, other, "the first one")
+    assert call.proposed and call.proposed["kind"] == "phone", call.proposed

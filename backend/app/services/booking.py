@@ -2412,14 +2412,15 @@ async def _decide(
     # the shop's meeting kind and length, not as the visit a retail customer
     # gets, and it keeps what it was about.
     details = offer_details(contact)
-    # The analyzer's "wants a meeting" is a reading, and a loose one: it says
-    # yes to nearly any booking request, and "I'll take 2" after a list of
-    # times came back as a meeting. A meeting is a phone call, so for a shop
-    # that drives to its customers it skipped the address and the area - and
-    # a remodeller's customer was booked a phone consultation nobody asked
-    # for, with nowhere on record to go. For those shops only the customer's
-    # own words make it a call.
-    asked_meeting = is_meeting(text) or (wants_meeting and not does_site_visits(organization))
+    # What KIND of appointment it is comes from the customer's own words ("a
+    # phone call", "over Zoom", "a demo") or the shop's own default - never
+    # from the analyzer. Its "wants a meeting" says yes to nearly any booking
+    # request, and a meeting is a call: "I'll take 2" booked a remodeller's
+    # customer a phone consultation with no address. Limiting that to shops
+    # set up for site visits was not enough - a shop that had not filled its
+    # settings in yet still had "book for me" read back as a phone
+    # consultation. The flag still counts as wanting something scheduled.
+    asked_meeting = is_meeting(text)
     meeting = existing is None and (asked_meeting or bool(offered and details.get("meeting")))
     new_kind = None
     about = None
