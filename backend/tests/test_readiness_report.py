@@ -488,3 +488,37 @@ def test_where_they_are_and_where_the_job_is(beluga):
     place = booking.place_in("I am in California but the property is in Miami.")
     assert booking.in_area(organization, place) is True
     assert booking.in_area(organization, booking.place_in("my house in Seattle, Washington.")) is False
+
+
+# --------------------------------------------------------------- October 1, Test agent
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Bathroom remodeling usually takes 2-6 weeks, including permits. We'd like to make it easy.",
+        "Our design team can help with a chair-height vanity, regarding your layout.",
+    ],
+)
+def test_english_is_not_roman_urdu(reply):
+    assert not llm_service.is_roman_urdu(reply)
+
+
+@pytest.mark.parametrize("reply", ["Ji bilkul, ye kitne ka hai bhai?", "Aap ko kya chahiye?"])
+def test_roman_urdu_is_still_read(reply):
+    assert llm_service.is_roman_urdu(reply)
+
+
+@pytest.mark.parametrize(
+    "reply, expected",
+    [
+        ("You're booked for Monday 5 October at 9:30 AM.", True),
+        ("All set - Monday at 9.30am.", True),
+        ("Which two Monday slots work best for you?", False),
+        ("You're booked in.", False),
+    ],
+)
+def test_a_booking_reply_states_the_time(reply, expected):
+    assert llm_service.confirms(reply, "site visit on Monday 5 October at 9:30 am") is expected
+
+
+def test_a_time_on_the_hour_may_be_said_short():
+    assert llm_service.confirms("See you Monday at 10 AM", "site visit on Monday 5 October at 10:00 am")

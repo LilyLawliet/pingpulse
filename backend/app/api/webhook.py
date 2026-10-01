@@ -1019,6 +1019,7 @@ async def process_inbound_message(
             appointment=appointment_turn.appointment,
             did_cancel=appointment_turn.cancelled,
             did_move=appointment_turn.moved,
+            did_book=appointment_turn.booked,
             handoff_allowed=handed_to_a_person,
             # A reply may only mention pictures it is actually sending.
             photos_attached=bool(outbound_media),

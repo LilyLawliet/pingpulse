@@ -928,6 +928,7 @@ async def simulate(
             appointment=appointment,
             did_cancel=performed == "cancelled",
             did_move=performed == "moved",
+            did_book=performed == "booked",
             handoff_allowed=bool(booking_block and "colleague has just been alerted" in booking_block),
             known_prices=offer.prices,
             known_quantities=offer.quote.quantities(),

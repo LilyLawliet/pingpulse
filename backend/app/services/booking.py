@@ -1646,7 +1646,17 @@ _MEETING = re.compile(
     r"\b(meetings?|meet (up|with|you|your team)|demos?|walk-?through|discovery call|sales call|"
     r"intro(ductory)? call|video call|zoom|google meet|"
     r"(ms |microsoft )?teams (call|meeting|link)|(on|over|via) (ms |microsoft )?teams|"
-    r"(have|set up|arrange|jump on|hop on|get on|book|schedule) a (quick |short )?(phone |video )?call|phone call|"
+    r"(have|set up|arrange|jump on|hop on|get on|book|schedule|do) a (quick |short |brief |initial )?(phone |video )?call|phone call|"
+    # For a shop that drives to its customers, only these words now make a
+    # turn a call rather than a visit, so the plain ways of asking for one
+    # have to be here: without them a customer wanting a quick chat is asked
+    # for a street address, or sent a van.
+    #
+    # Anchored on the phone itself. "Call me when you arrive" is a site visit
+    # with a note attached, so "call me" alone is deliberately not enough.
+    r"(talk|speak|chat|discuss|go over (it|this)) (it |this |that )?(over|on) the phone|"
+    r"(over|on) the phone (first|instead|before)|"
+    r"phone consultation|consultation call|call rather than|call instead of (a |an )?(visit|someone)|"
     r"(partnership|wholesale|distribution|distributor|reseller|b2b|pricing|onboarding) "
     r"(call|chat|meeting|discussion))\b",
     re.IGNORECASE,
@@ -2148,7 +2158,14 @@ async def _handle_turn(
     # the shop's meeting kind and length, not as the visit a retail customer
     # gets, and it keeps what it was about.
     details = offer_details(contact)
-    asked_meeting = is_meeting(text) or wants_meeting
+    # The analyzer's "wants a meeting" is a reading, and a loose one: it says
+    # yes to nearly any booking request, and "I'll take 2" after a list of
+    # times came back as a meeting. A meeting is a phone call, so for a shop
+    # that drives to its customers it skipped the address and the area - and
+    # a remodeller's customer was booked a phone consultation nobody asked
+    # for, with nowhere on record to go. For those shops only the customer's
+    # own words make it a call.
+    asked_meeting = is_meeting(text) or (wants_meeting and not does_site_visits(organization))
     meeting = existing is None and (asked_meeting or bool(offered and details.get("meeting")))
     new_kind = None
     about = None

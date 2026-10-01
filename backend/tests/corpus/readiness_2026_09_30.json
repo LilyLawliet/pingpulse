@@ -1021,6 +1021,46 @@
           }
         }
       ]
+    },
+    {
+      "name": "Picking a slot when the analyzer reads it as a meeting",
+      "steps": [
+        {
+          "say": "What times do you have Monday?",
+          "analyzer_says": {
+            "wants_meeting": true
+          },
+          "added_because": "found in the Test agent on October 1: the analyzer marks most booking requests as wanting a meeting",
+          "expect": {
+            "performed": null,
+            "offered": "some"
+          }
+        },
+        {
+          "say": "I'll take 2",
+          "analyzer_says": {
+            "wants_meeting": true
+          },
+          "added_because": "this booked a phone consultation on Monday at 9:30 with no address: the meeting flag skipped the site-visit checks",
+          "expect": {
+            "performed": null,
+            "refusal": "needs_address",
+            "rows": {
+              "total": 0
+            }
+          }
+        },
+        {
+          "say": "It's 1200 Brickell Ave, Unit 4, Miami FL 33131",
+          "added_because": "the address books the time they picked, as a site visit - and 'Unit 4' does not pick the fourth time",
+          "expect": {
+            "performed": "booked",
+            "slot": "2026-10-05 09:30",
+            "location_contains": "1200 Brickell Ave"
+          },
+          "check": "is_a_site_visit"
+        }
+      ]
     }
   ]
 }

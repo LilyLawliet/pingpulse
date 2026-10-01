@@ -9,7 +9,8 @@ runs the given test files against each. Every row should read RED. A row
 that reads green is a fault the tests would let back in.
 
 It was used to prove the move of the replay's expectations into JSON lost
-nothing: the hand-written version caught 10 of these, the JSON one all 14.
+nothing: the hand-written version caught 10 of the first 14, the JSON one all
+14. Entries naming llm_service.py break the reply step rather than booking.
 
 Each mutation must match booking.py exactly once, or the run stops: one that
 no longer matches would silently test nothing. When booking.py is changed,
@@ -18,20 +19,30 @@ update the strings here. The file is restored afterwards whatever happens.
 import subprocess, sys, pathlib
 
 SRC = pathlib.Path("app/services/booking.py")
+LLM = pathlib.Path("app/services/llm_service.py")
+
 
 # Read and write the bytes ourselves. read_text() decodes with the platform's
-# encoding, which is cp1252 on Windows and cannot read this file at all; and
-# the mutation strings below are written with \n, so the text has to be
-# normalised to match them. Whatever line ending the file actually uses is
-# put back, so a checkout with CRLF is restored as it was rather than
-# rewritten wholesale.
-_RAW = SRC.read_bytes().decode("utf-8")
-_ENDING = "\r\n" if "\r\n" in _RAW else "\n"
-ORIGINAL = _RAW.replace("\r\n", "\n")
+# encoding, which is cp1252 on Windows and cannot read booking.py at all: the
+# harness died before mutating anything, so nobody on Windows could check what
+# the tests catch. The mutation strings below are written with \n, so the text
+# is normalised to match them, and whatever ending the file actually uses is
+# put back - restoring a CRLF checkout as plain \n rewrites every line of it,
+# and a harness that hands your source back changed is worse than one that
+# will not run.
+def _read(path: pathlib.Path) -> tuple[str, str]:
+    raw = path.read_bytes().decode("utf-8")
+    return raw.replace("\r\n", "\n"), ("\r\n" if "\r\n" in raw else "\n")
 
 
-def _put(text: str) -> None:
-    SRC.write_bytes(text.replace("\n", _ENDING).encode("utf-8"))
+SOURCES: dict[pathlib.Path, str] = {}
+ENDINGS: dict[pathlib.Path, str] = {}
+for _path in (SRC, LLM):
+    SOURCES[_path], ENDINGS[_path] = _read(_path)
+
+
+def _write(path: pathlib.Path, text: str) -> None:
+    path.write_bytes(text.replace("\n", ENDINGS[path]).encode("utf-8"))
 
 MUTATIONS = {
     "holding_off ignored": (
@@ -95,16 +106,33 @@ MUTATIONS = {
         "def contact_problems(text: str) -> list[str]:\n",
         "def contact_problems(text: str) -> list[str]:\n    return []\n",
     ),
+    "analyzer meeting flag trusted": (
+        "    asked_meeting = is_meeting(text) or (wants_meeting and not does_site_visits(organization))",
+        "    asked_meeting = is_meeting(text) or wants_meeting",
+    ),
+    # Entries for another file name it first.
+    "Roman Urdu matched inside words": (LLM,
+        '    hits = sum(1 for marker in _ROMAN_URDU_WORDS if marker.search(lowered))',
+        '    hits = sum(1 for marker in ROMAN_URDU_MARKERS if marker in f" {lowered} ")',
+    ),
+    "a booking need not be confirmed": (LLM,
+        "    done = \"booked\" if did_book else \"moved\" if did_move else \"cancelled\" if did_cancel else None",
+        "    done = None",
+    ),
 }
 
 files = sys.argv[1:]
 results = {}
 try:
-    for name, (old, new) in MUTATIONS.items():
-        count = ORIGINAL.count(old)
+    for name, mutation in MUTATIONS.items():
+        path, old, new = mutation if len(mutation) == 3 else (SRC, *mutation)
+        original = SOURCES[path]
+        count = original.count(old)
         if count != 1:
-            sys.exit(f"mutation {name!r} matches {count} times; fix the harness")
-        _put(ORIGINAL.replace(old, new))
+            sys.exit(f"mutation {name!r} matches {count} times in {path}; fix the harness")
+        for other, text in SOURCES.items():
+            _write(other, text)
+        _write(path, original.replace(old, new))
         row = {}
         for f in files:
             proc = subprocess.run(
@@ -114,7 +142,8 @@ try:
             row[f] = "RED" if proc.returncode else "green"
         results[name] = row
 finally:
-    _put(ORIGINAL)
+    for path, text in SOURCES.items():
+        _write(path, text)
 
 width = max(len(n) for n in results)
 print(" " * width, " | ".join(pathlib.Path(f).stem for f in files))

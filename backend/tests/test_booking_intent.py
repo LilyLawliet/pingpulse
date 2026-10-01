@@ -248,3 +248,39 @@ def test_choosing_the_second_time_picks_it(message):
 def test_a_number_that_counts_something_picks_nothing(message):
     """A pick here books a time the customer never chose."""
     assert booking.chosen_slot(message, _OFFERED, _ZONE) is None, message
+
+
+# --------------------------------------------------------------------------
+# Asking for a call, at a business that drives to its customers
+# --------------------------------------------------------------------------
+# The analyzer's "wants a meeting" no longer counts for a site-visit shop,
+# because it said yes to nearly every booking request and so skipped the
+# address and the areas. That leaves the customer's own words as the only way
+# to ask for a call, so the plain ways of asking have to be read - otherwise
+# somebody wanting a quick chat is asked for a street address, or sent a van.
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["can we do a quick call first?", "can we hop on a call?", "id prefer a phone call",
+     "lets do a zoom", "can we talk on the phone first", "can we discuss over the phone",
+     "teams meeting please", "schedule a call", "book a consultation call",
+     "phone consultation please", "can we go over it on the phone"],
+)
+def test_asking_for_a_call_is_read_as_one(message):
+    assert booking.is_meeting(message) is True, message
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["come out monday and call me when you arrive",
+     "can someone come to 1200 Brickell Ave on tuesday, call me when close",
+     "I need an estimate at my house, ring me first",
+     "book a site visit for friday",
+     "I want 2 bathrooms done",
+     "come and look at the bathroom"],
+)
+def test_a_visit_with_a_phone_note_is_still_a_visit(message):
+    """A van is being sent. Reading this as a call skips the address and the
+    area check, which is the fault this whole guard exists for."""
+    assert booking.is_meeting(message) is False, message

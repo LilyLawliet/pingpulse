@@ -45,7 +45,11 @@ from app.services import booking
 
 REPORTS = sorted((Path(__file__).parent / "corpus").glob("readiness_*.json"))
 
-STEP_KEYS = {"turn", "say", "added_because", "expect", "check", "note"}
+# `analyzer_says` is what the analyzer read on the live turn, passed in the way
+# the webhook passes it: {"wants_meeting": true}. It is a reading of the
+# message, not a fact, and booking must not trust it further than that.
+STEP_KEYS = {"turn", "say", "added_because", "expect", "check", "note", "analyzer_says"}
+ANALYZER_KEYS = {"wants_meeting"}
 CONVERSATION_KEYS = {"name", "steps", "contact_metadata", "note"}
 
 
@@ -159,7 +163,15 @@ async def move_chains_to_the_original(db, shop, contact, turn, history):
     assert turn.previous.status == APPOINTMENT_CANCELLED
 
 
-CHECKS = {"move_chains_to_the_original": move_chains_to_the_original}
+async def is_a_site_visit(db, shop, contact, turn, history):
+    """Booked as the visit the shop does, not as a call nobody asked for."""
+    assert turn.appointment.kind == "onsite", f"booked a {turn.appointment.kind}"
+
+
+CHECKS = {
+    "move_chains_to_the_original": move_chains_to_the_original,
+    "is_a_site_visit": is_a_site_visit,
+}
 
 
 # ------------------------------------------------------------- the runner
@@ -312,7 +324,11 @@ async def test_conversation(path, index, db_session, monkeypatch):
         where = f"{conversation['name']}, step {number} ({step.get('turn') or 'ours'})"
         assert "expect" in step or "check" in step, f"{where}: nothing is asserted"
 
-        turn = await booking.handle_turn(db_session, shop, contact, message)
+        said = step.get("analyzer_says") or {}
+        assert not set(said) - ANALYZER_KEYS, f"{where}: analyzer_says takes {sorted(ANALYZER_KEYS)}"
+        turn = await booking.handle_turn(
+            db_session, shop, contact, message, wants_meeting=bool(said.get("wants_meeting"))
+        )
         live = await booking.upcoming_for(db_session, contact.id)
         history.append(turn)
 
