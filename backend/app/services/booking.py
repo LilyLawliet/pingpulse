@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -1373,7 +1374,7 @@ def named_moment(organization, named: Named, kind: str | None = None) -> datetim
 _YES = re.compile(
     r"^\W*(yes|yes please|yeah|yep|yup|ok|okay|ok please|sure|confirm|confirmed|book it|"
     r"go ahead|please do|perfect|great|sounds good|that works|works for me|done|"
-    r"haan|han|ji|ji haan|theek hai|thik hai|sahi hai|si|oui|ja)\b[\s\W]*"
+    r"haan|han|ji|ji haan|theek hai|thik hai|sahi hai|si|sí|claro|confirmo|dale|oui|ja)\b[\s\W]*"
     # "ok, go ahead and book it" is still only a yes.
     r"(?:(?:and\s+)?(?:please|thanks|thank you|go ahead|book it|do it|kar do|kardo)\b[\s\W]*){0,3}$",
     re.IGNORECASE,
@@ -1580,6 +1581,11 @@ class TurnResult:
     previous: "Appointment | None" = None  # what a move replaced
     calendar_down: bool = False            # the owner's own calendar couldn't be read
     meeting: bool = False                  # a meeting, not a visit
+    # Waiting on their yes: what would be done, and the read-back they are sent
+    # for it. The read-back is rendered here, not by a model, so what they
+    # agree to is exactly what will be written.
+    proposed: dict | None = None
+    reply: str | None = None
 
     def __post_init__(self):
         if self.offered is None:
@@ -1597,6 +1603,8 @@ class TurnResult:
         line about something else. Nothing here comes from a model.
         """
         zone = agent_config.zone_of(organization)
+        if self.reply:
+            return self.reply
         if self.booked and self.appointment is not None:
             return f"You're booked: {describe(self.appointment)}."
         if self.moved and self.appointment is not None:
@@ -2131,7 +2139,238 @@ def _why_not(organization, refusal: Refusal, moment: datetime, their_zone: ZoneI
     return said
 
 
+# ------------------------------------------------------- nothing without a yes
+# A booking, a move or a cancellation is never written from the message that
+# asked for it. The message is read - which time, which appointment, where -
+# and what would be done is read back to them from the record, word for word
+# the same whoever asked and however they put it. Only a plain yes to that
+# writes anything.
+#
+# Every fault in the September 30 readiness test and the replays after it
+# was a reading of free text going straight to the diary: "DO NOT book it
+# yet" booked, "Unit 4" picked the fourth time, "I'll take 2" booked a call,
+# 7pm Pacific booked 7pm Eastern. Each was fixed one phrasing at a time, and
+# customers have more phrasings than any list. With a read-back in between a
+# misreading is something they see and correct, not something they find on
+# the day.
+PENDING_KEY = "pending_action"
+
+_NO = re.compile(
+    r"^\W*(no|nope|nah|no thanks|no thank you|not that|that'?s wrong|wrong|wait|hold on|"
+    r"nahi|nahin|nai|non|nein)\b[\s\W]*$",
+    re.IGNORECASE,
+)
+_STARTS_YES = re.compile(r"^\W*(yes|yeah|yep|yup|ok|okay|sure|confirm\w*|perfect|great|si|sí|haan|ji)\b", re.IGNORECASE)
+
+
+def pending(contact) -> dict | None:
+    """What is waiting on their yes, if it is still fresh."""
+    held = (getattr(contact, "contact_metadata", None) or {}).get(PENDING_KEY)
+    if not isinstance(held, dict):
+        return None
+    try:
+        made = datetime.fromisoformat(held["made"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if made.tzinfo is None:
+        made = made.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - made > timedelta(minutes=OFFER_VALID_MINUTES):
+        return None
+    return held
+
+
+def forget_pending(contact) -> None:
+    metadata = dict(getattr(contact, "contact_metadata", None) or {})
+    metadata.pop(PENDING_KEY, None)
+    contact.contact_metadata = metadata
+
+
+def _hold(contact, action: dict) -> None:
+    metadata = dict(getattr(contact, "contact_metadata", None) or {})
+    metadata[PENDING_KEY] = {**action, "made": datetime.now(timezone.utc).isoformat()}
+    contact.contact_metadata = metadata
+
+
+def _readback_of(organization, at: datetime, kind: str, location: str | None) -> str:
+    """The sentence for an appointment that does not exist yet, as describe() would say it."""
+    from types import SimpleNamespace
+
+    length = timedelta(minutes=duration_minutes(organization, kind))
+    return describe(
+        SimpleNamespace(
+            timezone_name=str(agent_config.zone_of(organization)),
+            starts_at=at,
+            ends_at=at + length,
+            kind=kind,
+            location=location,
+            is_blocked=False,
+        )
+    )
+
+
+def _propose(contact, action: dict, says: str, *, appointment=None, lead: str = "") -> TurnResult:
+    """Hold the action and ask for a yes to it. Nothing is written."""
+    _hold(contact, action)
+    verb = {"book": "book it", "move": "move it", "cancel": "cancel it"}[action["action"]]
+    keep_it = " or tell me if you'd rather keep it" if action["action"] == "cancel" else " or tell me what to change"
+    reply = f"{lead}To confirm: {says}. Reply YES to {verb},{keep_it}."
+    return TurnResult(
+        prompt_block=(
+            "=== APPOINTMENTS ===\n"
+            f"NOTHING has been booked, moved or cancelled. They are being asked to confirm: {says}. "
+            "Do NOT say it is done."
+        ),
+        appointment=appointment,
+        proposed=action,
+        reply=reply,
+    )
+
+
+async def _carry_out(db, organization, contact, held: dict) -> TurnResult:
+    """Do exactly what they said yes to, checked again now."""
+    zone = agent_config.zone_of(organization)
+    their_zone = ZoneInfo(held["their_zone"]) if held.get("their_zone") else None
+    action = held["action"]
+
+    if action == "book":
+        at = datetime.fromisoformat(held["at"])
+        result = await book(
+            db, organization, contact, at,
+            kind=held.get("kind"), location=held.get("location"), notes=held.get("notes"),
+        )
+        if result.ok:
+            forget_offer(contact)
+            meeting = bool(held.get("meeting"))
+            return TurnResult(
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    f"They said yes, and it is BOOKED, just now, successfully: {describe(result.appointment)}"
+                    f"{_their_time(_aware(result.appointment.starts_at), their_zone)}. "
+                    "Confirm exactly that - the same day, the same time, the same "
+                    "kind of appointment. Do not add a detail that is not in it."
+                    + (
+                        f" Give them this link to add it to their own calendar: "
+                        f"{add_to_calendar_link(organization, result.appointment)}"
+                        if meeting
+                        else ""
+                    )
+                ),
+                appointment=result.appointment,
+                performed="booked",
+                meeting=meeting,
+            )
+        slots = await _near(db, organization, at, held.get("kind"))
+        remember_offer(contact, slots, OFFER_BOOK, kind=held.get("kind"), meeting=bool(held.get("meeting")))
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"They said yes, but {_why_not(organization, result, at, their_zone)}\n"
+                + as_prompt_block(organization, contact, slots)
+                + "\nSay what happened and offer these instead. Nothing is booked."
+            ),
+            refusal=result,
+            offered=slots,
+        )
+
+    appointment = await db.get(Appointment, uuid.UUID(held["appointment_id"]))
+    if appointment is None or appointment.contact_id != contact.id:
+        appointment = None
+
+    if action == "cancel":
+        result = await cancel(db, appointment)
+        if result.ok:
+            forget_offer(contact)
+            return TurnResult(
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    f"They said yes, and their {describe(appointment)} has been CANCELLED, "
+                    "just now, successfully. Confirm that plainly and briefly."
+                ),
+                appointment=appointment,
+                performed="cancelled",
+            )
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"The cancellation did NOT go through: {result.message} "
+                "Tell them what you see and do not claim it is cancelled."
+            ),
+            appointment=appointment,
+            refusal=result,
+        )
+
+    at = datetime.fromisoformat(held["at"])
+    result = await reschedule(db, organization, appointment, at)
+    if result.ok:
+        forget_offer(contact)
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"They said yes, and their appointment has been MOVED, just now, successfully. "
+                f"It was: {describe(appointment)}. It is now: "
+                f"{describe(result.appointment)}{_their_time(at, their_zone)}. Confirm exactly that "
+                "and nothing else."
+            ),
+            appointment=result.appointment,
+            performed="moved",
+            previous=appointment,
+        )
+    still = appointment if appointment is not None and appointment.status == APPOINTMENT_CONFIRMED else None
+    slots = await _near(db, organization, at, still.kind if still else None) if still else []
+    if still:
+        remember_offer(contact, slots, OFFER_MOVE)
+    return TurnResult(
+        prompt_block=(
+            "=== APPOINTMENTS ===\n"
+            f"The move did NOT happen. {_why_not(organization, result, at, their_zone)}"
+            + (f" They still have their original {describe(still)}. Say so." if still else "")
+        ),
+        appointment=still,
+        refusal=result,
+        offered=slots,
+    )
+
+
+def _same_action(one: dict | None, other: dict | None) -> bool:
+    keys = ("action", "at", "appointment_id", "location", "kind")
+    return bool(one and other) and all(one.get(k) == other.get(k) for k in keys)
+
+
 async def _handle_turn(
+    db, organization, contact, text: str, *, wants_meeting: bool = False
+) -> TurnResult:
+    held = pending(contact)
+    if held is not None and agreed_to_it(text):
+        forget_pending(contact)
+        return await _carry_out(db, organization, contact, held)
+    forget_pending(contact)
+
+    if held is not None and _NO.match(text or ""):
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                "They said no to what was read back to them, so NOTHING was booked, moved "
+                "or cancelled. Ask what they would like instead."
+            ),
+            appointment=await upcoming_for(db, contact.id),
+            refusal=Refusal("declined", "Nothing has been changed."),
+        )
+
+    turn = await _decide(db, organization, contact, text, wants_meeting=wants_meeting)
+    # "Yes, Monday at 10 is right" is a yes with the time said again: when it
+    # reads as exactly what was put to them, it is the yes, not a new question.
+    if held is not None and _STARTS_YES.match(text or "") and _same_action(turn.proposed, held):
+        forget_pending(contact)
+        return await _carry_out(db, organization, contact, held)
+    return turn
+
+
+def agreed_to_it(text: str) -> bool:
+    """A plain yes, and nothing else in the message to read."""
+    return bool(_YES.match(text or ""))
+
+
+async def _decide(
     db, organization, contact, text: str, *, wants_meeting: bool = False
 ) -> TurnResult:
     existing = await upcoming_for(db, contact.id)
@@ -2247,26 +2486,11 @@ async def _handle_turn(
                 ),
                 refusal=Refusal("not_found", "There is no appointment booked to cancel."),
             )
-        result = await cancel(db, existing)
-        if result.ok:
-            forget_offer(contact)
-            return TurnResult(
-                prompt_block=(
-                    "=== APPOINTMENTS ===\n"
-                    f"Their {describe(existing)} has been CANCELLED, just now, "
-                    "successfully. Confirm that plainly and briefly."
-                ),
-                appointment=existing,
-                performed="cancelled",
-            )
-        return TurnResult(
-            prompt_block=(
-                "=== APPOINTMENTS ===\n"
-                f"The cancellation did NOT go through: {result.message} "
-                "Tell them what you see and do not claim it is cancelled."
-            ),
+        return _propose(
+            contact,
+            {"action": "cancel", "appointment_id": str(existing.id)},
+            f"cancel your {describe(existing)}",
             appointment=existing,
-            refusal=result,
         )
 
     # ------------------------------------------------------------ the past
@@ -2298,20 +2522,20 @@ async def _handle_turn(
         if target is not None:
             if picked is None and only_asking(text):
                 return await _put_to_them(db, organization, contact, target, OFFER_MOVE, existing)
-            result = await reschedule(db, organization, existing, target)
-            if result.ok:
-                forget_offer(contact)
-                return TurnResult(
-                    prompt_block=(
-                        "=== APPOINTMENTS ===\n"
-                        f"Their appointment has been MOVED, just now, successfully. "
-                        f"It was: {describe(existing)}. It is now: "
-                        f"{describe(result.appointment)}. Confirm exactly that and "
-                        "nothing else."
-                    ),
-                    appointment=result.appointment,
-                    performed="moved",
-                    previous=existing,
+            result = await _can_move(db, organization, existing, target)
+            if result is None:
+                when = _readback_of(organization, target, existing.kind, existing.location)
+                remember_offer(contact, [target], OFFER_MOVE)
+                return _propose(
+                    contact,
+                    {
+                        "action": "move",
+                        "appointment_id": str(existing.id),
+                        "at": target.isoformat(),
+                        "their_zone": named.zone.key if named.zone else None,
+                    },
+                    f"move your {describe(existing)} to {when}{_their_time(target, named.zone)}",
+                    appointment=existing,
                 )
             slots = await _near(db, organization, target, existing.kind)
             remember_offer(contact, slots, OFFER_MOVE)
@@ -2441,102 +2665,9 @@ async def _handle_turn(
                 db, organization, contact, target, OFFER_BOOK, keep=keep, their_zone=named.zone
             )
 
-        # Everything the shop said it needs before sending somebody out.
-        # A meeting is a conversation, not a van: the questions a shop asks
-        # before sending somebody out don't hold it back.
-        outstanding = [] if meeting else _missing_for_booking(organization, contact)
-        if outstanding:
-            name, asks = outstanding[0]
-            remember_offer(contact, [target], OFFER_BOOK, **keep)
-            return TurnResult(
-                prompt_block=(
-                    "=== APPOINTMENTS ===\n"
-                    f"They chose {_say_moment(target, zone)} - but this business "
-                    f"needs to know {asks or name} before an appointment can be "
-                    "made. Ask them for that one thing. Nothing is booked yet, so "
-                    "do NOT say it is."
-                ),
-                refusal=Refusal("needs_qualification", f"Still need: {asks or name}"),
-                offered=[target],
-            )
-
-        # Where they are going and how to reach them. Both are asked for
-        # before anything is written, and the time is held while they answer.
-        location = meeting_link(organization) if meeting and new_kind == "video" else None
-        if visit_kind == "onsite":
-            location = visit_address(contact)
-        problem = None
-        if requires_address(organization, visit_kind) and not location:
-            problem = ("address", (
-                "the street address of the property, with the unit or apartment "
-                "number if there is one"
-            ))
-        elif unusable_details(contact):
-            problem = ("details", "; ".join(unusable_details(contact)) + " - ask for a correct one")
-        if problem is not None:
-            needs, ask = problem
-            refusal = await is_free(
-                db, organization, target,
-                target + timedelta(minutes=duration_minutes(organization, visit_kind)),
-            )
-            if refusal is None:
-                remember_offer(contact, [target], OFFER_BOOK, needs=needs, **keep)
-                return TurnResult(
-                    prompt_block=(
-                        "=== APPOINTMENTS ===\n"
-                        f"{_say_moment(target, zone)}{_their_time(target, named.zone)} is free "
-                        f"and they chose it, but it is NOT booked: first we need {ask}. "
-                        "Ask for that one thing. Do NOT say anything is booked, confirmed "
-                        "or reserved, and do NOT say a visit will happen."
-                    ),
-                    refusal=Refusal(
-                        "needs_address" if needs == "address" else "contact_invalid",
-                        f"Before this can be booked we need {ask}.",
-                    ),
-                    offered=[target],
-                )
-
-        result = await book(
-            db,
-            organization,
-            contact,
-            target,
-            kind=new_kind or visit_kind,
-            location=location,
-            notes=f"Meeting request: {about}" if meeting and about else None,
-        )
-        if result.ok:
-            forget_offer(contact)
-            return TurnResult(
-                prompt_block=(
-                    "=== APPOINTMENTS ===\n"
-                    f"BOOKED, just now, successfully: {describe(result.appointment)}"
-                    f"{_their_time(_aware(result.appointment.starts_at), named.zone)}. "
-                    "Confirm exactly that - the same day, the same time, the same "
-                    "kind of appointment. Do not add a detail that is not in it."
-                    + (
-                        f" Give them this link to add it to their own calendar: "
-                        f"{add_to_calendar_link(organization, result.appointment)}"
-                        if meeting
-                        else ""
-                    )
-                ),
-                appointment=result.appointment,
-                performed="booked",
-                meeting=meeting,
-            )
-
-        slots = await _near(db, organization, target, new_kind)
-        remember_offer(contact, slots, OFFER_BOOK, **keep)
-        return TurnResult(
-            prompt_block=(
-                "=== APPOINTMENTS ===\n"
-                f"{_why_not(organization, result, target, named.zone)}\n"
-                + as_prompt_block(organization, contact, slots, meeting_kind_=new_kind if meeting else None)
-                + "\nSay what happened and offer these instead. Nothing is booked."
-            ),
-            refusal=result,
-            offered=slots,
+        return await _propose_booking(
+            db, organization, contact, target,
+            keep=keep, visit_kind=visit_kind, their_zone=named.zone,
         )
 
     if named.days:
@@ -2570,6 +2701,112 @@ async def _handle_turn(
         prompt_block=as_prompt_block(
             organization, contact, slots, meeting_kind_=new_kind if meeting else None
         ),
+        offered=slots,
+    )
+
+
+async def _can_move(db, organization, existing, target) -> Refusal | None:
+    """Why this appointment could not be moved to this time, or None if it could."""
+    if _aware(existing.starts_at) == target:
+        return Refusal("unchanged", "That is the time it is already booked for.")
+    length = timedelta(minutes=duration_minutes(organization, existing.kind))
+    return await is_free(db, organization, target, target + length, ignore_id=existing.id)
+
+
+async def _propose_booking(
+    db, organization, contact, target, *, keep: dict, visit_kind: str, their_zone=None, lead: str = ""
+) -> TurnResult:
+    """Everything a booking needs, checked; then the read-back, or why not."""
+    zone = agent_config.zone_of(organization)
+    meeting = bool(keep.get("meeting"))
+    new_kind = keep.get("kind")
+    about = keep.get("about")
+    kind = (new_kind or visit_kind).lower()
+
+    # Everything the shop said it needs before sending somebody out.
+    # A meeting is a conversation, not a van: the questions a shop asks
+    # before sending somebody out don't hold it back.
+    outstanding = [] if meeting else _missing_for_booking(organization, contact)
+    if outstanding:
+        name, asks = outstanding[0]
+        remember_offer(contact, [target], OFFER_BOOK, **keep)
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"They chose {_say_moment(target, zone)} - but this business "
+                f"needs to know {asks or name} before an appointment can be "
+                "made. Ask them for that one thing. Nothing is booked yet, so "
+                "do NOT say it is."
+            ),
+            refusal=Refusal("needs_qualification", f"Still need: {asks or name}"),
+            offered=[target],
+        )
+
+    # Where they are going and how to reach them. Both are asked for
+    # before anything is put to them, and the time is held while they answer.
+    location = meeting_link(organization) if meeting and new_kind == "video" else None
+    if visit_kind == "onsite":
+        location = visit_address(contact)
+    length = timedelta(minutes=duration_minutes(organization, kind))
+    refusal = await is_free(db, organization, target, target + length)
+    problem = None
+    if requires_address(organization, visit_kind) and not location:
+        problem = ("address", (
+            "the street address of the property, with the unit or apartment "
+            "number if there is one"
+        ))
+    elif unusable_details(contact):
+        problem = ("details", "; ".join(unusable_details(contact)) + " - ask for a correct one")
+    if problem is not None and refusal is None:
+        needs, ask = problem
+        remember_offer(contact, [target], OFFER_BOOK, needs=needs, **keep)
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"{_say_moment(target, zone)}{_their_time(target, their_zone)} is free "
+                f"and they chose it, but it is NOT booked: first we need {ask}. "
+                "Ask for that one thing. Do NOT say anything is booked, confirmed "
+                "or reserved, and do NOT say a visit will happen."
+            ),
+            refusal=Refusal(
+                "needs_address" if needs == "address" else "contact_invalid",
+                f"Before this can be booked we need {ask}.",
+            ),
+            offered=[target],
+        )
+
+    if refusal is None:
+        refusal = visit_refusal(organization, kind, location)
+    if refusal is None:
+        when = _readback_of(organization, target, kind, location)
+        # The time stays the standing offer, so the next message is read as
+        # about it: "make it 11 instead" corrects it, "yes, 10 is right" agrees.
+        remember_offer(contact, [target], OFFER_BOOK, **keep)
+        return _propose(
+            contact,
+            {
+                "action": "book",
+                "at": target.isoformat(),
+                "kind": kind,
+                "location": location,
+                "notes": f"Meeting request: {about}" if meeting and about else None,
+                "meeting": meeting,
+                "their_zone": their_zone.key if their_zone else None,
+            },
+            f"{when}{_their_time(target, their_zone)}",
+            lead=lead,
+        )
+
+    slots = await _near(db, organization, target, new_kind)
+    remember_offer(contact, slots, OFFER_BOOK, **keep)
+    return TurnResult(
+        prompt_block=(
+            "=== APPOINTMENTS ===\n"
+            f"{_why_not(organization, refusal, target, their_zone)}\n"
+            + as_prompt_block(organization, contact, slots, meeting_kind_=new_kind if meeting else None)
+            + "\nSay what happened and offer these instead. Nothing is booked."
+        ),
+        refusal=refusal,
         offered=slots,
     )
 
@@ -2622,6 +2859,37 @@ async def _put_to_them(
         db, organization, moment, moment + length,
         ignore_id=existing.id if existing is not None else None,
     )
+    if refusal is None and existing is None and purpose == OFFER_BOOK:
+        # "Is Thursday at 3 free?" is answered with the read-back itself, so a
+        # yes to it books - one question, not two.
+        remember_offer(contact, [moment], purpose, **keep)
+        return await _propose_booking(
+            db, organization, contact, moment,
+            keep=keep, visit_kind=(keep.get("kind") or default_kind(organization)).lower(),
+            their_zone=their_zone, lead=f"{_say_moment(moment, zone)} is free. ",
+        )
+    if refusal is None and existing is not None:
+        # Somebody already booked naming another free time: read back the
+        # move. If they meant a second appointment, they say so instead of yes.
+        if _aware(existing.starts_at) == moment:
+            return TurnResult(
+                prompt_block=as_prompt_block(organization, contact, [], appointment=existing),
+                appointment=existing,
+            )
+        when = _readback_of(organization, moment, existing.kind, existing.location)
+        remember_offer(contact, [moment], OFFER_MOVE)
+        return _propose(
+            contact,
+            {
+                "action": "move",
+                "appointment_id": str(existing.id),
+                "at": moment.isoformat(),
+                "their_zone": their_zone.key if their_zone else None,
+            },
+            f"move your {describe(existing)} to {when}{_their_time(moment, their_zone)}",
+            appointment=existing,
+            lead=f"{_say_moment(moment, zone)} is free. ",
+        )
     if refusal is None:
         remember_offer(contact, [moment], purpose, **keep)
         question = (

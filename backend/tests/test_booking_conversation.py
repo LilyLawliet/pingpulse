@@ -23,6 +23,8 @@ from app.models import (
 )
 from app.services import booking
 
+from .conftest import confirmed
+
 OPEN_WEEKDAYS = {
     day: {"open": "09:00", "close": "17:00"}
     for day in ("monday", "tuesday", "wednesday", "thursday", "friday")
@@ -150,10 +152,16 @@ async def test_offer_choose_book_confirm(remodeller, db_session):
     assert offer.offered
     first = offer.offered[0]
 
-    # 2. She picks one.
-    chosen = await booking.handle_turn(
+    # 2. She picks one, and is read back what would be booked. Nothing is yet.
+    proposal = await booking.handle_turn(
         db_session, organization, contact, "the first one please"
     )
+    assert proposal.performed is None
+    assert await booking.upcoming_for(db_session, contact.id) is None
+    assert "Reply YES" in proposal.reply and "site visit" in proposal.reply
+
+    # 3. She says yes.
+    chosen = await booking.handle_turn(db_session, organization, contact, "yes")
 
     assert chosen.performed == "booked"
     assert chosen.appointment is not None
@@ -192,10 +200,10 @@ async def test_an_unclear_answer_books_nothing_and_asks_again(remodeller, db_ses
 async def test_cancelling_a_real_appointment_updates_the_record(remodeller, db_session):
     organization, contact = remodeller
     await booking.handle_turn(db_session, organization, contact, "what times are free?")
-    booked = await booking.handle_turn(db_session, organization, contact, "the first one")
+    booked = await confirmed(db_session, organization, contact, "the first one")
     assert booked.performed == "booked"
 
-    cancelled = await booking.handle_turn(
+    cancelled = await confirmed(
         db_session, organization, contact, "please cancel my appointment"
     )
 
@@ -214,7 +222,7 @@ async def test_moving_an_appointment_leaves_one_live_row(remodeller, db_session)
 
     organization, contact = remodeller
     await booking.handle_turn(db_session, organization, contact, "what times are free?")
-    await booking.handle_turn(db_session, organization, contact, "the first one")
+    await confirmed(db_session, organization, contact, "the first one")
 
     # Ask to move, get offered times, pick a different one.
     asked = await booking.handle_turn(
@@ -223,7 +231,7 @@ async def test_moving_an_appointment_leaves_one_live_row(remodeller, db_session)
     assert asked.performed is None
     assert asked.offered
 
-    moved = await booking.handle_turn(
+    moved = await confirmed(
         db_session, organization, contact, "move it to the last one"
     )
 
@@ -280,7 +288,7 @@ async def test_a_booking_waits_for_the_information_the_shop_requires(db_session)
     contact.qualification = {**contact.qualification, "address": "12 Mill Lane, Miami"}
     await db_session.flush()
     await booking.handle_turn(db_session, organization, contact, "when can you come?")
-    now_booked = await booking.handle_turn(db_session, organization, contact, "the first one")
+    now_booked = await confirmed(db_session, organization, contact, "the first one")
 
     assert now_booked.performed == "booked"
 
@@ -309,7 +317,7 @@ async def test_a_customer_who_already_has_one_is_not_offered_another(
 ):
     organization, contact = remodeller
     await booking.handle_turn(db_session, organization, contact, "what times are free?")
-    await booking.handle_turn(db_session, organization, contact, "the first one")
+    await confirmed(db_session, organization, contact, "the first one")
 
     again = await booking.handle_turn(
         db_session, organization, contact, "can I book an appointment?"
@@ -379,7 +387,7 @@ async def test_the_contact_record_shows_the_appointment(client, org_a, db_sessio
     assert empty.json()["appointment"] is None
 
     await bk.handle_turn(db_session, organization, contact, "what times are free?")
-    booked = await bk.handle_turn(db_session, organization, contact, "the first one")
+    booked = await confirmed(db_session, organization, contact, "the first one")
     assert booked.performed == "booked"
     await db_session.commit()
 

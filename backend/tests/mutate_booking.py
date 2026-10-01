@@ -106,6 +106,18 @@ MUTATIONS = {
         "def contact_problems(text: str) -> list[str]:\n",
         "def contact_problems(text: str) -> list[str]:\n    return []\n",
     ),
+    "any reply to a read-back counts as yes": (
+        "    if held is not None and agreed_to_it(text):",
+        "    if held is not None:",
+    ),
+    "a yes naming another time counts as the yes": (
+        "    return bool(one and other) and all(one.get(k) == other.get(k) for k in keys)",
+        "    return bool(one and other)",
+    ),
+    "a no is not heard as a no": (
+        "    if held is not None and _NO.match(text or \"\"):",
+        "    if False:",
+    ),
     "analyzer meeting flag trusted": (
         "    asked_meeting = is_meeting(text) or (wants_meeting and not does_site_visits(organization))",
         "    asked_meeting = is_meeting(text) or wants_meeting",

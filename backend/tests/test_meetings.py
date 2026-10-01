@@ -14,6 +14,8 @@ import pytest
 from app.models import CRMContact, Organization
 from app.services import booking, busy_calendar, invites, notifications
 
+from .conftest import confirmed
+
 DUBAI = ZoneInfo("Asia/Dubai")
 WEEKDAYS = {
     day: {"open": "09:00", "close": "18:00"}
@@ -177,7 +179,7 @@ async def test_a_demo_is_booked_as_a_video_call_with_the_link_and_no_address_ask
     organization, contact = saas
     _serve(monkeypatch, _ics())
     thursday = _ahead(3)
-    turn = await booking.handle_turn(
+    turn = await confirmed(
         db_session, organization, contact,
         f"I'd like to book a demo for my 3 clinics, {thursday.day} {thursday:%B} at 11am",
     )
@@ -198,7 +200,7 @@ async def test_picking_from_a_demo_offer_keeps_it_a_demo(saas, db_session, monke
     _serve(monkeypatch, _ics())
     offer = await booking.handle_turn(db_session, organization, contact, "can we schedule a quick phone call?")
     assert offer.offered
-    picked = await booking.handle_turn(db_session, organization, contact, "the first one")
+    picked = await confirmed(db_session, organization, contact, "the first one")
     assert picked.performed == "booked"
     assert picked.appointment.kind == "phone"
     assert picked.appointment.starts_at == offer.offered[0]
@@ -272,10 +274,10 @@ async def test_a_move_withdraws_the_old_event_and_invites_to_the_new(saas, db_se
     monkeypatch.setattr(notifications, "address_for", address)
 
     thursday, friday = _ahead(3), _ahead(4)
-    booked = await booking.handle_turn(
+    booked = await confirmed(
         db_session, organization, contact, f"book a demo {thursday.day} {thursday:%B} at 11am"
     )
-    moved = await booking.handle_turn(
+    moved = await confirmed(
         db_session, organization, contact, f"can we do {friday.day} {friday:%B} at 2pm instead"
     )
     assert moved.performed == "moved"

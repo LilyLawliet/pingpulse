@@ -367,7 +367,7 @@
       "assessment": "Cancellation request produces a simulated move, not a cancellation."
     }
   ],
-  "how_to_read": "'turns' is the tester's evidence exactly as sent: prompt, the reply the agent gave, the action trace. Nothing in it is an expectation. 'conversations' is the spec, written and reviewed by a person: each conversation is played in order against one customer, and every step says what the backend must do. A step names an evidence turn ('turn') or, when it is ours rather than the tester's, gives the message ('say') and why it was added ('added_because'). 'expect' uses only the keys the runner knows - any other key fails the run - and 'check' names a Python check in test_readiness_replay.py for what the keys cannot say. Every turn is also held to the invariants in the runner, whatever its expect says.",
+  "how_to_read": "'turns' is the tester's evidence exactly as sent: prompt, the reply the agent gave, the action trace. Nothing in it is an expectation. 'conversations' is the spec, written and reviewed by a person: each conversation is played in order against one customer, and every step says what the backend must do. A step names an evidence turn ('turn') or, when it is ours rather than the tester's, gives the message ('say') and why it was added ('added_because'). 'expect' uses only the keys the runner knows - any other key fails the run - and 'check' names a Python check in test_readiness_replay.py for what the keys cannot say. Every turn is also held to the invariants in the runner, whatever its expect says. Since October 1 nothing is booked, moved or cancelled from the message that asks: it is read back ('proposed') and a following 'yes' step writes it.",
   "shop": {
     "now": "2026-09-30T10:00:00-04:00",
     "timezone": "America/New_York",
@@ -696,11 +696,20 @@
             "performed": null,
             "rows": {
               "total": 0
-            }
+            },
+            "proposed": null
           }
         },
         {
           "turn": "T03",
+          "expect": {
+            "performed": null,
+            "proposed": "book"
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "nothing is written until they say yes to what was read back",
           "expect": {
             "performed": "booked",
             "slot": "2026-10-01 09:00",
@@ -709,6 +718,14 @@
         },
         {
           "turn": "T04",
+          "expect": {
+            "performed": null,
+            "proposed": "move"
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "nothing is written until they say yes to what was read back",
           "expect": {
             "performed": "moved",
             "slot": "2026-10-02 10:00",
@@ -943,6 +960,14 @@
           "say": "Sorry - phone is 202-555-0101 and email is jamie.qa@example.com",
           "added_because": "the corrected details book the time they chose",
           "expect": {
+            "performed": null,
+            "proposed": "book"
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "nothing is written until they say yes to what was read back",
+          "expect": {
             "performed": "booked",
             "slot": "2026-10-02 10:00",
             "location_contains": "100 Test Avenue"
@@ -956,6 +981,14 @@
         {
           "turn": "T40",
           "expect": {
+            "performed": null,
+            "proposed": "book"
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "nothing is written until they say yes to what was read back",
+          "expect": {
             "performed": "booked",
             "slot": "2026-10-05 11:00",
             "location_contains": "100 Test Avenue"
@@ -963,6 +996,14 @@
         },
         {
           "turn": "T41",
+          "expect": {
+            "performed": null,
+            "proposed": "cancel"
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "nothing is written until they say yes to what was read back",
           "expect": {
             "performed": "cancelled",
             "rows": {
@@ -980,6 +1021,14 @@
         {
           "turn": "T40",
           "expect": {
+            "performed": null,
+            "proposed": "book"
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "nothing is written until they say yes to what was read back",
+          "expect": {
             "performed": "booked",
             "slot": "2026-10-05 11:00"
           }
@@ -987,6 +1036,14 @@
         {
           "say": "Cancel my Monday, October 5, 2026, 11 AM appointment.",
           "added_because": "T41 also says 'I do not want to reschedule', which on its own stops the move; without it, naming the appointment's time must still identify it, not move it",
+          "expect": {
+            "performed": null,
+            "proposed": "cancel"
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "nothing is written until they say yes to what was read back",
           "expect": {
             "performed": "cancelled",
             "rows": {
@@ -1003,6 +1060,14 @@
       "steps": [
         {
           "turn": "T40",
+          "expect": {
+            "performed": null,
+            "proposed": "book"
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "nothing is written until they say yes to what was read back",
           "expect": {
             "performed": "booked",
             "slot": "2026-10-05 11:00"
@@ -1053,6 +1118,14 @@
         {
           "say": "It's 1200 Brickell Ave, Unit 4, Miami FL 33131",
           "added_because": "the address books the time they picked, as a site visit - and 'Unit 4' does not pick the fourth time",
+          "expect": {
+            "performed": null,
+            "proposed": "book"
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "nothing is written until they say yes to what was read back",
           "expect": {
             "performed": "booked",
             "slot": "2026-10-05 09:30",

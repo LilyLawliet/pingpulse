@@ -312,3 +312,19 @@ def events_stay_local(monkeypatch, request):
 
     monkeypatch.setattr(ws_manager, "_publish", capture)
     return published
+
+
+async def confirmed(db, organization, contact, text: str, yes: str = "yes"):
+    """Say it, check it was only read back, then say yes - the way a booking is made now.
+
+    Nothing is booked, moved or cancelled from the message that asks for it:
+    the customer is read back what would be done and only a yes writes it.
+    This asserts the first half too, so a test that books through it still
+    proves the asking message wrote nothing.
+    """
+    from app.services import booking
+
+    proposal = await booking.handle_turn(db, organization, contact, text)
+    assert proposal.performed is None, f"{text!r} wrote {proposal.performed} without a yes"
+    assert proposal.proposed, f"{text!r} was not read back:\n{proposal.prompt_block}"
+    return await booking.handle_turn(db, organization, contact, yes)

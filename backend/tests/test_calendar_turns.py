@@ -16,6 +16,8 @@ from app.models import APPOINTMENT_CANCELLED, APPOINTMENT_CONFIRMED, Appointment
 from app.services import booking
 from sqlalchemy import select
 
+from .conftest import confirmed
+
 KARACHI = ZoneInfo("Asia/Karachi")
 HOURS = {
     day: {"open": "11:00", "close": "20:00"}
@@ -152,7 +154,7 @@ def test_two_days_name_no_single_moment(shop):
 async def test_a_named_time_is_booked_exactly(shop, db_session):
     organization, contact = shop
     friday = _ahead(4)
-    turn = await booking.handle_turn(
+    turn = await confirmed(
         db_session, organization, contact, f"please book me for {_written(friday)} at 3pm"
     )
     assert turn.performed == "booked"
@@ -194,7 +196,8 @@ async def test_asking_whether_free_asks_first_then_yes_books_it(shop, db_session
         db_session, organization, contact, f"is {_written(thursday)} at 4pm free?"
     )
     assert asked.performed is None
-    assert "is FREE" in asked.prompt_block
+    # The answer to "is it free?" is the read-back itself, so one yes books it.
+    assert asked.proposed and "is free" in asked.reply and "Reply YES" in asked.reply
     assert await _live(db_session, contact) == []
 
     yes = await booking.handle_turn(db_session, organization, contact, "yes please")
@@ -221,7 +224,7 @@ async def test_a_taken_time_is_never_booked_twice(shop, db_session):
     other = CRMContact(organization_id=organization.id, phone_number="923009999999", qualification={})
     db_session.add(other)
     await db_session.flush()
-    first = await booking.handle_turn(db_session, organization, other, f"book {_written(friday)} 3pm")
+    first = await confirmed(db_session, organization, other, f"book {_written(friday)} 3pm")
     assert first.performed == "booked"
 
     second = await booking.handle_turn(db_session, organization, contact, f"book {_written(friday)} 3pm")
@@ -236,13 +239,13 @@ async def test_asking_to_move_then_picking_by_number_moves_it(shop, db_session):
     """The fault: the pick said nothing about moving, and nothing moved."""
     organization, contact = shop
     friday = _ahead(4)
-    await booking.handle_turn(db_session, organization, contact, f"book {_written(friday)} 3pm")
+    await confirmed(db_session, organization, contact, f"book {_written(friday)} 3pm")
 
     offer = await booking.handle_turn(db_session, organization, contact, "can I reschedule?")
     assert offer.performed is None and offer.offered
     second = offer.offered[1]
 
-    picked = await booking.handle_turn(db_session, organization, contact, "the second one")
+    picked = await confirmed(db_session, organization, contact, "the second one")
     assert picked.performed == "moved"
     assert picked.appointment.starts_at == second
     live = await _live(db_session, contact)
@@ -253,10 +256,10 @@ async def test_asking_to_move_then_picking_by_number_moves_it(shop, db_session):
 async def test_a_new_time_with_instead_moves_it(shop, db_session):
     organization, contact = shop
     friday, monday = _ahead(4), _ahead(0, weeks=2)
-    booked = await booking.handle_turn(db_session, organization, contact, f"book {_written(friday)} 3pm")
+    booked = await confirmed(db_session, organization, contact, f"book {_written(friday)} 3pm")
     old_id = booked.appointment.id
 
-    moved = await booking.handle_turn(
+    moved = await confirmed(
         db_session, organization, contact, f"can we do {_written(monday)} at 5pm instead"
     )
     assert moved.performed == "moved"
@@ -271,8 +274,8 @@ async def test_a_new_time_with_instead_moves_it(shop, db_session):
 async def test_dont_want_friday_can_we_do_monday_is_a_move_not_a_cancel(shop, db_session):
     organization, contact = shop
     friday, monday = _ahead(4), _ahead(0, weeks=2)
-    await booking.handle_turn(db_session, organization, contact, f"book {_written(friday)} 3pm")
-    turn = await booking.handle_turn(
+    await confirmed(db_session, organization, contact, f"book {_written(friday)} 3pm")
+    turn = await confirmed(
         db_session, organization, contact,
         f"I don't want the appointment on friday, can we do {_written(monday)} 2pm",
     )
@@ -284,7 +287,7 @@ async def test_dont_want_friday_can_we_do_monday_is_a_move_not_a_cancel(shop, db
 async def test_a_move_to_a_shut_time_keeps_the_original(shop, db_session):
     organization, contact = shop
     friday, sunday = _ahead(4), _ahead(6)
-    booked = await booking.handle_turn(db_session, organization, contact, f"book {_written(friday)} 3pm")
+    booked = await confirmed(db_session, organization, contact, f"book {_written(friday)} 3pm")
     turn = await booking.handle_turn(
         db_session, organization, contact, f"move it to {_written(sunday)} at 1pm"
     )
@@ -298,12 +301,13 @@ async def test_a_move_to_a_shut_time_keeps_the_original(shop, db_session):
 async def test_a_time_named_by_someone_already_booked_is_asked_about(shop, db_session):
     organization, contact = shop
     friday, tuesday = _ahead(4), _ahead(1, weeks=2)
-    await booking.handle_turn(db_session, organization, contact, f"book {_written(friday)} 3pm")
+    await confirmed(db_session, organization, contact, f"book {_written(friday)} 3pm")
     asked = await booking.handle_turn(
         db_session, organization, contact, f"can I book {_written(tuesday)} at 12pm?"
     )
     assert asked.performed is None
-    assert "moved to it" in asked.prompt_block
+    # Read back as a move; a customer who meant a second one says so instead of yes.
+    assert asked.proposed and "move your" in asked.reply
     yes = await booking.handle_turn(db_session, organization, contact, "yes")
     assert yes.performed == "moved"
     assert _local(yes.appointment).date() == tuesday
@@ -314,8 +318,8 @@ async def test_a_time_named_by_someone_already_booked_is_asked_about(shop, db_se
 async def test_cancel_cancels_and_the_record_says_so(shop, db_session):
     organization, contact = shop
     friday = _ahead(4)
-    booked = await booking.handle_turn(db_session, organization, contact, f"book {_written(friday)} 3pm")
-    turn = await booking.handle_turn(db_session, organization, contact, "please cancel my appointment")
+    booked = await confirmed(db_session, organization, contact, f"book {_written(friday)} 3pm")
+    turn = await confirmed(db_session, organization, contact, "please cancel my appointment")
     assert turn.performed == "cancelled"
     assert turn.appointment.id == booked.appointment.id
     assert await _live(db_session, contact) == []
@@ -381,15 +385,18 @@ async def test_the_shop_is_alerted_when_a_chat_books_moves_and_cancels(db_sessio
         return [entry for entry in raised if entry[0] == "booking"]
 
     friday, monday = _ahead(4), _ahead(0, weeks=2)
-    diary = await say(f"please book {_written(friday)} at 3pm", "SMb1")
+    assert await say(f"please book {_written(friday)} at 3pm", "SMb1") == [], "booked without a yes"
+    diary = await say("yes", "SMb1y")
     assert diary[-1][1] == "New appointment booked"
     assert "3:00 pm" in diary[-1][2] and "Friday" in diary[-1][2]
 
-    diary = await say(f"can we do {_written(monday)} at 5pm instead", "SMb2")
+    await say(f"can we do {_written(monday)} at 5pm instead", "SMb2")
+    diary = await say("yes", "SMb2y")
     assert diary[-1][1] == "Appointment moved"
     assert "Friday" in diary[-1][2] and "Monday" in diary[-1][2] and "5:00 pm" in diary[-1][2]
 
-    diary = await say("please cancel my appointment", "SMb3")
+    await say("please cancel my appointment", "SMb3")
+    diary = await say("yes", "SMb3y")
     assert diary[-1][1] == "Appointment cancelled"
     assert len(diary) == 3, "an alert was raised for something that did not happen"
 
@@ -398,9 +405,9 @@ async def test_the_shop_is_alerted_when_a_chat_books_moves_and_cancels(db_sessio
 async def test_cancel_after_asking_to_move_cancels(shop, db_session):
     organization, contact = shop
     friday = _ahead(4)
-    await booking.handle_turn(db_session, organization, contact, f"book {_written(friday)} 3pm")
+    await confirmed(db_session, organization, contact, f"book {_written(friday)} 3pm")
     await booking.handle_turn(db_session, organization, contact, "can I reschedule?")
-    turn = await booking.handle_turn(db_session, organization, contact, "no, just cancel it please")
+    turn = await confirmed(db_session, organization, contact, "no, just cancel it please")
     assert turn.performed == "cancelled"
     assert await _live(db_session, contact) == []
 
@@ -409,7 +416,7 @@ async def test_cancel_after_asking_to_move_cancels(shop, db_session):
 async def test_with_no_model_the_customer_still_gets_the_row(shop, db_session):
     organization, contact = shop
     friday = _ahead(4)
-    booked = await booking.handle_turn(db_session, organization, contact, f"book {_written(friday)} 3pm")
+    booked = await confirmed(db_session, organization, contact, f"book {_written(friday)} 3pm")
     assert booked.plain_reply(organization) == f"You're booked: {booking.describe(booked.appointment)}."
 
     offer = await booking.handle_turn(db_session, organization, contact, "can I reschedule?")

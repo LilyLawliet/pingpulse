@@ -91,6 +91,11 @@ _SAYS_BOOKED = re.compile(
     r"\b(is|are|been)\s+(now\s+)?(confirmed|booked|scheduled|reserved|set for)\b|\bscheduled for\b",
     re.IGNORECASE,
 )
+# A yes, as a person reading the message would take it.
+_IS_YES = re.compile(
+    r"^\W*(yes|yeah|yep|yup|ok|okay|sure|confirm\w*|go ahead|perfect|great|si|sí|haan|ji)\b",
+    re.IGNORECASE,
+)
 _SAYS_CANCELLED = re.compile(r"\b(cancell?ed|removed|deleted)\b", re.IGNORECASE)
 _SAYS_MOVED = re.compile(r"\b(moved|rescheduled)\b", re.IGNORECASE)
 
@@ -112,6 +117,13 @@ async def invariants(db, shop, contact, message: str, turn, evidence: dict | Non
     # Told not to book: nothing is booked.
     if _NO_GO.search(message):
         assert not turn.booked, "booked after being told not to"
+
+    # Nothing is written from the message that asks for it. Only a yes to what
+    # was read back books, moves or cancels anything.
+    if turn.performed:
+        assert _IS_YES.match(message), f"{turn.performed} on {message!r}, which is not a yes"
+    if turn.proposed:
+        assert turn.performed is None and turn.reply, "a read-back that wrote something, or said nothing"
 
     # Nothing offered that has passed, that the shop is shut for, or to a job
     # outside the area.
@@ -252,6 +264,17 @@ def _prompt_contains(seen, wanted):
         assert text in seen.turn.prompt_block, f"{seen.where}: {text!r} not in\n{seen.turn.prompt_block}"
 
 
+def _proposed(seen, wanted):
+    """"book" | "move" | "cancel": what was read back, waiting on a yes. null: nothing was."""
+    if wanted is None:
+        assert seen.turn.proposed is None, f"{seen.where}: read back {seen.turn.proposed} - nothing should be"
+        return
+    assert wanted in ("book", "move", "cancel"), f"{seen.where}: proposed is book, move, cancel or null"
+    held = seen.turn.proposed or {}
+    assert held.get("action") == wanted, f"{seen.where}: proposed {held.get('action')!r}\n{seen.turn.prompt_block}"
+    assert seen.turn.reply and "Reply YES" in seen.turn.reply, f"{seen.where}: no read-back sent: {seen.turn.reply!r}"
+
+
 def _guard_blocks_reply_then(seen, wanted):
     """true: the reply the tester received on this turn is refused by the guard now."""
     assert wanted is True, f"{seen.where}: guard_blocks_reply_then only takes true"
@@ -271,6 +294,7 @@ EXPECT = {
     "rows": _rows_are,
     "prompt_contains": _prompt_contains,
     "guard_blocks_reply_then": _guard_blocks_reply_then,
+    "proposed": _proposed,
 }
 
 

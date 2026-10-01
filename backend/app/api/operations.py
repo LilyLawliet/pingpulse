@@ -798,6 +798,7 @@ async def simulate(
     offered_slots: list[str] = []
     booking_reply = None
     order_reply = None
+    turn_reply = None
     order_note = None
     state = payload.get("booking_state") if isinstance(payload.get("booking_state"), dict) else {}
     if booking.wants_booking(message) and not booking.booking_enabled(organization):
@@ -838,14 +839,19 @@ async def simulate(
                 starts = datetime.fromisoformat(pretend_booking["starts_at"])
                 ends = datetime.fromisoformat(pretend_booking["ends_at"])
                 if ends > datetime.now(timezone.utc):
+                    # Rebuilt with the id it had, so a move or cancellation
+                    # read back on the last turn still names it when they say yes.
+                    kept_id = pretend_booking.get("id")
                     db.add(
                         Appointment(
+                            **({"id": uuid.UUID(kept_id)} if kept_id else {}),
                             organization_id=tenant.id,
                             contact_id=probe.id,
                             starts_at=starts,
                             ends_at=ends,
                             timezone_name=pretend_booking.get("timezone") or "UTC",
                             kind=pretend_booking.get("kind") or "other",
+                            location=pretend_booking.get("location"),
                             status=APPOINTMENT_CONFIRMED,
                             source="agent",
                         )
@@ -859,6 +865,7 @@ async def simulate(
             db, organization, probe, message, wants_meeting=bool(analysis.get("wants_meeting"))
         )
         booking_reply = turn.plain_reply(organization)
+        turn_reply = turn.reply
         performed = turn.performed
         if turn.appointment is not None:
             appointment = SimpleNamespace(when=booking.describe(turn.appointment))
@@ -867,7 +874,7 @@ async def simulate(
         # Orders, the way a live chat takes them: the draft travels in the
         # state like the booking offer does, and a placed order is rolled
         # back with everything else.
-        if not performed:
+        if not performed and not turn.proposed:
             order_turn = await orders.handle_turn(
                 db, organization, probe, message, history, await offers.prepare(db, organization)
             )
@@ -892,8 +899,15 @@ async def simulate(
                 "ends_at": booking._aware(kept.ends_at).isoformat(),
                 "timezone": kept.timezone_name,
                 "kind": kept.kind,
+                "location": kept.location,
+                "id": str(kept.id),
             }
         offered_slots = [str(slot) for slot in (turn.offered or [])]
+        if turn.proposed:
+            booking_note = (
+                "The customer is asked to confirm this. Nothing is booked until they reply "
+                "yes - try it."
+            )
         if performed:
             booking_note = (
                 f"This would have {performed} {appointment.when if appointment else 'the appointment'} "
@@ -911,7 +925,14 @@ async def simulate(
     if offer.prompt_block():
         knowledge = "\n\n".join(filter(None, [knowledge, offer.prompt_block()]))
 
-    if order_reply:
+    if turn_reply:
+        generation = GenerationResult(
+            provider="booking",
+            text=await languages.in_customer_language(turn_reply, message),
+            prompt_used="",
+            latency_ms=0,
+        )
+    elif order_reply:
         generation = GenerationResult(
             provider="order",
             text=await languages.in_customer_language(order_reply, message),

@@ -27,7 +27,7 @@ from app.models import (
 )
 from app.services import booking, llm_service, qualification
 
-from .conftest import _session_for
+from .conftest import _session_for, confirmed
 
 MIAMI = ZoneInfo("America/New_York")
 WEEKDAYS = {
@@ -100,7 +100,7 @@ async def test_do_not_book_it_yet_books_nothing(beluga, db_session):
     assert "NOT to book" in turn.prompt_block
 
     # And when they come back and say so, that time is the one booked.
-    later = await booking.handle_turn(db_session, organization, contact, "ok, go ahead and book it")
+    later = await confirmed(db_session, organization, contact, "ok, go ahead and book it")
     assert later.performed == "booked", later
     assert booking._aware(later.appointment.starts_at).astimezone(MIAMI).hour == 10
 
@@ -131,7 +131,7 @@ async def test_cancel_and_do_not_reschedule_cancels(beluga, db_session):
     held = await booking.book(db_session, organization, contact, when, location=ADDRESS)
     assert held.ok
 
-    turn = await booking.handle_turn(
+    turn = await confirmed(
         db_session, organization, contact,
         f"Cancel my {day:%A}, {said(day)}, {day.year}, 11 AM appointment. "
         "I do not want to reschedule.",
@@ -205,9 +205,12 @@ async def test_two_pacific_books_five_eastern(beluga, db_session):
     contact.contact_metadata = {"visit_address": ADDRESS}
     day = weekday_ahead()
 
-    turn = await booking.handle_turn(
+    proposal = await booking.handle_turn(
         db_session, organization, contact, f"Book me in for {said(day)} at 2pm Pacific"
     )
+    # Read back in both zones, so a misread zone is seen before anything is booked.
+    assert "5:00 pm" in proposal.reply and "2:00 pm" in proposal.reply, proposal.reply
+    turn = await booking.handle_turn(db_session, organization, contact, "yes")
 
     assert turn.performed == "booked", turn
     assert booking._aware(turn.appointment.starts_at).astimezone(MIAMI).hour == 17
@@ -230,7 +233,7 @@ async def test_no_address_no_visit(beluga, db_session):
     assert await rows(db_session, contact) == 0
 
     # The address, given next, books the time they chose.
-    turn = await booking.handle_turn(db_session, organization, contact, ADDRESS)
+    turn = await confirmed(db_session, organization, contact, ADDRESS)
     assert turn.performed == "booked", turn
     assert "1200 Brickell Ave" in turn.appointment.location
 
@@ -250,7 +253,7 @@ async def test_invalid_contact_details_hold_the_visit(beluga, db_session):
     assert turn.refusal.reason == "contact_invalid"
     assert await rows(db_session, contact) == 0
 
-    turn = await booking.handle_turn(
+    turn = await confirmed(
         db_session, organization, contact, "sorry - phone is 305 555 0100, email is dana@example.com"
     )
     assert turn.performed == "booked", turn

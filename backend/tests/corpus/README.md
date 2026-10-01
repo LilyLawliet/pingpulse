@@ -27,9 +27,15 @@ A step's `expect` may use only these keys; any other key fails the run:
 | `rows` | `{"confirmed": 1, "cancelled": 1, "total": 2}` for that customer afterwards |
 | `prompt_contains` | `["10:00 pm"]`: words the agent must have been told |
 | `guard_blocks_reply_then` | `true`: the reply they got is one the guard now refuses |
+| `proposed` | `"book"`, `"move"` or `"cancel"`: what was read back to them, waiting on a yes; `null`: nothing should be |
 
 What the keys cannot say goes in `"check": "name"`, a Python function in
 `CHECKS` in the runner. Do not add keys to say more; add a check.
+
+**Nothing is written from the message that asks for it.** A request is read
+back ("To confirm: site visit on Monday 5 October at 10:00 am at … Reply YES
+to book it"), so a booking takes two steps: the request, expecting
+`"proposed": "book"`, then `"say": "yes"`, expecting `"performed": "booked"`.
 
 Every step is also held to the runner's invariants, whatever its `expect`
 says: nothing booked after "don't book", nothing offered in the past or

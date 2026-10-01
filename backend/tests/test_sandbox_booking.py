@@ -51,19 +51,31 @@ async def test_times_are_offered_one_is_booked_and_nothing_is_kept(org_a, monkey
         return "You're booked in."
 
     monkeypatch.setattr(llm_service, "_call_groq", confirms)
-    second = (
-        await org_a.post(
-            "/api/v1/agent/simulate",
-            json={
-                "message": "The first one please",
-                "history": [
-                    {"sender": "user", "content": "Can I book an appointment tomorrow? It's at 1200 Brickell Ave, Miami"},
-                    {"sender": "agent", "content": first["reply"]},
-                ],
-                "booking_state": first["booking_state"],
-            },
-        )
-    ).json()
+
+    async def say(message, state):
+        return (
+            await org_a.post(
+                "/api/v1/agent/simulate",
+                json={
+                    "message": message,
+                    "history": [
+                        {"sender": "user", "content": "Can I book an appointment tomorrow? It's at 1200 Brickell Ave, Miami"},
+                        {"sender": "agent", "content": first["reply"]},
+                    ],
+                    "booking_state": state,
+                },
+            )
+        ).json()
+
+    # The pick is read back from the record, not written by the model, and
+    # nothing is booked by it.
+    picked = await say("The first one please", first["booking_state"])
+    assert picked["booking"]["performed"] is None, picked
+    assert picked["provider"] == "booking"
+    assert picked["reply"].startswith("To confirm: site visit on ") and "Reply YES" in picked["reply"]
+    assert "asked to confirm" in picked["booking"]["note"]
+
+    second = await say("yes", picked["booking_state"])
     assert second["booking"]["performed"] == "booked", second
     assert "Nothing was saved" in second["booking"]["note"]
     # "You're booked in." says nothing about when. A booking the reply does
@@ -78,19 +90,7 @@ async def test_times_are_offered_one_is_booked_and_nothing_is_kept(org_a, monkey
         return f"Done - your {when} is confirmed."
 
     monkeypatch.setattr(llm_service, "_call_groq", with_the_time)
-    again = (
-        await org_a.post(
-            "/api/v1/agent/simulate",
-            json={
-                "message": "The first one please",
-                "history": [
-                    {"sender": "user", "content": "Can I book an appointment tomorrow? It's at 1200 Brickell Ave, Miami"},
-                    {"sender": "agent", "content": first["reply"]},
-                ],
-                "booking_state": first["booking_state"],
-            },
-        )
-    ).json()
+    again = await say("yes", picked["booking_state"])
     assert again["booking"]["performed"] == "booked", again
     assert again["reply"].startswith("Done - your "), "a reply that states the booking is used as written"
 
@@ -135,16 +135,18 @@ async def test_a_pretend_booking_can_be_moved_and_cancelled(org_a, monkeypatch):
         ).json()
 
     first = await say("Can I book an appointment? The house is 1200 Brickell Ave, Miami", {})
-    booked = await say("the first one", first["booking_state"])
+    booked = await say("yes", (await say("the first one", first["booking_state"]))["booking_state"])
     assert booked["booking"]["performed"] == "booked", booked
     assert "sandbox_appointment" in booked["booking_state"]
 
     offer = await say("can I reschedule?", booked["booking_state"])
     assert offer["booking"]["offered"], offer
-    moved = await say("the last one", offer["booking_state"])
+    moved = await say("yes", (await say("the last one", offer["booking_state"]))["booking_state"])
     assert moved["booking"]["performed"] == "moved", moved
 
-    gone = await say("please cancel my appointment", moved["booking_state"])
+    asked = await say("please cancel my appointment", moved["booking_state"])
+    assert asked["booking"]["performed"] is None and "Reply YES to cancel" in asked["reply"], asked
+    gone = await say("yes", asked["booking_state"])
     assert gone["booking"]["performed"] == "cancelled", gone
     assert "sandbox_appointment" not in gone["booking_state"]
 

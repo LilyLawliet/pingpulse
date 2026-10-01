@@ -968,7 +968,7 @@ async def process_inbound_message(
     # one, and what the customer reads about it - the summary, the order
     # number, the total - is rendered from the record, not by the model.
     order_turn = orders.OrderTurn()
-    if not appointment_turn.performed and not booking_only:
+    if not appointment_turn.performed and not appointment_turn.proposed and not booking_only:
         order_turn = await orders.handle_turn(
             db, organization, contact, body, history, prepared, reading=order_reading
         )
@@ -989,7 +989,16 @@ async def process_inbound_message(
     if order_turn.prompt_block and not order_turn.reply:
         knowledge = "\n\n".join(filter(None, [knowledge, order_turn.prompt_block]))
 
-    if order_turn.reply:
+    if appointment_turn.reply:
+        # What they are asked to confirm, rendered from the record. Not left to
+        # a model: a yes to it books exactly this, so it has to say exactly this.
+        generation = GenerationResult(
+            provider="booking",
+            text=await languages.in_customer_language(appointment_turn.reply, body),
+            prompt_used=appointment_turn.prompt_block,
+            latency_ms=0,
+        )
+    elif order_turn.reply:
         generation = GenerationResult(
             provider="order",
             text=await languages.in_customer_language(order_turn.reply, body),
