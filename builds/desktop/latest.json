@@ -1,11 +1,11 @@
 {
-  "version": "1.10.1",
-  "notes": "Connecting WhatsApp works again, the agent knows your opening hours, and Setup stops ticking a step you have not done.",
-  "pub_date": "2026-09-30T22:26:21+00:00",
+  "version": "1.11.0",
+  "notes": "Nothing is booked until the customer says yes to a read-back, handovers ask first, and a visit is never confused with a call.",
+  "pub_date": "2026-10-02T01:00:46+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjB4TnFzWFdCTWhkSk9TeEcxaEtDYmQ2cWtvVWpYNlM5SDhTVmxNN1lkU1k3bzZ1QWd6b3pzbnJPRXp4WThDajNzeW9oVEdDRk9kZVlMWktydGlUZ2dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwODA3MTgwCWZpbGU6UGluZ1B1bHNlXzEuMTAuMV94NjQtc2V0dXAuZXhlCnpkaWhuRFBINWhvZHJ2VGNSWmtlVHBVUnFRWUgzaDRBRmVYV1F0ZWcralR0Q2pwMUVWQVNlYk9DMC9DY0wzL0RjOEQvcEdYaVp4cVd4eGsxcUNlcUNBPT0K",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.10.1_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjl4cHJ4ZG5jQUMweHkxVVlOd3dpckttWkhYVlNlZmxzd0hlQ2xOZ1BTN3M1S2I4WVhqL01VNFpzYXV4b0lFSTZkZmg2b1hUOVhiTUhxRlU2Qm40Z0FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwOTAyODQ1CWZpbGU6UGluZ1B1bHNlXzEuMTEuMF94NjQtc2V0dXAuZXhlCjRlU0d4UWpxYVRzdk1uSy9haURJWlkyV3M0ZXh5bnNtYnBrZDUwYks3NVBqVVR0Y0ZYU04zMVFTQk5JZERKbHl2MVU4cU5GMkJpNjhWaUVvTFRpcERnPT0K",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.11.0_x64-setup.exe"
     }
   }
 }

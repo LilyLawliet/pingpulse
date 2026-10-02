@@ -12,6 +12,58 @@ import { Sparkles, X } from 'lucide-react'
  */
 const RELEASES = [
   {
+    version: '1.11.0',
+    date: '2 October 2026',
+    items: [
+      {
+        title: 'Nothing goes in the diary until the customer says yes',
+        body:
+          'The agent now reads the appointment back before it saves anything — '
+          + '“To confirm: site visit on Monday 5 October at 10:00 am at 1200 Brickell '
+          + 'Ave. Reply YES to book it, or tell me what to change.” Only a plain yes '
+          + 'writes it, and the time is checked again at that moment, so a slot taken '
+          + 'while they were deciding is refused instead of double-booked. “Make it 11 '
+          + 'instead” is read back afresh. It means a customer sees a misreading and '
+          + 'corrects it, rather than finding it on the day.',
+      },
+      {
+        title: 'It asks before passing a conversation to you',
+        body:
+          'Handing over stops the agent until someone picks the conversation up, so '
+          + 'it is no longer done on a hunch. “A human”, “the manager” and your own '
+          + 'escalation words still hand over at once. Anything less certain is put to '
+          + 'the customer as a question first. “Book one with ahmed name” used to be '
+          + 'read as asking for somebody called Ahmed, and left a customer who wanted '
+          + 'to book sitting in silence.',
+      },
+      {
+        title: 'A visit is a visit and a call is a call',
+        body:
+          'Only the customer’s own words — “a phone call”, “over Zoom”, “a demo” — '
+          + 'or your own default decide which one they get. Bookings were being turned '
+          + 'into phone consultations with no address, including at businesses that had '
+          + 'not finished their settings. A site visit is never booked without an '
+          + 'address, and never outside the areas you serve.',
+      },
+      {
+        title: 'It always says what it just did',
+        body:
+          'After booking, moving or cancelling, the reply has to state the day and '
+          + 'time, and if it does not, the confirmation is sent from the record itself. '
+          + 'One customer was booked at 9:30 and then asked which slots suited them, so '
+          + 'they left believing nothing had been booked.',
+      },
+      {
+        title: 'Answers in Roman Urdu, and yes means yes',
+        body:
+          '“haan ji”, “ji bilkul” and “bilkul” now count as a yes, while “bilkul '
+          + 'nahi” does not. An English reply is no longer mistaken for Roman Urdu '
+          + 'because of letters inside other words — “din” in “including”, “hai” in '
+          + '“chair” — which had been replacing whole answers with a canned one.',
+      },
+    ],
+  },
+  {
     version: '1.10.1',
     date: '1 October 2026',
     items: [
