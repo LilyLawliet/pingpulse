@@ -41,15 +41,20 @@ from app.models import (
     CRMContact,
     Organization,
 )
-from app.services import booking
+from app.services import booking, scope
 
 REPORTS = sorted((Path(__file__).parent / "corpus").glob("readiness_*.json"))
 
 # `analyzer_says` is what the analyzer read on the live turn, passed in the way
 # the webhook passes it: {"wants_meeting": true}. It is a reading of the
 # message, not a fact, and booking must not trust it further than that.
-STEP_KEYS = {"turn", "say", "added_because", "expect", "check", "note", "analyzer_says"}
+# `scope_says` is what the scope check (app/services/scope.py) would answer for
+# what the customer has said so far - a model's reading, injected the same way:
+# {"job": "dog grooming", "service_fits": false}. Absent, the check knows
+# nothing, as it does with no description or no model, and nothing is refused.
+STEP_KEYS = {"turn", "say", "added_because", "expect", "check", "note", "analyzer_says", "scope_says"}
 ANALYZER_KEYS = {"wants_meeting"}
+SCOPE_KEYS = {"job", "service_fits", "place", "area_fits"}
 CONVERSATION_KEYS = {"name", "steps", "contact_metadata", "note"}
 
 
@@ -180,7 +185,21 @@ async def is_a_site_visit(db, shop, contact, turn, history):
     assert turn.appointment.kind == "onsite", f"booked a {turn.appointment.kind}"
 
 
+async def reads_back_the_job(db, shop, contact, turn, history):
+    """The read-back names the work being booked, not only the time."""
+    job = (scope.remembered(contact) or scope.Verdict()).job
+    assert job and f"for {job} on " in (turn.reply or ""), turn.reply
+
+
+async def notes_the_job(db, shop, contact, turn, history):
+    """The booked row says what the visit is for, so the shop knows too."""
+    job = (scope.remembered(contact) or scope.Verdict()).job
+    assert job and f"Job: {job}" in (turn.appointment.notes or ""), turn.appointment.notes
+
+
 CHECKS = {
+    "reads_back_the_job": reads_back_the_job,
+    "notes_the_job": notes_the_job,
     "move_chains_to_the_original": move_chains_to_the_original,
     "is_a_site_visit": is_a_site_visit,
 }
@@ -320,7 +339,7 @@ async def test_conversation(path, index, db_session, monkeypatch):
     _Clock.now = datetime.fromisoformat(report["shop"]["now"])
     monkeypatch.setattr(booking, "datetime", _Frozen)
 
-    shop = Organization(name=report["business"], sales_prompt="")
+    shop = Organization(name=report["business"], sales_prompt=report["shop"].get("description", ""))
     shop.timezone = report["shop"]["timezone"]
     shop.agent_config = json.loads(json.dumps(report["shop"]["agent_config"]))
     db_session.add(shop)
@@ -337,6 +356,9 @@ async def test_conversation(path, index, db_session, monkeypatch):
     await db_session.flush()
 
     history = []
+    # The scope check reads what the customer has said so far, not one message,
+    # so a reading stands until a step gives another.
+    reading = None
     for number, step in enumerate(conversation["steps"], start=1):
         assert not set(step) - STEP_KEYS, f"unknown step keys {sorted(set(step) - STEP_KEYS)}"
         assert ("turn" in step) != ("say" in step), "a step names an evidence turn or says something, not both"
@@ -350,6 +372,14 @@ async def test_conversation(path, index, db_session, monkeypatch):
 
         said = step.get("analyzer_says") or {}
         assert not set(said) - ANALYZER_KEYS, f"{where}: analyzer_says takes {sorted(ANALYZER_KEYS)}"
+        if "scope_says" in step:
+            reading = step["scope_says"]
+            assert not set(reading) - SCOPE_KEYS, f"{where}: scope_says takes {sorted(SCOPE_KEYS)}"
+
+        async def scope_reads(organization, text, _reading=reading):
+            return scope.Verdict(**(_reading or {}))
+
+        monkeypatch.setattr(scope, "check", scope_reads)
         turn = await booking.handle_turn(
             db_session, shop, contact, message, wants_meeting=bool(said.get("wants_meeting"))
         )

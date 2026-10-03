@@ -157,6 +157,11 @@ def looks_english(message: str) -> bool:
     return foreign == 0 or english > foreign
 
 
+# A read-back, the hand-over question and the hand-over itself are fixed
+# sentences the customer must be able to read, so they get longer than a
+# passing reply to arrive in their language before falling back to English.
+FIXED_REPLY_SECONDS = 8
+
 TRANSLATE_PROMPT = """Rewrite the shop's message below in the same language and script the
 customer wrote in. If the customer wrote Roman Urdu, write Roman Urdu. Keep every number,
 price, currency, product name, link and emoji exactly as it is, and keep line breaks.
@@ -200,11 +205,16 @@ async def in_customer_language(text: str, customer_message: str, timeout: float 
         TRANSLATE_PROMPT.format(customer=customer_message[:500], text=text), timeout
     )
     rewritten = str((answer or {}).get("text") or "").strip()
+    # Each way back to English is logged with its reason: a Spanish customer
+    # asked "shall I pass you to the team?" in English (October 3, R21) left
+    # nothing to say which of these it was.
     if not rewritten:
+        logger.warning("no translation within %.0fs; replying in English to a non-English message", timeout)
         return text
     if _figures(rewritten) != _figures(text) or _links(rewritten) != _links(text):
-        logger.info("translation changed a figure or a link; sending the original")
+        logger.warning("translation changed a figure or a link; replying in English")
         return text
     if wrong_script(customer_message, rewritten):
+        logger.warning("translation came back in the wrong script; replying in English")
         return text
     return rewritten

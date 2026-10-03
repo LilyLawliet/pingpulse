@@ -40,6 +40,9 @@ from app.models import (
 )
 from app.services import booking, calendar_feed
 
+# A site visit booked by the agent goes somewhere.
+VISIT = "1200 Brickell Ave, Unit 4, Miami FL 33131"
+
 
 # ---------------------------------------------------------------- helpers
 async def _org(db_session, tenant) -> Organization:
@@ -203,7 +206,7 @@ async def test_a_booking_the_customer_made_is_a_row_they_can_be_shown(
     slots = await booking.free_slots(db_session, organization, days=7, limit=10)
     chosen = slots[0]
 
-    result = await booking.book(db_session, organization, contact, chosen)
+    result = await booking.book(db_session, organization, contact, chosen, location=VISIT)
     appointment = getattr(result, "appointment", None)
     assert appointment is not None, result
 
@@ -245,8 +248,8 @@ async def test_the_same_slot_cannot_be_given_to_two_people(org_a, db_session):
     slots = await booking.free_slots(db_session, organization, days=7, limit=10)
     chosen = slots[0]
 
-    assert getattr(await booking.book(db_session, organization, first, chosen), "appointment", None)
-    clash = await booking.book(db_session, organization, second, chosen)
+    assert getattr(await booking.book(db_session, organization, first, chosen, location=VISIT), "appointment", None)
+    clash = await booking.book(db_session, organization, second, chosen, location=VISIT)
     assert getattr(clash, "appointment", None) is None
 
     # And it stops being offered.
@@ -290,7 +293,7 @@ async def test_a_true_confirmation_is_allowed_through(org_a, db_session):
     await db_session.flush()
 
     slots = await booking.free_slots(db_session, organization, days=14, limit=5)
-    booked = await booking.book(db_session, organization, contact, slots[0])
+    booked = await booking.book(db_session, organization, contact, slots[0], location=VISIT)
     appointment = getattr(booked, "appointment", None)
     assert appointment is not None
 

@@ -47,7 +47,7 @@ from app.models import (
     APPOINTMENT_KINDS,
     Appointment,
 )
-from app.services import agent_config, busy_calendar
+from app.services import agent_config, busy_calendar, scope
 
 logger = logging.getLogger(__name__)
 
@@ -1853,8 +1853,19 @@ def visit_address(contact) -> str | None:
 
 
 def requires_address(organization, kind: str) -> bool:
-    """A site visit needs somewhere to go, unless the shop has said otherwise."""
-    return kind == "onsite" and does_site_visits(organization)
+    """A site visit needs somewhere to go, unless the shop has said otherwise.
+
+    Every site visit, not only at shops that have filled in their settings.
+    Limiting it to those let an unconfigured shop read back and book "site
+    visit ... at" nowhere: the October 3 run confirmed a visit after the
+    customer refused to give an address. A shop that does not go out to its
+    customers sets its appointment type to something else, or require_address
+    to false.
+    """
+    if kind != "onsite":
+        return False
+    config = _config(organization).get("appointments") or {}
+    return config.get("require_address") is not False
 
 
 def service_areas(organization) -> list[str]:
@@ -2249,6 +2260,24 @@ async def _carry_out(db, organization, contact, held: dict) -> TurnResult:
 
     if action == "book":
         at = datetime.fromisoformat(held["at"])
+        # Checked again now, not trusted from when it was read back.
+        verdict = scope.remembered(contact)
+        if verdict is not None and (
+            verdict.service_fits is False
+            or (
+                held.get("kind") == "onsite"
+                and verdict.area_fits is False
+                and in_area(organization, held.get("location")) is None
+            )
+        ):
+            return TurnResult(
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    "They said yes, but this is not work or a place this business takes, "
+                    "so NOTHING was booked. Say so plainly."
+                ),
+                refusal=Refusal("outside_scope", "This is not something the business takes on."),
+            )
         result = await book(
             db, organization, contact, at,
             kind=held.get("kind"), location=held.get("location"), notes=held.get("notes"),
@@ -2394,6 +2423,10 @@ async def _decide(
     # said it - a booking three messages later needs the address from the first.
     note_where(contact, text)
     note_details(contact, text)
+    # What they have said about the job and the place, for the scope check.
+    said = scope.note_said(
+        contact, text, wants_booking(text) or wants_meeting or bool(place_in(text))
+    )
     offered = remembered_offer(contact)
     purpose = offer_purpose(contact)
     named = named_time(text, zone)
@@ -2646,6 +2679,28 @@ async def _decide(
             waiting_on == "details" and not unusable_details(contact)
         ):
             target = offered[0]
+        else:
+            # Still missing. Said so, rather than leaving the reply to its own
+            # devices: with nothing about the booking in front of it, the model
+            # is what wrote "your visit is confirmed" for a visit with no address.
+            ask = (
+                "the street address of the property, with the unit or apartment number if there is one"
+                if waiting_on == "address"
+                else "; ".join(unusable_details(contact)) + " - a correct one"
+            )
+            return TurnResult(
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    f"{_say_moment(offered[0], zone)} is held for them, but NOTHING is booked: "
+                    f"we still need {ask}. Without it no visit can be booked. Say that plainly, "
+                    "once, and do NOT say anything is booked, confirmed or scheduled."
+                ),
+                refusal=Refusal(
+                    "needs_address" if waiting_on == "address" else "contact_invalid",
+                    f"Before this can be booked we need {ask}.",
+                ),
+                offered=[offered[0]],
+            )
 
     if target is None and not (wants_booking(text) or wants_meeting) and not (
         named.days and (offered or only_asking(text))
@@ -2660,6 +2715,43 @@ async def _decide(
     # Seattle for a Miami business.
     visit_kind = (new_kind or default_kind(organization)).lower()
     where = job_place(contact)
+
+    # Work the business does not do, or a place it does not go, going by
+    # what it says about itself: no times at all. A read-back of "site visit
+    # for dog grooming" is faithful, and a yes to it is still a booking that
+    # should never have been offered.
+    verdict = await scope.for_contact(organization, contact, said)
+    if verdict.service_fits is False:
+        forget_offer(contact)
+        job = verdict.job or "That"
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"{job} is NOT something this business does, going by its own description. "
+                "Nothing is booked and no time may be offered. Say plainly that it is not "
+                "something the business does, and ask whether there is something it does "
+                "that they need."
+            ),
+            refusal=Refusal("outside_services", f"{job} is not something this business offers."),
+        )
+    if (
+        visit_kind == "onsite"
+        and in_area(organization, where) is None
+        and verdict.area_fits is False
+    ):
+        forget_offer(contact)
+        place = verdict.place or where or "That place"
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"{place} is NOT in the area this business works in, going by its own "
+                "description. Nothing is booked and no time may be offered. Say plainly that "
+                "it is outside the area served. If they think the property is inside it, ask "
+                "for its city or ZIP code."
+            ),
+            refusal=Refusal("outside_area", f"{place} is outside the area served."),
+        )
+
     if visit_kind == "onsite" and in_area(organization, where) is False:
         forget_offer(contact)
         return TurnResult(
@@ -2795,6 +2887,12 @@ async def _propose_booking(
         refusal = visit_refusal(organization, kind, location)
     if refusal is None:
         when = _readback_of(organization, target, kind, location)
+        verdict = scope.remembered(contact)
+        job = verdict.job if verdict is not None else None
+        if job:
+            # What is being booked, said back too: "site visit for roof
+            # replacement", so the yes is to the job as well as the time.
+            when = when.replace(" on ", f" for {job} on ", 1)
         # The time stays the standing offer, so the next message is read as
         # about it: "make it 11 instead" corrects it, "yes, 10 is right" agrees.
         remember_offer(contact, [target], OFFER_BOOK, **keep)
@@ -2805,7 +2903,10 @@ async def _propose_booking(
                 "at": target.isoformat(),
                 "kind": kind,
                 "location": location,
-                "notes": f"Meeting request: {about}" if meeting and about else None,
+                "notes": (
+                    f"Meeting request: {about}" if meeting and about
+                    else f"Job: {job}" if job else None
+                ),
                 "meeting": meeting,
                 "their_zone": their_zone.key if their_zone else None,
             },

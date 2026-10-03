@@ -404,7 +404,8 @@ async def test_the_analyzer_does_not_turn_a_booking_into_a_call(db_session):
     await db_session.flush()
     contact = CRMContact(
         organization_id=shop.id, phone_number="13055550142", name="Ahmad",
-        pipeline_stage="NEW_LEAD", qualification={}, contact_metadata={},
+        pipeline_stage="NEW_LEAD", qualification={},
+        contact_metadata={"visit_address": "100 Test Avenue, Miami FL 33101"},
     )
     db_session.add(contact)
     await db_session.flush()
@@ -412,8 +413,8 @@ async def test_the_analyzer_does_not_turn_a_booking_into_a_call(db_session):
     offer = await booking.handle_turn(db_session, shop, contact, "my name is ahmad, book for me", wants_meeting=True)
     assert offer.offered and not offer.meeting
     picked = await booking.handle_turn(db_session, shop, contact, "the first one", wants_meeting=True)
-    assert picked.proposed and picked.proposed["kind"] == "onsite", picked.proposed
-    assert "phone" not in picked.reply
+    assert picked.proposed and picked.proposed["kind"] == "onsite", picked.prompt_block
+    assert "site visit" in picked.reply and "phone" not in picked.reply
 
     # The customer's own words still make it a call.
     other = CRMContact(

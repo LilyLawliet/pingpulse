@@ -103,8 +103,8 @@ MUTATIONS = {
         "            their_zone = None",
     ),
     "no address needed": (
-        '    return kind == "onsite" and does_site_visits(organization)',
-        "    return False",
+        '    if kind != "onsite":\n        return False\n',
+        '    return False\n',
     ),
     "areas not checked": (
         '    areas = service_areas(organization)\n    if not areas or not where:\n        return None',
@@ -141,6 +141,18 @@ MUTATIONS = {
     "a yes to the handover question is ignored": (HANDOVER,
         "    return datetime.now(timezone.utc) - made <= timedelta(minutes=VALID_MINUTES)",
         "    return False",
+    ),
+    "address needed only once site visits are set up": (
+        '    return config.get("require_address") is not False',
+        '    return config.get("require_address") is not False and does_site_visits(organization)',
+    ),
+    "scope says not a service we do - ignored": (
+        "    if verdict.service_fits is False:\n        forget_offer(contact)",
+        "    if False:\n        forget_offer(contact)",
+    ),
+    "scope says not an area we serve - ignored": (
+        "        and in_area(organization, where) is None\n        and verdict.area_fits is False\n",
+        "        and in_area(organization, where) is None\n        and False\n",
     ),
     "analyzer meeting flag trusted": (
         "    asked_meeting = is_meeting(text)\n",

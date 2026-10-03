@@ -34,7 +34,8 @@ steps:
         python tests/mutate_booking.py --together \
           tests/test_readiness_replay.py tests/test_readiness_report.py \
           tests/test_confirm_before_booking.py tests/test_sandbox_booking.py \
-          tests/test_calendar_turns.py tests/test_booking_conversation.py
+          tests/test_calendar_turns.py tests/test_booking_conversation.py \
+          tests/test_scope.py
 
   # ---------------------------------------------------------------- frontend
   # A build, not a lint. The dashboard has no test suite, so this catches what

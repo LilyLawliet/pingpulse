@@ -37,7 +37,10 @@ def shop(**appointments) -> Organization:
     organization.timezone = "UTC"
     organization.agent_config = {
         "business_hours": OPEN_ALL_WEEK,
-        "appointments": {"min_notice_minutes": 0, **appointments},
+        # These are tests of the diary - clashes, buffers, moves - not of
+        # where a visit goes, so the address rule is switched off the way a
+        # shop that does not visit its customers would switch it off.
+        "appointments": {"min_notice_minutes": 0, "require_address": False, **appointments},
     }
     return organization
 
@@ -437,7 +440,7 @@ async def test_a_fully_booked_shop_offers_nothing_rather_than_inventing(db_sessi
     # Open one hour a week, and that hour is taken.
     organization.agent_config = {
         "business_hours": {"monday": {"open": "09:00", "close": "10:00"}},
-        "appointments": {"min_notice_minutes": 0},
+        "appointments": {"min_notice_minutes": 0, "require_address": False},
     }
     db_session.add(organization)
     await db_session.flush()

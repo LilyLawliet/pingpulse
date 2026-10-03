@@ -1,0 +1,233 @@
+{
+  "source": "Regression check by the client's tester, built-in Test agent, 2026-10-03 America/New_York. The evidence JSON was not supplied; prompts are those quoted in the report.",
+  "business": "Constrivo Group",
+  "how_to_read": "As readiness_2026_09_30.json. This shop is set up as it was on October 3: no services, no areas, no appointment type - only the business description.",
+  "excluded": [
+    "R1, R5-R11, R14-R16, R18, R21-R25: passed or not about booking; their prompts were not supplied"
+  ],
+  "turns": [
+    {
+      "id": "R2",
+      "scenario": "Seattle, unsupported area",
+      "verdict_then": "FAIL",
+      "prompt": "I need a roof replacement at my home in Seattle, Washington. Can you book a site visit Monday October 5, 2026 in the morning?",
+      "reply_then": null,
+      "trace_then": "Offered from your diary: 6 times",
+      "assessment": "Refused Seattle in words; times offered; 9 AM read back; YES booked."
+    },
+    {
+      "id": "R17",
+      "scenario": "Dog grooming and boots",
+      "verdict_then": "FAIL",
+      "prompt": "Can you book dog grooming for Monday October 5, 2026 at 10 AM? I also want to buy a pair of boots.",
+      "reply_then": null,
+      "trace_then": "This would have booked site visit",
+      "assessment": "Reached a site-visit read-back; YES booked."
+    }
+  ],
+  "shop": {
+    "now": "2026-10-03T10:00:00-04:00",
+    "timezone": "America/New_York",
+    "description": "Constrivo Group: residential and commercial construction and remodeling in Miami / South Florida - kitchens, bathrooms, additions, roofing, impact windows.",
+    "agent_config": {
+      "business_hours": {
+        "monday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "tuesday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "wednesday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "thursday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "friday": {
+          "open": "09:00",
+          "close": "20:00"
+        }
+      },
+      "appointments": {
+        "duration_minutes": 60
+      }
+    },
+    "note": "Services, areas and appointment type blank, as in the October 3 run."
+  },
+  "conversations": [
+    {
+      "name": "Seattle with no areas listed",
+      "steps": [
+        {
+          "turn": "R2",
+          "scope_says": {
+            "job": "roof replacement",
+            "service_fits": true,
+            "place": "Seattle, Washington",
+            "area_fits": false
+          },
+          "expect": {
+            "performed": null,
+            "refusal": "outside_area",
+            "offered": "none",
+            "proposed": null
+          }
+        },
+        {
+          "say": "9 AM works",
+          "added_because": "R3: accepting 9 AM produced a read-back",
+          "expect": {
+            "performed": null,
+            "offered": "none",
+            "proposed": null
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "R4: YES booked the Seattle visit",
+          "expect": {
+            "performed": null,
+            "rows": {
+              "total": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dog grooming with no services listed",
+      "steps": [
+        {
+          "turn": "R17",
+          "scope_says": {
+            "job": "dog grooming",
+            "service_fits": false
+          },
+          "expect": {
+            "performed": null,
+            "refusal": "outside_services",
+            "offered": "none",
+            "proposed": null
+          }
+        },
+        {
+          "say": "Monday at 10 AM is fine, book it",
+          "added_because": "R19: the second run reached a site-visit read-back",
+          "expect": {
+            "performed": null,
+            "offered": "none",
+            "proposed": null
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "R20: YES booked a site visit for dog grooming",
+          "expect": {
+            "performed": null,
+            "rows": {
+              "total": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contact details corrected, address refused",
+      "steps": [
+        {
+          "say": "Book a bathroom site visit for Monday October 5, 2026 at 10 AM. My phone is 123 and my email is not-an-email.",
+          "added_because": "R10-R11: invalid details refused",
+          "scope_says": {
+            "job": "bathroom remodel",
+            "service_fits": true
+          },
+          "expect": {
+            "performed": null,
+            "refusal": "needs_address",
+            "proposed": null
+          }
+        },
+        {
+          "say": "Sorry - my phone is 305 555 0100 and my email is jamie@example.com. I will not give you the address.",
+          "added_because": "R12: after the details were fixed, the address was refused and a read-back followed",
+          "expect": {
+            "performed": null,
+            "refusal": "needs_address",
+            "proposed": null
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "R13: YES confirmed an on-site visit with no address",
+          "expect": {
+            "performed": null,
+            "rows": {
+              "total": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "In scope, with the job read back",
+      "contact_metadata": {
+        "visit_address": "100 Test Avenue, Miami, FL 33101, unit 2"
+      },
+      "steps": [
+        {
+          "say": "Please book a bathroom remodel site visit for Monday October 5 at 10 AM",
+          "added_because": "the check lets a job the business does through, and names it in the read-back",
+          "scope_says": {
+            "job": "bathroom remodel",
+            "service_fits": true,
+            "place": "Miami",
+            "area_fits": true
+          },
+          "expect": {
+            "performed": null,
+            "proposed": "book"
+          },
+          "check": "reads_back_the_job"
+        },
+        {
+          "say": "yes",
+          "added_because": "the yes books it, and the row says what the visit is for",
+          "expect": {
+            "performed": "booked",
+            "slot": "2026-10-05 10:00",
+            "location_contains": "100 Test Avenue"
+          },
+          "check": "notes_the_job"
+        }
+      ]
+    },
+    {
+      "name": "No reading at all books as before",
+      "contact_metadata": {
+        "visit_address": "100 Test Avenue, Miami, FL 33101, unit 2"
+      },
+      "steps": [
+        {
+          "say": "Please book a site visit for Monday October 5 at 11 AM",
+          "added_because": "with no description or no model the check knows nothing, and nothing is refused",
+          "expect": {
+            "performed": null,
+            "proposed": "book"
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "fails open",
+          "expect": {
+            "performed": "booked",
+            "slot": "2026-10-05 11:00"
+          }
+        }
+      ]
+    }
+  ]
+}

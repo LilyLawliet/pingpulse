@@ -775,7 +775,9 @@ async def simulate(
     state = handover_question.forget(state)
     if not escalation and booking.heard_as_a_person(analysis, message):
         return {
-            "reply": await languages.in_customer_language(handover_question.question(organization), message),
+            "reply": await languages.in_customer_language(
+                handover_question.question(organization), message, timeout=languages.FIXED_REPLY_SECONDS
+            ),
             "escalated": False,
             "provider": "handover",
             "latency_ms": 0,
@@ -956,7 +958,7 @@ async def simulate(
     if turn_reply:
         generation = GenerationResult(
             provider="booking",
-            text=await languages.in_customer_language(turn_reply, message),
+            text=await languages.in_customer_language(turn_reply, message, timeout=languages.FIXED_REPLY_SECONDS),
             prompt_used="",
             latency_ms=0,
         )

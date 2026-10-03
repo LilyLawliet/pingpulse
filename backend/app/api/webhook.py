@@ -195,6 +195,8 @@ def evaluate_stage(
 #
 # It also never says "I am a person". The agent is not one, and a customer who
 # asked for a human is owed a straight answer about that.
+FIXED_REPLY_SECONDS = languages.FIXED_REPLY_SECONDS
+
 DEFAULT_HANDOFF_REPLY = (
     "You're through to the automated assistant, so I've stopped replying here "
     "and passed this conversation to the team."
@@ -216,7 +218,9 @@ async def acknowledge_handoff(
     Recorded as a message like any other, so the dashboard shows the operator
     exactly what the customer was told before they picked the conversation up.
     """
-    text = await languages.in_customer_language(handoff_reply(organization), customer_message)
+    text = await languages.in_customer_language(
+        handoff_reply(organization), customer_message, timeout=FIXED_REPLY_SECONDS
+    )
     return await _send_fixed(db, organization, contact, channel, phone_number, text)
 
 
@@ -743,7 +747,9 @@ async def process_inbound_message(
     # booking used to end in silence.
     if booking.heard_as_a_person(analysis, body) and contact.ai_enabled:
         contact.contact_metadata = handover_question.ask(contact.contact_metadata)
-        text = await languages.in_customer_language(handover_question.question(organization), body)
+        text = await languages.in_customer_language(
+            handover_question.question(organization), body, timeout=FIXED_REPLY_SECONDS
+        )
         told = await _send_fixed(db, organization, contact, channel, phone_number, text)
         await db.commit()
         await manager.broadcast(
@@ -1017,7 +1023,7 @@ async def process_inbound_message(
         # a model: a yes to it books exactly this, so it has to say exactly this.
         generation = GenerationResult(
             provider="booking",
-            text=await languages.in_customer_language(appointment_turn.reply, body),
+            text=await languages.in_customer_language(appointment_turn.reply, body, timeout=FIXED_REPLY_SECONDS),
             prompt_used=appointment_turn.prompt_block,
             latency_ms=0,
         )
