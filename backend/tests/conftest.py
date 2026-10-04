@@ -234,7 +234,33 @@ def no_outbound_network(monkeypatch, request):
     if "allow_network" in request.keywords:
         return
 
+    import asyncio
     import socket
+
+    def refuse(host):
+        raise RuntimeError(
+            f"This test tried to connect to {host!r}. Unit tests must not use "
+            "the network: stub the call, or mark the test "
+            "@pytest.mark.allow_network if reaching out is the point of it."
+        )
+
+    # The asyncio loop as well as the socket. A socket guard alone is not
+    # enough on Windows: the Proactor loop opens its connections through
+    # overlapped I/O and never calls socket.connect, so every async httpx call
+    # went straight past it. The guard looked installed and was - and live
+    # Groq calls were still being made and answered inside the suite, which is
+    # exactly what it exists to stop. Found when a scope check reached the
+    # real model and failed a test that passes when it cannot.
+    real_create_connection = asyncio.base_events.BaseEventLoop.create_connection
+
+    async def guarded_create_connection(self, protocol_factory, host=None, port=None, **kwargs):
+        if host is not None and host not in _LOCAL:
+            refuse(host)
+        return await real_create_connection(self, protocol_factory, host, port, **kwargs)
+
+    monkeypatch.setattr(
+        asyncio.base_events.BaseEventLoop, "create_connection", guarded_create_connection
+    )
 
     real_connect = socket.socket.connect
 
@@ -249,11 +275,7 @@ def no_outbound_network(monkeypatch, request):
         # Unix sockets and the like pass a plain string or a bare fd; only
         # AF_INET/AF_INET6 carry a (host, port) pair worth checking.
         if isinstance(address, tuple) and address and address[0] not in _LOCAL:
-            raise RuntimeError(
-                f"This test tried to connect to {address[0]!r}. Unit tests must "
-                "not use the network: stub the call, or mark the test "
-                "@pytest.mark.allow_network if reaching out is the point of it."
-            )
+            refuse(address[0])
         return real_connect(self, address, *args, **kwargs)
 
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)

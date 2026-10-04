@@ -54,3 +54,61 @@ def test_a_test_that_says_so_may_still_reach_out():
     internet to be up to prove the opt-out works.
     """
     assert socket.socket.connect.__name__ != "guarded_connect"
+
+
+# --------------------------------------------------------------------------
+# The asyncio loop, not only the socket
+# --------------------------------------------------------------------------
+# Guarding socket.connect alone is not enough on Windows: the Proactor event
+# loop opens its connections through overlapped I/O and never calls it, so
+# every async httpx request went straight past the guard. It looked installed,
+# and was - and live Groq calls were still being made and answered inside the
+# suite. Found when a scope check reached the real model and failed a test
+# that passes when it cannot. The test above is synchronous, which is exactly
+# why it never noticed.
+
+
+def _every_cause(error: BaseException):
+    """Flatten an exception and anything it wraps, groups included.
+
+    httpx reports the refusal as "unhandled errors in a TaskGroup", so the
+    guard's own words are only found by walking in.
+    """
+    yield error
+    for nested in getattr(error, "exceptions", ()) or ():
+        yield from _every_cause(nested)
+    for nested in (error.__cause__, error.__context__):
+        if nested is not None:
+            yield from _every_cause(nested)
+
+
+@pytest.mark.asyncio
+async def test_an_async_client_cannot_reach_a_provider():
+    import httpx
+
+    with pytest.raises(Exception) as refused:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post("https://api.groq.com/openai/v1/chat/completions", json={})
+
+    # The address, not the name: httpx resolves before it asks the loop to
+    # connect, so by here the host is an IP. The refusal is the point.
+    said = " ".join(str(e) for e in _every_cause(refused.value))
+    assert "must not use the network" in said, said[:400]
+
+
+@pytest.mark.asyncio
+async def test_the_model_helpers_come_back_empty_rather_than_answered():
+    """What the suite actually depends on: no provider answers a test.
+
+    The prompt has to be one a provider would really answer with an object.
+    A vague one comes back as prose, so `structured` returns None whether the
+    guard is holding or not - a test that passes either way, which is the
+    failure this whole file exists to catch.
+    """
+    from app.services import understanding
+
+    prompt = (
+        "A customer wrote: 'I need a roof replacement in Seattle.'\n"
+        'Return ONLY this JSON: {"job": "<the work in a few words>", "fits": true | false}'
+    )
+    assert await understanding.structured(prompt, 6) is None
