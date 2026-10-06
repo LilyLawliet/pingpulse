@@ -275,7 +275,27 @@ def names_unmatched_work(organization, text: str) -> bool:
         str(getattr(organization, field, "") or "")
         for field in ("product_rules", "sales_prompt")
     )
-    return not (_stems(written) & wanted)
+    if _stems(written) & wanted:
+        return False
+    # Same reason as in `supports`: a request in another language shares no
+    # words with an English list however ordinary it is, and stopping to ask
+    # every Spanish-speaking customer what they meant is its own failure.
+    return _same_language(text, written)
+
+
+def _same_language(said: str, business: str) -> bool:
+    """Are these written the same way? Read off the words, with no model.
+
+    Only used to stop a refusal: where it cannot tell, it says yes, because
+    the cost of being wrong here is a customer being told their own language
+    is not served.
+    """
+    from app.services import languages
+
+    try:
+        return languages.looks_english(said or "") == languages.looks_english(business or "")
+    except Exception:  # noqa: BLE001 - a refusal never depends on this working
+        return True
 
 
 def matched_service(organization, text: str) -> str | None:
@@ -312,7 +332,7 @@ def worth_checking(text: str) -> bool:
     return len(_stems(text)) >= 2
 
 
-def supports(organization, job: str | None) -> bool | None:
+def supports(organization, job: str | None, said: str = "") -> bool | None:
     """Whether this business does that work. Decided here, from its own list.
 
     Three answers, and the middle one matters. True and False are this
@@ -354,6 +374,17 @@ def supports(organization, job: str | None) -> bool | None:
         for field in ("product_rules", "sales_prompt")
     )
     if _stems(written) & wanted:
+        return None
+    # The list is in the business's language. Matching a request written in
+    # another one against it proves nothing: a Miami remodeller was made to
+    # tell a Spanish-speaking customer that "remodelación de cocina" was not
+    # something it did, having listed "kitchen remodeling". No words in
+    # common is only evidence of a different trade when the two are written
+    # the same way.
+    # Judged on what the customer wrote, not on the two or three words the
+    # model used to label it: "remodelación de cocina" is too short to tell
+    # apart from English, while the sentence it came from is not.
+    if not _same_language(said or job or "", written):
         return None
     return False
 
@@ -414,7 +445,7 @@ async def check(organization, said: str, documents=()) -> Verdict:
         job = matched_service(organization, said)
     # The model named the job; the list decides whether it is ours. Its own
     # answer is kept only where the business has listed nothing to decide with.
-    settled = supports(organization, job)
+    settled = supports(organization, job, said)
     return Verdict(
         job=job,
         service_fits=flag("service_fits") if settled is None else settled,

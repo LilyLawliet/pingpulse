@@ -202,3 +202,47 @@ def test_any_trade_decides_for_itself(trade, description, theirs, not_theirs):
         assert scope.supports(shop, job) is True, f"{trade} was told it does not do {job}"
     for job in not_theirs:
         assert scope.supports(shop, job) is False, f"{trade} accepted {job}"
+
+
+# ------------------------------------------------- a list is in one language
+# Found in production, on a screenshot meant to be evidence: a Miami
+# remodeller told a Spanish-speaking customer that "remodelación de cocina"
+# was not something it did, having listed "kitchen remodeling". The list
+# matched nothing because the list is in English, and no words in common was
+# read as a different trade.
+#
+# So the list only decides for requests written the way the list is. Where it
+# cannot, the model's reading is used - the same as for a business that has
+# listed nothing. That cuts both ways: grooming asked for in Spanish is not
+# refused here either. A list in one language cannot be the authority on
+# requests in another, and being wrong in that direction costs a client
+# their own customers.
+SPANISH = [
+    ("remodelación de cocina", "Hola, quiero remodelar mi cocina. Pueden ayudarme?"),
+    ("remodelación de baño", "Buenas, necesito remodelar mi baño completo"),
+    ("peluquería canina", "Hola, pueden bañar y cortar el pelo a mi perro?"),
+]
+
+
+@pytest.mark.parametrize("job,said", SPANISH, ids=[row[0] for row in SPANISH])
+def test_a_request_in_another_language_is_not_refused_off_an_english_list(job, said):
+    assert scope.supports(constrivo(), job, said) is None
+
+
+def test_the_customers_own_sentence_decides_the_language():
+    """Not the two or three words the model labelled the job with.
+
+    "remodelación de cocina" on its own is too short to tell from English -
+    it scores as English and was refused. The sentence it came from is not.
+    """
+    shop = constrivo()
+    said = "Hola, quiero remodelar mi cocina. Pueden ayudarme?"
+    assert scope.supports(shop, "remodelación de cocina", said) is None
+
+
+@pytest.mark.parametrize(
+    "job,said",
+    [("dog grooming", "Can you groom my dog?"), ("car gearbox repair", "Can you fix my gearbox?")],
+)
+def test_the_list_still_decides_in_its_own_language(job, said):
+    assert scope.supports(constrivo(), job, said) is False
