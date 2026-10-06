@@ -1015,8 +1015,17 @@ async def simulate(
         )
     # What a real conversation would do when nothing answers the question:
     # alert a person. The sandbox says so instead of alerting anybody.
+    # Unless the answer is "we do not do that", which is an answer and not an
+    # unanswered question. The same check the live webhook makes, in the same
+    # place: a shop testing its agent must see what the customer would get.
     team = None
-    if generation.needs_team is not None:
+    wrote_it_ourselves = generation.needs_team is not None or generation.provider == "none"
+    if generation.needs_team is not None and not outside_trade:
+        outside_trade = await booking.not_our_trade(db, organization, message)
+    if generation.needs_team is not None and outside_trade:
+        generation.text = booking.not_our_trade_reply(outside_trade)
+        generation.needs_team = None
+    elif generation.needs_team is not None:
         reachable = await notifications.can_reach(db, organization)
         generation.text = (
             unanswered.passed_on(organization)
@@ -1030,7 +1039,7 @@ async def simulate(
             else "Nothing in your documents answers this, and no alert address or device "
             "is set up - so the customer is not promised a reply. Add one under Alerts."
         )
-    if generation.needs_team is not None or generation.provider == "none":
+    if wrote_it_ourselves:
         generation.text = await languages.in_customer_language(generation.text, message)
     return {
         "reply": generation.text,

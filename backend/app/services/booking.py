@@ -2547,6 +2547,21 @@ async def not_our_trade(db, organization, said: str) -> str | None:
     return verdict.job or "That"
 
 
+def not_our_trade_reply(job: str) -> str:
+    """What to say back. Written here, not by the model, and not by a colleague.
+
+    The model's own answer to "can you groom my dog?" was "I don't have the
+    answer to hand - I've passed it to the team", because the shop's documents
+    do not mention dog grooming and it is told never to invent an offering.
+    That is true of the documents and false of the business, and it spends a
+    person on a question the shop answers in four words.
+    """
+    return (
+        f"Sorry - {job} is not something we do. "
+        "If there is something else you need, tell me and I will help."
+    )
+
+
 async def _decide(
     db, organization, contact, text: str, *, wants_meeting: bool = False
 ) -> TurnResult:

@@ -1142,15 +1142,28 @@ async def process_inbound_message(
 
     # The agent did not have the answer. A person is alerted and the
     # customer is told what actually happened, instead of a filler question.
+    #
+    # Unless the answer is "we do not do that". "Can you groom my dog this
+    # week?" came back as an unanswered question - truthfully, because the
+    # documents do not mention dog grooming - and a colleague was alerted for
+    # something the shop answers itself. The scope check is asked once here,
+    # on a turn that was already going to cost somebody's attention.
+    wrote_it_ourselves = generation.needs_team is not None or generation.provider == "none"
+    if generation.needs_team is not None and not outside_trade:
+        outside_trade = await booking.not_our_trade(db, organization, body)
     if generation.needs_team is not None:
-        generation.text = await unanswered.handle(
-            db, organization, contact, generation.needs_team, body
-        )
+        if outside_trade:
+            generation.text = booking.not_our_trade_reply(outside_trade)
+            generation.needs_team = None
+        else:
+            generation.text = await unanswered.handle(
+                db, organization, contact, generation.needs_team, body
+            )
 
     # A sentence the backend wrote rather than the model - the hand-over, the
     # worked-out answer with no model to phrase it - goes out in the
     # customer's language, with every figure checked unchanged.
-    if generation.needs_team is not None or generation.provider == "none":
+    if wrote_it_ourselves:
         generation.text = await languages.in_customer_language(generation.text, body)
 
     await manager.broadcast(

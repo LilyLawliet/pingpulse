@@ -245,3 +245,38 @@ async def test_work_the_shop_does_not_do_is_answered_not_handed_on(org_a, monkey
     assert body.get("provider") != "handover", body
     assert prompts, "no reply was generated"
     assert "NOT something this business does" in prompts[-1], prompts[-1]
+
+
+@pytest.mark.asyncio
+async def test_a_question_the_documents_do_not_answer_is_still_answered(org_a, monkeypatch):
+    """The path the live run actually took.
+
+    "Can you groom my dog this week?" came back from the model as a question
+    it could not answer - truthfully, because the documents say nothing about
+    dog grooming - and a colleague was alerted. The documents not mentioning
+    it is the answer, not a reason to spend somebody's attention.
+    """
+    from app.services import understanding
+
+    session = _session_for(org_a._client)
+    organization = await session.get(Organization, uuid.UUID(org_a.organization_id))
+    organization.sales_prompt = "Residential and commercial remodeling in Miami / South Florida."
+    await session.flush()
+
+    async def scope_says(prompt, timeout):
+        return {"job": "dog grooming", "service_fits": False}
+
+    async def groq(prompt):
+        # What the model returns when it has no answer in the documents.
+        return "NEEDS_TEAM: whether we groom dogs"
+
+    monkeypatch.setattr(understanding, "structured", scope_says)
+    monkeypatch.setattr(llm_service, "_call_groq", groq)
+
+    body = (
+        await org_a.post(
+            "/api/v1/agent/simulate", json={"message": "Can you groom my dog this week?"}
+        )
+    ).json()
+    assert body["needs_team"] is None, body
+    assert "not something we do" in body["reply"], body["reply"]
