@@ -280,3 +280,40 @@ async def test_a_question_the_documents_do_not_answer_is_still_answered(org_a, m
     ).json()
     assert body["needs_team"] is None, body
     assert "not something we do" in body["reply"], body["reply"]
+
+
+@pytest.mark.asyncio
+async def test_a_held_time_is_not_called_one_they_can_take(org_a, monkeypatch):
+    """The page said "reply with one to see it booked" under a reply that had
+    just asked for a working phone number. The time is held while they answer;
+    the page is told which of the two it is looking at."""
+    session = _session_for(org_a._client)
+    organization = await session.get(Organization, uuid.UUID(org_a.organization_id))
+    organization.timezone = "UTC"
+    organization.agent_config = {
+        "business_hours": EVERY_DAY,
+        "appointments": {"min_notice_minutes": 0, "duration_minutes": 60, "require_address": False},
+    }
+    await session.flush()
+
+    async def groq(prompt):
+        return "Could you give me a number that works?"
+
+    monkeypatch.setattr(llm_service, "_call_groq", groq)
+
+    held = (
+        await org_a.post(
+            "/api/v1/agent/simulate",
+            json={"message": "Book me tomorrow at 10am, my phone number is 123"},
+        )
+    ).json()
+    assert held["booking"]["offered"], held
+    assert held["booking"]["held"] is True, held["booking"]
+
+    free = (
+        await org_a.post(
+            "/api/v1/agent/simulate", json={"message": "What times do you have tomorrow?"}
+        )
+    ).json()
+    assert free["booking"]["offered"], free
+    assert free["booking"]["held"] is False, free["booking"]

@@ -949,6 +949,13 @@ _TIME_IN_TEXT = re.compile(
 OFFER_BOOK = "book"
 OFFER_MOVE = "move"
 
+#: Refusals that mean the time is being held while the customer answers
+#: something, rather than waiting for them to take it. Nothing branches on
+#: this in a conversation - it is so a shop watching its agent in the Test
+#: agent is not told "reply with one and it is booked" under a reply that has
+#: just asked for a working phone number.
+STILL_WAITING = frozenset({"needs_address", "contact_invalid", "needs_qualification"})
+
 
 def remember_offer(
     contact,

@@ -842,6 +842,7 @@ async def simulate(
         )
     appointment = None
     performed = None
+    held_for_an_answer = False
     offered_slots: list[str] = []
     booking_reply = None
     order_reply = None
@@ -913,6 +914,9 @@ async def simulate(
         booking_reply = turn.plain_reply(organization)
         turn_reply = turn.reply
         performed = turn.performed
+        held_for_an_answer = (
+            turn.refusal is not None and turn.refusal.reason in booking.STILL_WAITING
+        )
         if turn.appointment is not None:
             appointment = SimpleNamespace(when=booking.describe(turn.appointment))
         if turn.prompt_block:
@@ -1060,7 +1064,14 @@ async def simulate(
         # Set when the agent did not know: what a live chat would do about it.
         "needs_team": team,
         # What booking did on this turn, and what to send back next turn.
-        "booking": {"note": booking_note, "offered": offered_slots, "performed": performed},
+        "booking": {
+            "note": booking_note,
+            "offered": offered_slots,
+            "performed": performed,
+            # Whether those times are theirs to take, or are being held while
+            # the customer answers something the reply has just asked for.
+            "held": held_for_an_answer,
+        },
         "order": {"note": order_note},
         "booking_state": state,
         "sent": False,

@@ -143,8 +143,15 @@ export default function AgentSandbox() {
                   )}
                   {turn.booking?.offered?.length > 0 && !turn.booking?.performed && (
                     <p className="mt-2 text-[11px] leading-relaxed text-faint">
-                      Offered from your diary: {turn.booking.offered.length} time
-                      {turn.booking.offered.length === 1 ? '' : 's'}. Reply with one to see it booked.
+                      {turn.booking.held
+                        ? `Your agent is holding ${
+                            turn.booking.offered.length === 1
+                              ? 'this time'
+                              : `these ${turn.booking.offered.length} times`
+                          } until the customer answers what it just asked for. Nothing is booked yet.`
+                        : `Your agent offered ${turn.booking.offered.length} ${
+                            turn.booking.offered.length === 1 ? 'time' : 'times'
+                          } from your calendar. Reply with one to see it booked.`}
                     </p>
                   )}
                   {turn.needs_team && (
