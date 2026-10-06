@@ -761,6 +761,15 @@ async def about_an_order_they_have(db, organization, contact, text: str) -> Orde
     orders = await on_record(db, organization, contact)
     if not orders:
         return OrderTurn(
+            # Whether an order exists is the table's answer, not a question of
+            # phrasing, so the answer is written here. Asked to say this nicely,
+            # a model has the customer's own confident account of an order in
+            # front of it and the shop's politeness instruction behind it.
+            reply=(
+                "I can't find an order in your name, and no payment has been taken. "
+                "If you'd like to place one now, tell me what you need and I'll take "
+                "it - or I can pass you to a colleague if you think this is wrong."
+            ),
             prompt_block=(
                 "=== NO ORDER ON RECORD ===\n"
                 "They have written about an order, a delivery or a payment as something that "

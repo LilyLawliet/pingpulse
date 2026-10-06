@@ -122,4 +122,10 @@ async def test_the_turn_reaches_the_prompt(shop_and_contact, db_session):
         [], prepared,
     )
     assert "NO ORDER ON RECORD" in turn.prompt_block
-    assert turn.reply is None and turn.placed is False
+    assert turn.placed is False
+    # Whether an order exists is the table's answer, so the answer is written
+    # here and sent as it is. The model is not asked to phrase a no while the
+    # customer's own confident account of the order sits in front of it.
+    assert turn.reply is not None
+    assert "can't find an order in your name" in turn.reply
+    assert "no payment has been taken" in turn.reply

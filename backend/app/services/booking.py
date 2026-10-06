@@ -414,9 +414,17 @@ async def book(
             "Appointments are not set up for this business yet.",
         )
 
+    # No kind at all means "whatever this shop books by default", which is a
+    # setting. A kind that was asked for and is not one of this shop's is a
+    # different thing entirely, and quietly turning it into the default is how
+    # a request becomes a generic site visit - the exact complaint the client
+    # made. It is refused rather than substituted.
     chosen_kind = (kind or default_kind(organization)).lower()
     if chosen_kind not in APPOINTMENT_KINDS:
-        chosen_kind = default_kind(organization)
+        return Refusal(
+            "unknown_kind",
+            "That isn't a kind of appointment this business books.",
+        )
 
     ends_at = starts_at + timedelta(minutes=duration_minutes(organization, chosen_kind))
 
@@ -1039,6 +1047,29 @@ OFFER_MOVE = "move"
 #: agent is not told "reply with one and it is booked" under a reply that has
 #: just asked for a working phone number.
 STILL_WAITING = frozenset({"needs_address", "contact_invalid", "needs_qualification"})
+
+#: Refusals where the backend has already decided, and the model is therefore
+#: not asked. It may still carry the conversation everywhere else - reading
+#: what somebody meant, asking the next question, choosing the words - but it
+#: has no say in whether a service is offered, whether an area is served,
+#: whether details are usable, whether qualification passed, or whether a time
+#: could be taken. Each of these renders from `plain_reply`, which is written
+#: here and reads nothing a model produced.
+#:
+#: The six the client asked for, in their words, are all here:
+#: NOT_QUALIFIED, UNSUPPORTED_SERVICE, OUTSIDE_SERVICE_AREA, INVALID_CONTACT,
+#: BOOKING_FAILED and NO_RECORD.
+HARD_STOPS = frozenset({
+    "needs_qualification",                                   # NOT_QUALIFIED
+    "outside_services", "outside_scope",                     # UNSUPPORTED_SERVICE
+    "outside_area",                                          # OUTSIDE_SERVICE_AREA
+    "contact_invalid", "bad_details", "needs_address",       # INVALID_CONTACT
+    "taken", "busy", "closed", "past", "backwards",          # BOOKING_FAILED
+    "too_long", "blocked", "unchanged", "not_confirmed",
+    "already_cancelled",
+    "not_found",                                             # NO_RECORD
+    "unknown_kind", "not_configured",                        # BOOKING_FAILED
+})
 
 
 def remember_offer(
@@ -1704,10 +1735,16 @@ class TurnResult:
         if self.cancelled and self.appointment is not None:
             return f"Your {describe(self.appointment)} has been cancelled."
         lines = []
-        asks = ("needs_address", "contact_invalid", "outside_area", "holding_off", "past")
+        # Refusals whose message is already a sentence for the customer, rather
+        # than a note about a time. "Still need: a postcode" was neither, which
+        # is why it used to be left out here and handed to a model instead.
+        asks = (
+            "needs_address", "contact_invalid", "outside_area", "holding_off",
+            "past", "needs_qualification", "unknown_kind", "not_configured",
+        )
         if self.refusal is not None and self.refusal.reason in asks:
             lines.append(self.refusal.message)
-        elif self.refusal is not None and self.refusal.reason not in ("needs_qualification",):
+        elif self.refusal is not None:
             lines.append(f"Sorry, that time isn't possible: {self.refusal.message}")
         if self.offered and not (
             self.refusal is not None and self.refusal.reason in ("needs_address", "contact_invalid")
@@ -1763,6 +1800,28 @@ _MEETING = re.compile(
 )
 _VIDEO = re.compile(r"\b(video|zoom|google meet|meet link|teams|online|screen ?share|demo)\b", re.IGNORECASE)
 _PHONE = re.compile(r"\b(phone|voice call|ring me|call me|whatsapp call)\b", re.IGNORECASE)
+
+
+# Somebody asking the business to do something, in any trade. Deliberately
+# about the shape of the sentence rather than the work named in it: what the
+# work is gets read elsewhere, and a list of trades here would be a list that
+# is always short by one.
+_ASKS_FOR_WORK = re.compile(
+    r"\b(?:"
+    r"i(?:'| a)?m looking for|looking for|i need|we need|i want|we want|i'?d like"
+    # "do you also do", "do you guys offer" - the adverb in the middle is why
+    # a topic change to another trade went unchecked.
+    r"|can you|could you|can i get|do you\b[^.?!]{0,16}?\b(?:do|offer|sell|handle|provide|stock)"
+    r"|are you able to|need someone to|need a|need my|help me with|quote for"
+    r"|how much (?:is|for|would)|price (?:for|of)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def asks_for_work(text: str) -> bool:
+    """They are asking the business for something, whatever the something is."""
+    return bool(_ASKS_FOR_WORK.search(text or ""))
 
 
 def is_meeting(text: str) -> bool:
@@ -2293,10 +2352,17 @@ async def handle_turn(
     announcing a booking can only survive if a booking was made.
     """
     try:
-        return await _handle_turn(db, organization, contact, text, wants_meeting=wants_meeting)
+        turn = await _handle_turn(db, organization, contact, text, wants_meeting=wants_meeting)
     except Exception as exc:  # noqa: BLE001 - never at the cost of a reply
         logger.warning("appointment handling failed for %s: %s", contact.id, exc)
         return TurnResult()
+    # One place, so a new refusal cannot be added somewhere that forgets to do
+    # this. Where the answer is already settled there is nothing for a model to
+    # weigh up, and asking it to phrase a no is how "I've penciled you in for a
+    # 3 pm consultation" was said on a turn that had refused the job.
+    if turn.reply is None and turn.refusal is not None and turn.refusal.reason in HARD_STOPS:
+        turn.reply = turn.plain_reply(organization)
+    return turn
 
 
 # A question about the booking they already have.
@@ -2307,6 +2373,26 @@ _ABOUT_THE_BOOKING = re.compile(
 )
 
 _INSTEAD = re.compile(r"\b(instead|rather|swap|switch)\b", re.IGNORECASE)
+
+# Writing about an appointment of theirs as something that already exists.
+# Deliberately not a bare "my appointment": "I want my appointment on Friday"
+# is a request for one, and answering that with "I can't find it" would be
+# worse than saying nothing. These are the shapes that assert or ask after one.
+_ASKS_ABOUT_THEIR_BOOKING = re.compile(
+    r"\b(?:"
+    r"you (?:already |just )?(?:booked|scheduled|confirmed|set up|put) (?:me|us|it|my|our)"
+    r"|where(?:'s| is| was)\s+my\s+(?:appointment|booking|visit|consultation|slot)"
+    r"|when(?:'s| is| was)\s+my\s+(?:appointment|booking|visit|consultation|slot)"
+    r"|is\s+my\s+(?:appointment|booking|visit|consultation|slot)\s+(?:still\s+)?(?:on|confirmed|booked)"
+    r"|i (?:have|had|got) an? (?:appointment|booking) (?:with you|yesterday|last week)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def asks_about_their_booking(text: str) -> bool:
+    """They have written about an appointment of theirs as a thing that exists."""
+    return bool(_ASKS_ABOUT_THEIR_BOOKING.search(text or ""))
 
 
 def _offer_block(organization, slots, purpose, existing=None, lead: str = "") -> str:
@@ -2726,8 +2812,20 @@ async def _decide(
     note_where(contact, text)
     note_details(contact, text)
     # What they have said about the job and the place, for the scope check.
+    # What goes into the window the scope check reads. "dog grooming please"
+    # is not shaped like a request and names a trade, so the first message
+    # with anything in it is kept whatever its shape; after that, only
+    # messages that are about the job or the place.
     said = scope.note_said(
-        contact, text, wants_booking(text) or wants_meeting or bool(place_in(text))
+        contact,
+        text,
+        (
+            wants_booking(text)
+            or wants_meeting
+            or bool(place_in(text))
+            or asks_for_work(text)
+            or (scope.remembered(contact) is None and scope.worth_checking(text))
+        ),
     )
     offered = remembered_offer(contact)
     purpose = offer_purpose(contact)
@@ -2844,10 +2942,39 @@ async def _decide(
             appointment=existing,
         )
 
+    # --------------------------------------------- an appointment they claim
+    # The diary is asked, and the diary's answer is the answer. A customer
+    # saying they were booked in does not make a row exist, and the absence of
+    # one is stronger than their account of it - said here rather than left to
+    # a model holding their confident version and a politeness instruction.
+    if existing is None and asks_about_their_booking(text):
+        return TurnResult(
+            refusal=Refusal("not_found", "There is no appointment booked in your name."),
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                "They have written about an appointment as something that already exists. "
+                "There is NO appointment on record for this customer. Say so plainly and "
+                "without blame, and do NOT discuss a time, a date or an arrival for it."
+            ),
+        )
+
     # ------------------------------------------------------ not ours to book
     # Before anything about the time: work or a place the business does not
     # take gets no times, whatever else is wrong with the request.
-    if existing is None and about_times:
+    # Also on the turn they first ask for something, not only once they are
+    # asking about times. The refusal used to be recorded only on a turn that
+    # mentioned a time, so whether the business's "no" was remembered depended
+    # on which way into this function the message came - and a customer who
+    # said "can you groom my dog?" and then talked about anything else for
+    # three turns arrived at "the 3:00 pm one please" with nothing on record.
+    # The first time somebody says what they are after, however they phrase it.
+    # "dog grooming please" is not shaped like a request and still names one,
+    # so the check is asked once per conversation on the first message with
+    # anything in it, and after that only when they are asking about times.
+    first_ask = scope.refused_job(contact) is None and scope.worth_checking(said) and (
+        asks_for_work(said) or scope.remembered(contact) is None
+    )
+    if existing is None and (about_times or first_ask):
         outside = await _outside_scope(db, organization, contact, said, new_kind)
         if outside is not None:
             return outside
@@ -3103,7 +3230,10 @@ async def _propose_booking(
                 "made. Ask them for that one thing. Nothing is booked yet, so "
                 "do NOT say it is."
             ),
-            refusal=Refusal("needs_qualification", f"Still need: {asks or name}"),
+            refusal=Refusal(
+                "needs_qualification",
+                f"Before I can book that I need to know {asks or name}.",
+            ),
             offered=[target],
         )
 

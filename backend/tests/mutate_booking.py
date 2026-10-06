@@ -14,7 +14,12 @@ nothing: the hand-written version caught 10 of the first 14, the JSON one all
 
 Each mutation must match booking.py exactly once, or the run stops: one that
 no longer matches would silently test nothing. When booking.py is changed,
-update the strings here. The file is restored afterwards whatever happens.
+update the strings here.
+
+Nothing is broken in place. The backend is copied to a private directory
+first and every mutation, run and restore happens there, so this can be run
+alongside anything else - a deploy, an editor, another test run - and can be
+killed at any point without leaving a mutation behind.
 
 It exits non-zero when any fault survives every file it was run with, so CI
 can run it (cloudbuild.yaml does). Two things would make that lie, and both
@@ -31,7 +36,38 @@ are refused rather than reported:
 runs the files as one pytest call per fault: the question CI asks is whether
 anything catches each one, not which file does, and it is six times faster.
 """
-import subprocess, sys, pathlib
+import os, shutil, subprocess, sys, pathlib, tempfile
+
+# ---------------------------------------------------------------- the sandbox
+# The harness breaks real source files and restores them in a finally. That is
+# fine until something else reads them in the meantime. On October 6 it was
+# started in the background and booking.py was scp'd to production mid-run:
+# the deploy happened to catch the file between two mutations, and could as
+# easily have shipped a deliberately broken guard to two live clients. Killing
+# the run skipped the finally and left a mutation in the working tree twice.
+#
+# So it no longer has the working tree to break. Everything below runs on a
+# private copy, and the tree the rest of the machine is using is never written
+# to at all - not during a run, not during a restore, not if this process is
+# killed halfway through.
+def _sandbox() -> pathlib.Path:
+    here = pathlib.Path.cwd()
+    if not (here / "app" / "services" / "booking.py").exists():
+        sys.exit("run this from the backend directory")
+    root = pathlib.Path(tempfile.mkdtemp(prefix="mutate-booking-"))
+    shutil.copytree(
+        here,
+        root / "backend",
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "*.pyc", ".pytest_cache", ".mypy_cache", ".venv",
+            "node_modules", ".git", "htmlcov",
+        ),
+    )
+    return root
+
+
+_ROOT = _sandbox()
+os.chdir(_ROOT / "backend")
 
 SRC = pathlib.Path("app/services/booking.py")
 LLM = pathlib.Path("app/services/llm_service.py")
@@ -207,6 +243,26 @@ MUTATIONS = {
         "    _keep_the_good_ones(contact, text, given)\n",
         "    pass\n",
     ),
+    "the shop's own list does not settle what it does": (SCOPE,
+        "        service_fits=flag(\"service_fits\") if settled is None else settled,\n",
+        "        service_fits=flag(\"service_fits\"),\n",
+    ),
+    "a hard stop is handed back to the model to phrase": (
+        "    if turn.reply is None and turn.refusal is not None and turn.refusal.reason in HARD_STOPS:\n",
+        "    if False:\n",
+    ),
+    "the scope check waits until they ask about times": (
+        "    if existing is None and (about_times or first_ask):\n",
+        "    if existing is None and about_times:\n",
+    ),
+    "an appointment the customer invents is not checked": (
+        "    if existing is None and asks_about_their_booking(text):\n",
+        "    if False:\n",
+    ),
+    "an unknown appointment kind becomes the default again": (
+        "        return Refusal(\n            \"unknown_kind\",\n            \"That isn't a kind of appointment this business books.\",\n        )\n",
+        "        chosen_kind = default_kind(organization)\n",
+    ),
     "the turn that refuses does not write the refusal down": (
         "    if contact is not None:\n        scope.remember_refusal(contact, job, verdict.place)\n",
         "    if False:\n        scope.remember_refusal(contact, job, verdict.place)\n",
@@ -280,8 +336,9 @@ try:
             row[column] = "RED" if proc.returncode == 1 else "green"
         results[name] = row
 finally:
-    for path, text in SOURCES.items():
-        _write(path, text)
+    # Nothing here is the working tree, so this is tidiness rather than repair.
+    os.chdir(pathlib.Path.home())
+    shutil.rmtree(_ROOT, ignore_errors=True)
 
 width = max(len(n) for n in results)
 heads = {c: (c if together else pathlib.Path(c).stem) for c in columns}

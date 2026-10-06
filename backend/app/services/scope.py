@@ -25,7 +25,6 @@ import hashlib
 import json
 import logging
 import re
-import re
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,8 @@ THE CUSTOMER WROTE:
 {said}
 
 Return ONLY this JSON:
-{{"job": "<the work or service they want, in a few words, or null>",
+{{"job": "<the work or service they want, in a few words, written in the same
+         language the business uses above - not the customer's - or null>",
   "service_fits": true | false | null,
   "place": "<where the job is, as they wrote it, or null>",
   "area_fits": true | false | null}}
@@ -142,8 +142,156 @@ def what_the_business_says(organization, documents=()) -> str:
     return "\n".join(parts)
 
 
+# Words that carry no trade meaning, so two requests sharing only these share
+# nothing. "service", "work" and "job" are here because a shop writes "roofing
+# services" and a customer writes "dog grooming service", and matching on
+# "service" would make every request fit every business.
+_NOISE = frozenset({
+    "a", "an", "and", "the", "or", "of", "for", "to", "my", "our", "your", "in",
+    "on", "at", "with", "new", "full", "some", "any", "service", "services",
+    "work", "works", "job", "jobs", "project", "projects", "need", "want",
+    "please", "help", "get", "general", "custom", "other",
+})
+_WORD = re.compile(r"[a-z]+")
+#: "Services: general construction, home remodeling, ..." - how a shop that has
+#: not filled in the services field still writes down what it does.
+_SERVICES_SENTENCE = re.compile(
+    r"\b(?:"
+    r"services?\s*(?:it offers|offered|include[sd]?|we offer|:)"
+    r"|we\s+(?:offer|provide|sell|supply|specialis[ez]e in)"
+    r"|what we do\s*:"
+    r")\s*(.{3,600}?)(?:\.\s|\.$|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+_SPLIT_SERVICES = re.compile(r"\s*(?:,|;|\band\b|•|\n)\s*")
+
+
+def _stem(word: str) -> str:
+    """Enough of a word to compare trades by. "roofing" and "roof" are one trade."""
+    if len(word) > 4 and word.endswith("ies"):
+        word = word[:-3] + "y"
+    elif len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        word = word[:-1]
+    if len(word) > 5 and word.endswith("ing"):
+        word = word[:-3]
+    elif len(word) > 6 and word.endswith("ment"):
+        word = word[:-4]
+    # "remodelling" -> "remodell" -> "remodel", so it meets "remodeling".
+    if len(word) > 4 and word[-1] == word[-2] and word[-1] not in "aeiou":
+        word = word[:-1]
+    return word
+
+
+def _stems(text: str) -> set[str]:
+    """Content words, crudely stemmed, for comparing one trade to another."""
+    found = set()
+    for word in _WORD.findall((text or "").lower()):
+        if word in _NOISE or len(word) < 3:
+            continue
+        word = _stem(word)
+        if word not in _NOISE and len(word) >= 3:
+            found.add(word)
+    return found
+
+
+def offered_services(organization) -> list[str]:
+    """What this business says it does, as a list, from its own settings.
+
+    In order: the services field the owner filled in; the services read out of
+    its documents and shown to it for approval; and failing both, a "Services:
+    ..." sentence in what it wrote about itself. All three are the business's
+    own words, held by us, and none of them is a model's opinion formed at the
+    moment a customer asks.
+    """
+    from app.services import agent_config
+
+    config = getattr(organization, "agent_config", None) or {}
+    listed = [str(v).strip() for v in (config.get("services") or []) if str(v).strip()]
+    if listed:
+        return listed[:60]
+    proposed = (config.get(agent_config.PROPOSED_KEY) or {}).get("fields") or {}
+    listed = [str(v).strip() for v in (proposed.get("services") or []) if str(v).strip()]
+    if listed:
+        return listed[:60]
+    written = " ".join(
+        str(getattr(organization, field, "") or "")
+        for field in ("product_rules", "sales_prompt")
+    )
+    match = _SERVICES_SENTENCE.search(written)
+    if not match:
+        return []
+    found = [part.strip(" .") for part in _SPLIT_SERVICES.split(match.group(1))]
+    return [part for part in found if len(part) > 2][:60]
+
+
+#: A word in this many of the shop's own services is a modifier, not a trade.
+#: Constrivo lists four kinds of "construction" and three things done to a
+#: "home", so "home" alone cannot be what makes a request theirs - otherwise
+#: "dog grooming at home" matches "home remodeling".
+SHARED_BY = 3
+
+
+def worth_checking(text: str) -> bool:
+    """Enough said to be naming something, rather than "yes" or "thanks"."""
+    return len(_stems(text)) >= 2
+
+
+def supports(organization, job: str | None) -> bool | None:
+    """Whether this business does that work. Decided here, from its own list.
+
+    Three answers, and the middle one matters. True and False are this
+    function's own, read off the list the business keeps. None means it cannot
+    be told from the list - the business has listed nothing, the request was
+    not named, or the only thing it shares with the list is a word like "home"
+    that half the services carry. Only then is the model's reading used.
+
+    So a request naming a trade the shop does not list - dog grooming, to a
+    remodeller - is refused here, by us, whatever the model thought. A vague
+    one is still a conversation, and is left to be read as one.
+    """
+    wanted = _stems(job or "")
+    services = offered_services(organization)
+    if not wanted or not services:
+        return None
+    stemmed = [_stems(service) for service in services]
+    seen: dict[str, int] = {}
+    for words in stemmed:
+        for word in words:
+            seen[word] = seen.get(word, 0) + 1
+    telling = {word for word, count in seen.items() if count < SHARED_BY}
+
+    for words in stemmed:
+        shared = words & wanted
+        # Two words in common is a trade matched; one is only a match if that
+        # word is one this shop uses to tell its services apart.
+        if len(shared) >= 2 or (shared & telling):
+            return True
+    if any(words & wanted for words in stemmed):
+        return None  # a modifier in common and nothing else: not ours to call
+    # The list is not everything the business has written about itself. A shop
+    # whose list says "general construction" still describes itself as doing
+    # residential work, and refusing "something residential" off the list alone
+    # would turn away its own trade. Saying no needs the word to be absent from
+    # everything it has said, not just from the list.
+    written = " ".join(
+        str(getattr(organization, field, "") or "")
+        for field in ("product_rules", "sales_prompt")
+    )
+    if _stems(written) & wanted:
+        return None
+    return False
+
+
 async def check(organization, said: str, documents=()) -> Verdict:
-    """The model's reading of whether this request fits. Never raises; unknown on any doubt."""
+    """Whether this request fits. The model reads it; this decides.
+
+    The model is asked what the customer is after and where. Whether that is
+    work the business does is then settled here, against the list the business
+    itself keeps - so a model that is feeling helpful cannot admit a job the
+    shop does not do, and a client cannot be told its own services are not its
+    own. Where the business has listed nothing, there is nothing to decide
+    with and the model's reading is all there is.
+    """
     business = what_the_business_says(organization, documents)
     if not business or not (said or "").strip():
         return Verdict()
@@ -167,9 +315,13 @@ async def check(organization, said: str, documents=()) -> Verdict:
         value = answer.get(key)
         return str(value).strip()[:120] if isinstance(value, str) and value.strip() else None
 
+    job = text("job")
+    # The model named the job; the list decides whether it is ours. Its own
+    # answer is kept only where the business has listed nothing to decide with.
+    settled = supports(organization, job)
     return Verdict(
-        job=text("job"),
-        service_fits=flag("service_fits"),
+        job=job,
+        service_fits=flag("service_fits") if settled is None else settled,
         place=text("place"),
         area_fits=flag("area_fits"),
     )
