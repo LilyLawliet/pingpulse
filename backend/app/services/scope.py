@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import re
+import re
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -70,7 +71,50 @@ class Verdict:
         return self.service_fits is not None or self.area_fits is not None
 
 
-def what_the_business_says(organization) -> str:
+# How much of the business's own documents to quote. Enough for what it does
+# and where, small enough that a scope check cannot eat the per-minute token
+# budget it shares with every reply.
+DOCUMENT_CHARS = 1400
+# What a passage mentioning the trade or the patch looks like. Used only to
+# choose which passages to quote, never to decide anything.
+_TELLING = re.compile(
+    r"\b(服务|service|services|we (do|offer|provide|handle|serve)|specialis|"
+    r"areas?\s+(we\s+)?serve|serving|located|location|address|county|counties|"
+    r"remodel\w*|construction|renovation|installation|repair|"
+    r"[A-Z]{2}\s+\d{5}|florida|fl\b)",
+    re.IGNORECASE,
+)
+
+
+def from_documents(documents) -> str:
+    """The passages of the business's own documents that say what it does and where.
+
+    Constrivo had no services and no areas filled in, and its description is
+    the agent's instruction sheet - "greet the customer by name", "never quote
+    a price" - which says nothing about the trade or the patch. So the model
+    was asked whether a roof in Seattle fits a business whose words never
+    mention Miami, answered "the words do not say", and the check fell open:
+    the reply said plainly that Seattle is not served while the diary offered
+    six times for it. The documents are where an unconfigured business
+    actually states both, and they are what the reply had been reading all
+    along.
+    """
+    telling, rest = [], []
+    for document in documents or []:
+        text = " ".join(str(getattr(document, "content", "") or "").split())
+        if not text:
+            continue
+        (telling if _TELLING.search(text) else rest).append(text)
+    kept, room = [], DOCUMENT_CHARS
+    for text in telling + rest:
+        if room <= 0:
+            break
+        kept.append(text[:room])
+        room -= len(kept[-1])
+    return " ... ".join(kept)
+
+
+def what_the_business_says(organization, documents=()) -> str:
     """Everything the business has said about what it does and where, in its own words."""
     from app.services import agent_config
 
@@ -92,12 +136,15 @@ def what_the_business_says(organization) -> str:
     description = str(getattr(organization, "sales_prompt", "") or "").strip()
     if description:
         parts.append("In its own description: " + description[:2000])
+    quoted = from_documents(documents)
+    if quoted:
+        parts.append("In its own documents: " + quoted)
     return "\n".join(parts)
 
 
-async def check(organization, said: str) -> Verdict:
+async def check(organization, said: str, documents=()) -> Verdict:
     """The model's reading of whether this request fits. Never raises; unknown on any doubt."""
-    business = what_the_business_says(organization)
+    business = what_the_business_says(organization, documents)
     if not business or not (said or "").strip():
         return Verdict()
     from app.services import understanding
@@ -153,7 +200,7 @@ def note_said(contact, text: str, relevant: bool) -> str:
     return "\n".join(said)
 
 
-async def for_contact(organization, contact, said: str) -> Verdict:
+async def for_contact(organization, contact, said: str, documents=()) -> Verdict:
     """The verdict for what they have said, asked once per change in what they said."""
     if not said:
         return remembered(contact) or Verdict()
@@ -161,7 +208,7 @@ async def for_contact(organization, contact, said: str) -> Verdict:
     held = metadata.get(SCOPE_KEY) or {}
     if isinstance(held, dict) and held.get("key") == _key(said):
         return remembered(contact) or Verdict()
-    verdict = await check(organization, said)
+    verdict = await check(organization, said, documents)
     metadata[SCOPE_KEY] = {"key": _key(said), "verdict": json.dumps(verdict.__dict__)}
     contact.contact_metadata = metadata
     return verdict

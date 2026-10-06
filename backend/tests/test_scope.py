@@ -198,3 +198,116 @@ async def test_the_property_in_miami_is_not_refused_for_where_they_live(remodell
         db_session, shop, contact, "I live in California but the property is in Miami. What times do you have?"
     )
     assert turn.offered, turn.prompt_block
+
+
+# ================================ a question that is not a booking at all
+# "Can you groom my dog this week?" names no time and asks for nothing to be
+# booked, so nothing above ever looked at it. The analyzer read it as somebody
+# wanting a person - which is what a model does with a request the agent
+# plainly cannot serve - and the customer was offered a colleague for a
+# question the shop answers itself in four words.
+@pytest.mark.asyncio
+async def test_work_the_business_does_not_do_is_named_outside_a_booking(
+    remodeller, db_session, monkeypatch
+):
+    shop, _ = remodeller
+    model_says(monkeypatch, {"job": "dog grooming", "service_fits": False})
+    assert await booking.not_our_trade(db_session, shop, "Can you groom my dog this week?") == (
+        "dog grooming"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"job": "bathroom remodel", "service_fits": True},
+        {"job": "something", "service_fits": None},
+        None,
+    ],
+)
+async def test_anything_but_a_plain_no_is_still_the_persons_to_answer(
+    remodeller, db_session, monkeypatch, answer
+):
+    """It fails open here too: only a clear no takes the handover away."""
+    shop, _ = remodeller
+    model_says(monkeypatch, answer)
+    assert await booking.not_our_trade(db_session, shop, "Can you do my bathroom?") is None
+
+
+@pytest.mark.asyncio
+async def test_an_empty_message_asks_no_model(remodeller, db_session, monkeypatch):
+    seen = []
+    shop, _ = remodeller
+    model_says(monkeypatch, {"service_fits": False}, seen)
+    assert await booking.not_our_trade(db_session, shop, "   ") is None
+    assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_the_question_does_not_overwrite_a_booking_in_the_same_chat(
+    remodeller, db_session, monkeypatch
+):
+    """Stateless on purpose: the verdict a yes is re-checked against is left alone."""
+    shop, contact = remodeller
+    model_says(monkeypatch, {"job": "bathroom remodel", "service_fits": True})
+    day = weekday_ahead()
+    await booking.handle_turn(
+        db_session, shop, contact, f"Book a bathroom remodel visit {day:%B} {day.day} at 10am"
+    )
+    held = dict(contact.contact_metadata)
+    model_says(monkeypatch, {"job": "dog grooming", "service_fits": False})
+    await booking.not_our_trade(db_session, shop, "and can you groom my dog?")
+    assert contact.contact_metadata == held
+
+
+async def test_the_webhook_answers_it_instead_of_offering_a_colleague(db_session, monkeypatch):
+    """End to end: the reading says "they want a person", the scope says "we do not
+    do that", and the customer is told so rather than asked if they would like one."""
+    from app.api.webhook import process_inbound_message
+    from app.models import CRMContact, Organization
+    from app.schemas import GenerationResult, TwilioWebhookPayload
+    from app.services import analyzer
+    from app.services.twilio_service import TwilioService
+
+    organization = Organization(
+        name="Constrivo Group",
+        sales_prompt="Residential and commercial remodeling in Miami / South Florida.",
+    )
+    db_session.add(organization)
+    await db_session.flush()
+    db_session.add(
+        CRMContact(
+            organization_id=organization.id, phone_number="13055550222", name="Test",
+            pipeline_stage="NEW_LEAD", qualification={}, contact_metadata={},
+        )
+    )
+    await db_session.flush()
+
+    async def fake_send(self, to_number, body, media_urls=None, sender=None):
+        return True, "SM_out"
+
+    async def reads_it(history, message, stage):
+        return {**analyzer.heuristic_analysis(message, stage), "wants_person": True}
+
+    model_says(monkeypatch, {"job": "dog grooming", "service_fits": False})
+    prompts = []
+
+    async def generate(*args, **kwargs):
+        prompts.append(kwargs.get("knowledge") or "")
+        return GenerationResult(
+            provider="test", text="We don't do dog grooming.", prompt_used="", latency_ms=1
+        )
+
+    monkeypatch.setattr(TwilioService, "send_whatsapp", fake_send)
+    monkeypatch.setattr("app.api.webhook.analyzer.analyse", reads_it)
+    monkeypatch.setattr("app.api.webhook.llm_service.generate_reply", generate)
+
+    payload = TwilioWebhookPayload.model_validate(
+        {"From": "whatsapp:+13055550222", "To": "whatsapp:+16602075318",
+         "Body": "Can you groom my dog this week?", "MessageSid": "SMdog1"}
+    )
+    result = await process_inbound_message(db_session, payload)
+    assert result.get("status") != "asked_about_handover", result
+    assert prompts, "no reply was generated"
+    assert any("NOT something this business does" in str(p) for p in prompts), prompts

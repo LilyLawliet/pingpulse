@@ -2324,6 +2324,31 @@ async def _carry_out(db, organization, contact, held: dict) -> TurnResult:
                 ),
                 refusal=Refusal("outside_scope", "This is not something the business takes on."),
             )
+        # And the details, checked again now for the same reason.
+        #
+        # A message giving "phone 123" and an address that is not an email is
+        # answered with times and the plain words "nothing can be booked until
+        # it is [corrected]" - and then a yes booked it anyway. Saying one
+        # thing to the customer and doing another is the failure this whole
+        # file exists to prevent, so the sentence is made true here rather
+        # than softened there.
+        #
+        # New bookings only. A move is for somebody who already has an
+        # appointment, and refusing to move it because they have just
+        # mistyped an email strands them for a reason that has nothing to do
+        # with the time they cannot make.
+        bad = unusable_details(contact)
+        if bad:
+            said = "; ".join(bad)
+            return TurnResult(
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    f"They said yes, but {said}, so NOTHING was booked, held or reserved. "
+                    "Say plainly that it is not booked yet, ask them for one that works, "
+                    "and say you will take the time as soon as you have it."
+                ),
+                refusal=Refusal("bad_details", f"Nothing was booked: {said}."),
+            )
         result = await book(
             db, organization, contact, at,
             kind=held.get("kind"), location=held.get("location"), notes=held.get("notes"),
@@ -2478,6 +2503,50 @@ def agreed_to_it(text: str) -> bool:
     return bool(_YES.match(text or ""))
 
 
+async def _business_documents(db, organization):
+    """The business's own uploaded passages, for the scope check to read.
+
+    Capped at a dozen: scope quotes only the first page or so of what comes
+    back, and one booking turn must not become a large query for a shop with
+    a long handbook. Passages of text only - a product row is a price, not a
+    statement of what the business does or where.
+    """
+    from app.models import KnowledgeDocument
+
+    rows = await db.execute(
+        select(KnowledgeDocument)
+        .where(
+            KnowledgeDocument.organization_id == organization.id,
+            KnowledgeDocument.doc_type == "policy",
+        )
+        .order_by(KnowledgeDocument.created_at)
+        .limit(12)
+    )
+    return rows.scalars().all()
+
+
+async def not_our_trade(db, organization, said: str) -> str | None:
+    """The work they asked for, when it is plainly not work this business does.
+
+    Asked outside a booking turn, where the only other answer was a person.
+    "Can you groom my dog this week?" was read by the analyzer as somebody
+    wanting a human - it is not a booking, so nothing here ever looked at it -
+    and a remodeller's customer was offered a colleague for a question the
+    shop would have answered itself in four words. Spending a handover on it
+    is both the wrong answer and the expensive one.
+
+    Stateless on purpose: `check` rather than `for_contact`, so a question
+    asked on the way past does not overwrite the verdict a booking in the
+    same conversation was read back against.
+    """
+    if not (said or "").strip():
+        return None
+    verdict = await scope.check(organization, said, await _business_documents(db, organization))
+    if verdict.service_fits is not False:
+        return None
+    return verdict.job or "That"
+
+
 async def _decide(
     db, organization, contact, text: str, *, wants_meeting: bool = False
 ) -> TurnResult:
@@ -2610,7 +2679,7 @@ async def _decide(
     # Before anything about the time: work or a place the business does not
     # take gets no times, whatever else is wrong with the request.
     if existing is None and about_times:
-        outside = await _outside_scope(organization, contact, said, new_kind)
+        outside = await _outside_scope(db, organization, contact, said, new_kind)
         if outside is not None:
             return outside
 
@@ -2951,7 +3020,7 @@ async def _propose_booking(
     )
 
 
-async def _outside_scope(organization, contact, said: str, new_kind) -> TurnResult | None:
+async def _outside_scope(db, organization, contact, said: str, new_kind) -> TurnResult | None:
     """Why this job gets no times at all - work or a place the business does not take - or None.
 
     Asked before anything about the time. The past-date check used to come
@@ -2980,7 +3049,14 @@ async def _outside_scope(organization, contact, said: str, new_kind) -> TurnResu
     # what it says about itself: no times at all. A read-back of "site visit
     # for dog grooming" is faithful, and a yes to it is still a booking that
     # should never have been offered.
-    verdict = await scope.for_contact(organization, contact, said)
+    # The business's own documents go with it. Where the lists are blank and
+    # the description is the agent's instruction sheet, they are the only
+    # place the trade and the patch are written down - and without them the
+    # check fell open on "a roof in Seattle" while the reply, which does read
+    # them, was saying plainly that Seattle is not served.
+    verdict = await scope.for_contact(
+        organization, contact, said, await _business_documents(db, organization)
+    )
     if verdict.service_fits is False:
         forget_offer(contact)
         job = verdict.job or "That"

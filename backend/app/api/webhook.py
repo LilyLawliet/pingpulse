@@ -745,7 +745,18 @@ async def process_inbound_message(
     # read it, and a reading is a guess: it is put to them as a question, and
     # their yes hands over. Handing over stops the agent, so a misread
     # booking used to end in silence.
-    if booking.heard_as_a_person(analysis, body) and contact.ai_enabled:
+    #
+    # Unless it is work this business plainly does not do. "Can you groom my
+    # dog this week?" is not a booking, so the scope check in booking.py never
+    # saw it, and a remodeller's customer was offered a colleague for a
+    # question the shop answers itself. The scope check runs here instead -
+    # once, on the rare turn the analyzer reads as wanting a person - and
+    # where the answer is "we do not do that", the ordinary reply says so.
+    outside_trade = None
+    read_as_a_person = booking.heard_as_a_person(analysis, body) and contact.ai_enabled
+    if read_as_a_person:
+        outside_trade = await booking.not_our_trade(db, organization, body)
+    if read_as_a_person and not outside_trade:
         contact.contact_metadata = handover_question.ask(contact.contact_metadata)
         text = await languages.in_customer_language(
             handover_question.question(organization), body, timeout=FIXED_REPLY_SECONDS
@@ -957,6 +968,17 @@ async def process_inbound_message(
     extra_blocks = [vision.as_prompt_block(image_analysis, bool(stored_media))]
     if appointment_turn.prompt_block:
         extra_blocks.append(appointment_turn.prompt_block)
+    if outside_trade:
+        # Said here rather than left to the model to work out from the
+        # documents, so the answer is the same every time it is asked.
+        extra_blocks.append(
+            "=== NOT SOMETHING THIS BUSINESS DOES ===\n"
+            f"{outside_trade} is NOT something this business does, going by its own "
+            "description and its own documents. Say so plainly and briefly. Do NOT "
+            "offer to pass them to a colleague, do NOT promise to check, and do NOT "
+            "offer a time. Ask whether there is something this business does that "
+            "they need."
+        )
     if handed_to_a_person:
         # Said plainly, and only here. The guard lets a handoff phrase through
         # for this turn because the alert behind it has already been raised.

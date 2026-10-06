@@ -207,3 +207,41 @@ async def test_a_booking_the_analyzer_reads_as_wanting_a_person_is_not_handed_ov
         )
     ).json()
     assert moved_on["escalated"] is False and "pending_handover" not in moved_on["booking_state"]
+
+
+@pytest.mark.asyncio
+async def test_work_the_shop_does_not_do_is_answered_not_handed_on(org_a, monkeypatch):
+    """The Test agent is where a shop finds this out, so it must answer the
+    same way the live chat does: "we do not do that", not "shall I pass you
+    to the team?"."""
+    from app.services import analyzer, understanding
+
+    session = _session_for(org_a._client)
+    organization = await session.get(Organization, uuid.UUID(org_a.organization_id))
+    organization.sales_prompt = "Residential and commercial remodeling in Miami / South Florida."
+    await session.flush()
+
+    async def reads_it(history, message, stage):
+        return {**analyzer.heuristic_analysis(message, stage), "wants_person": True}
+
+    async def scope_says(prompt, timeout):
+        return {"job": "dog grooming", "service_fits": False}
+
+    prompts = []
+
+    async def groq(prompt):
+        prompts.append(prompt)
+        return "We don't do dog grooming, I'm afraid."
+
+    monkeypatch.setattr("app.api.operations.analyzer.analyse", reads_it)
+    monkeypatch.setattr(understanding, "structured", scope_says)
+    monkeypatch.setattr(llm_service, "_call_groq", groq)
+
+    body = (
+        await org_a.post(
+            "/api/v1/agent/simulate", json={"message": "Can you groom my dog this week?"}
+        )
+    ).json()
+    assert body.get("provider") != "handover", body
+    assert prompts, "no reply was generated"
+    assert "NOT something this business does" in prompts[-1], prompts[-1]

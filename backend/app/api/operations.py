@@ -773,7 +773,14 @@ async def simulate(
     if not escalation and handover_question.asked(state) and booking.agreed_to_it(message):
         escalation = "agreed to be passed to the team"
     state = handover_question.forget(state)
-    if not escalation and booking.heard_as_a_person(analysis, message):
+    # Work this business plainly does not do is answered, not handed on. The
+    # same check the live webhook makes, in the same place, because a sandbox
+    # that answers differently from the live one tests nothing.
+    outside_trade = None
+    read_as_a_person = not escalation and booking.heard_as_a_person(analysis, message)
+    if read_as_a_person:
+        outside_trade = await booking.not_our_trade(db, organization, message)
+    if read_as_a_person and not outside_trade:
         return {
             "reply": await languages.in_customer_language(
                 handover_question.question(organization), message, timeout=languages.FIXED_REPLY_SECONDS
@@ -824,6 +831,15 @@ async def simulate(
     # remembers it, so "the 3pm one" can be picked in the next turn.
     booking_note = None
     booking_block = ""
+    if outside_trade:
+        booking_block = (
+            "=== NOT SOMETHING THIS BUSINESS DOES ===\n"
+            f"{outside_trade} is NOT something this business does, going by its own "
+            "description and its own documents. Say so plainly and briefly. Do NOT "
+            "offer to pass them to a colleague, do NOT promise to check, and do NOT "
+            "offer a time. Ask whether there is something this business does that "
+            "they need."
+        )
     appointment = None
     performed = None
     offered_slots: list[str] = []
@@ -841,11 +857,11 @@ async def simulate(
             "is set up, so nobody would hear about this request."
         )
         if reachable:
-            booking_block = (
+            booking_block = "\n\n".join(filter(None, [booking_block, (
                 "A colleague has just been alerted about this booking request. You MAY tell "
                 "the customer that a team member will get back to them with available times. "
                 "Do NOT offer a time yourself, do NOT say anything is booked."
-            )
+            )]))
     savepoint = await db.begin_nested()
     try:
         probe = CRMContact(

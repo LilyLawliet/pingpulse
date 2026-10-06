@@ -37,6 +37,7 @@ SRC = pathlib.Path("app/services/booking.py")
 LLM = pathlib.Path("app/services/llm_service.py")
 HANDOVER = pathlib.Path("app/services/handover_question.py")
 ANALYZER = pathlib.Path("app/services/analyzer.py")
+TASKS = pathlib.Path("app/tasks.py")
 
 
 # Read and write the bytes ourselves. read_text() decodes with the platform's
@@ -54,7 +55,7 @@ def _read(path: pathlib.Path) -> tuple[str, str]:
 
 SOURCES: dict[pathlib.Path, str] = {}
 ENDINGS: dict[pathlib.Path, str] = {}
-for _path in (SRC, LLM, HANDOVER, ANALYZER):
+for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS):
     SOURCES[_path], ENDINGS[_path] = _read(_path)
 
 
@@ -183,7 +184,20 @@ MUTATIONS = {
         "    asked_meeting = is_meeting(text)\n",
         "    asked_meeting = is_meeting(text) or wants_meeting\n",
     ),
+    "work the business does not do is handed to a person instead": (
+        "    if verdict.service_fits is not False:\n        return None\n",
+        "    return None\n",
+    ),
+    "a yes books on details that cannot be used": (
+        "        bad = unusable_details(contact)\n        if bad:\n",
+        "        bad = []\n        if bad:\n",
+    ),
     # Entries for another file name it first.
+    "a redelivered follow-up is sent again": (TASKS,
+        "    claims = (metadata or {}).get(SENT_CLAIMS_KEY)\n"
+        "    return isinstance(claims, list) and claim_key(token, attempt) in claims",
+        "    return False",
+    ),
     "Roman Urdu matched inside words": (LLM,
         '    hits = sum(1 for marker in _ROMAN_URDU_WORDS if marker.search(lowered))',
         '    hits = sum(1 for marker in ROMAN_URDU_MARKERS if marker in f" {lowered} ")',

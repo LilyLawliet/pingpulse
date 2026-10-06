@@ -376,7 +376,7 @@ async def test_conversation(path, index, db_session, monkeypatch):
             reading = step["scope_says"]
             assert not set(reading) - SCOPE_KEYS, f"{where}: scope_says takes {sorted(SCOPE_KEYS)}"
 
-        async def scope_reads(organization, text, _reading=reading):
+        async def scope_reads(organization, text, documents=(), _reading=reading):
             return scope.Verdict(**(_reading or {}))
 
         monkeypatch.setattr(scope, "check", scope_reads)
