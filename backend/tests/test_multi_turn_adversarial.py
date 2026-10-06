@@ -539,3 +539,55 @@ async def test_a_shop_with_no_list_still_books(db_session, monkeypatch):
     assert turn.refusal is None or turn.refusal.reason != "needs_job", (
         "a shop that has listed nothing was stopped from booking"
     )
+
+
+async def test_other_work_asked_for_after_a_job_was_agreed(constrivo, db_session, monkeypatch):
+    """The narrow form of the same hole, found in production, not in a test.
+
+    Once a supported job is on record the "what work is this?" gate is
+    satisfied, so a later request for something else only has the model
+    between it and a time - and the model does not always name the job.
+    "Book me a drone survey appointment for tomorrow", after a kitchen
+    remodel had been agreed, came back unnamed and was answered with six
+    consultation slots.
+
+    This is read off the message, with no model involved, and it asks rather
+    than refusing: a services list is short for every business, and the
+    backend not knowing what the job is is a reason to ask.
+    """
+    from app.services import understanding
+
+    async def says_nothing(prompt, timeout):
+        return {"job": None, "service_fits": None, "place": None, "area_fits": None}
+
+    shop, contact = constrivo
+    scope._remember_acceptance(contact, scope.Verdict(job="kitchen remodel", service_fits=True))
+    monkeypatch.setattr(understanding, "structured", says_nothing)
+
+    chat = Conversation(db_session, shop, contact)
+    turn = await chat.say("book me a drone survey appointment for tomorrow")
+    assert not turn.offered, "times were offered for work the shop never matched"
+    assert turn.refusal is not None and turn.refusal.reason == "needs_job"
+    await assert_nothing_booked(chat)
+
+
+async def test_working_through_a_booking_is_not_a_new_request(constrivo, db_session, monkeypatch):
+    """And the other way, which is what makes the gate safe to have.
+
+    "Book me in on Tuesday at 10am" names a time, not a trade. Reading it as
+    an unmatched request would stop every customer who has already said what
+    they want from choosing a slot.
+    """
+    from app.services import understanding
+
+    async def says_nothing(prompt, timeout):
+        return {"job": None, "service_fits": None, "place": None, "area_fits": None}
+
+    shop, contact = constrivo
+    scope._remember_acceptance(contact, scope.Verdict(job="kitchen remodel", service_fits=True))
+    monkeypatch.setattr(understanding, "structured", says_nothing)
+
+    for said in ("book me in for tomorrow at 2pm", "what times do you have?", "the first one please"):
+        assert not (
+            booking.asks_for_work(said) and scope.names_unmatched_work(shop, said)
+        ), f"{said!r} was read as asking for work the shop does not do"

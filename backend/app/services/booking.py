@@ -1815,6 +1815,7 @@ _ASKS_FOR_WORK = re.compile(
     # a topic change to another trade went unchecked.
     r"|can you|could you|can i get|do you\b[^.?!]{0,16}?\b(?:do|offer|sell|handle|provide|stock)"
     r"|are you able to|need someone to|need a|need my|help me with|quote for"
+    r"|book me|schedule me|sign me up|put me down for"
     r"|how much (?:is|for|would)|price (?:for|of)"
     r")\b",
     re.IGNORECASE,
@@ -3018,7 +3019,20 @@ async def _decide(
         and about_times
         and not offered
         and scope.offered_services(organization)
-        and not scope.accepted_job(contact)
+        # No job on record at all, or this message naming work that matches
+        # nothing the business wrote down. The second case is read off the
+        # message here rather than taken from the model, because the model
+        # does not always name the job: "book me a drone survey appointment
+        # for tomorrow", with a kitchen remodel already agreed, came back
+        # unnamed and was answered with six consultation slots.
+        and (
+            not scope.accepted_job(contact)
+            # Only when they are actually asking for something. "what times do
+            # you have?" and "the first one please" name no work either, and
+            # are a customer working through a booking rather than opening a
+            # new request.
+            or (asks_for_work(text) and scope.names_unmatched_work(organization, text))
+        )
         # A detail that cannot be used is the more specific thing wrong with
         # this turn, and the one the customer can act on. It has its own gate
         # further down; asking what work they need instead would bury it.

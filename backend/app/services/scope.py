@@ -231,6 +231,53 @@ def offered_services(organization) -> list[str]:
 SHARED_BY = 3
 
 
+#: Words for arranging a time rather than for the work itself. A message made
+#: only of these names no job: "book me in for tomorrow at 2pm" is a customer
+#: picking a slot, not a customer asking for something new.
+_ARRANGING = frozenset({
+    "book", "booking", "appointment", "appointments", "schedule", "scheduling",
+    "reschedule", "slot", "slots", "time", "times", "date", "day", "week",
+    "morning", "afternoon", "evening", "tonight", "today", "tomorrow",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+    "next", "this", "later", "earlier", "soon", "anytime", "sometime",
+    "am", "pm", "oclock", "available", "availability", "free", "visit", "visits",
+    "consultation", "call", "meeting", "come", "out", "over", "round", "in",
+    "me", "us", "you", "please", "thanks", "confirm", "yes", "no", "ok",
+})
+
+
+def names_unmatched_work(organization, text: str) -> bool:
+    """They have named something, and it is nothing this business wrote down.
+
+    Read off the message, with no model involved. This does NOT refuse - the
+    business's own list is short for every business, and "my countertops are
+    cracked" is real work described in words a services list does not carry.
+    It only says the backend cannot tell what the job is, which is a reason to
+    ask rather than to offer a time.
+
+    It exists because the model does not always name the job: "book me a drone
+    survey appointment for tomorrow", after a kitchen remodel had been agreed,
+    came back with no job named and six consultation slots offered.
+    """
+    services = offered_services(organization)
+    if not services:
+        return False
+    wanted = {word for word in _stems(text) if word not in _ARRANGING}
+    wanted = {word for word in wanted if _stem(word) not in _ARRANGING}
+    if not wanted:
+        return False  # nothing but arranging a time: not a new request
+    if any(_stems(service) & wanted for service in services):
+        return False
+    written = " ".join(
+        str(getattr(organization, field, "") or "")
+        for field in ("product_rules", "sales_prompt")
+    )
+    return not (_stems(written) & wanted)
+
+
 def worth_checking(text: str) -> bool:
     """Enough said to be naming something, rather than "yes" or "thanks"."""
     return len(_stems(text)) >= 2
