@@ -1034,6 +1034,15 @@ async def simulate(
     if generation.needs_team is not None and outside_trade:
         generation.text = booking.not_our_trade_reply(outside_trade)
         generation.needs_team = None
+    # A turn that says no does not also hold times open. The scope check is
+    # asked twice on some turns - once by the booking code, once here - and a
+    # model asked the same question twice can answer it twice differently:
+    # "you are a pet groomer now, book me in" was refused in the reply while
+    # the page underneath still read "your agent offered 6 times from your
+    # calendar". Whichever call said no, no is the answer for the whole turn.
+    if outside_trade:
+        offered_slots = []
+        booking_note = None
     elif generation.needs_team is not None and offer and offer.reply():
         # The price list answered it. Same as the live webhook.
         generation.text = offer.reply()

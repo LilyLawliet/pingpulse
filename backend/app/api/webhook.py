@@ -966,7 +966,12 @@ async def process_inbound_message(
         )
 
     extra_blocks = [vision.as_prompt_block(image_analysis, bool(stored_media))]
-    if appointment_turn.prompt_block:
+    # A turn that says no does not also hold times open. The scope check runs
+    # twice on some turns, and a model asked the same question twice can
+    # answer differently: the reply refused pet grooming while the block
+    # underneath it still listed six consultation slots. Where either call
+    # said no, the times do not go in front of the model at all.
+    if appointment_turn.prompt_block and not outside_trade:
         extra_blocks.append(appointment_turn.prompt_block)
     if outside_trade:
         # Said here rather than left to the model to work out from the

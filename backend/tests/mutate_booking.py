@@ -187,7 +187,7 @@ MUTATIONS = {
         '    return config.get("require_address") is not False and does_site_visits(organization)',
     ),
     "scope says not a service we do - ignored": (
-        "    if verdict.service_fits is False:\n        forget_offer(contact)",
+        "    if verdict.service_fits is False and verdict.job:\n        forget_offer(contact)",
         "    if False:\n        forget_offer(contact)",
     ),
     "scope says not an area we serve - ignored": (
@@ -195,7 +195,7 @@ MUTATIONS = {
         "        and elsewhere",
     ),
     "scope not checked before dates": (
-        "    if existing is None and about_times:",
+        "    if existing is None and (about_times or first_ask):",
         "    if False:",
     ),
     "state backstop off": (
@@ -223,7 +223,7 @@ MUTATIONS = {
         "    asked_meeting = is_meeting(text) or wants_meeting\n",
     ),
     "work the business does not do is handed to a person instead": (
-        "    if verdict.service_fits is not False:\n        return None\n",
+        "    if verdict.service_fits is not False or not verdict.job:\n        return None\n",
         "    return None\n",
     ),
     "a yes books on details that cannot be used": (

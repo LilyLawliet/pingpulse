@@ -373,8 +373,38 @@ def forget_refusal(contact) -> None:
 
 
 def _remember_refusal(contact, verdict: Verdict) -> None:
+    # A refusal has to name the work it refuses. A model that says "no" without
+    # saying no to what used to be written down as a refusal of "that", which
+    # then stuck to the whole conversation: in production it answered "Sorry -
+    # That is not something we do" to "what times do you have?" and went on
+    # refusing the kitchen remodel the same customer had already been promised.
+    if not verdict.job:
+        return
     metadata = dict(getattr(contact, "contact_metadata", None) or {})
-    metadata[REFUSED_KEY] = {"job": verdict.job or "that", "place": verdict.place}
+    metadata[REFUSED_KEY] = {"job": verdict.job, "place": verdict.place}
+    contact.contact_metadata = metadata
+
+
+#: The work this business DOES do that the same customer has asked for. Kept
+#: because one conversation can hold both: "do you do kitchen remodels? ... and
+#: can you groom my dog while you're here?" is one customer with two requests,
+#: and a refusal of the second must not take the first down with it.
+ACCEPTED_KEY = "job_accepted"
+
+
+def accepted_job(contact) -> str | None:
+    held = (getattr(contact, "contact_metadata", None) or {}).get(ACCEPTED_KEY)
+    if isinstance(held, dict):
+        job = str(held.get("job") or "").strip()
+        return job or None
+    return None
+
+
+def _remember_acceptance(contact, verdict: Verdict) -> None:
+    if not verdict.job:
+        return
+    metadata = dict(getattr(contact, "contact_metadata", None) or {})
+    metadata[ACCEPTED_KEY] = {"job": verdict.job}
     contact.contact_metadata = metadata
 
 
@@ -392,7 +422,19 @@ def remember_refusal(contact, job: str, place: str | None = None) -> None:
     _remember_refusal(contact, Verdict(job=job, service_fits=False, place=place, area_fits=None))
 
 
-async def for_contact(organization, contact, said: str, documents=()) -> Verdict:
+def _mentions(job: str | None, text: str) -> bool:
+    """Is this message about that work? Decided on the words, not by asking.
+
+    The scope check reads a window of the last three messages that looked like
+    they were about a job, so a grooming request keeps being found in it three
+    turns after it was answered. Whether THIS turn is about the refused work is
+    a different question, and the customer's own words settle it.
+    """
+    wanted = _stems(job or "")
+    return bool(wanted and wanted & _stems(text))
+
+
+async def for_contact(organization, contact, said: str, documents=(), message: str = "") -> Verdict:
     """The verdict for what they have said, asked once per change in what they said.
 
     A refusal, once given, outlives the window. `note_said` keeps the last
@@ -412,7 +454,12 @@ async def for_contact(organization, contact, said: str, documents=()) -> Verdict
     that is not a fresh job - an address, a phone number, a time, a yes -
     leaves it standing.
     """
-    if not said:
+    # Asked once per message, and only about messages with something in them.
+    # "yes", "ok", "3pm" name no work, so there is nothing to ask about: the
+    # verdict already on the contact is the answer, and a model that is asked
+    # anyway is a model given the chance to change its mind about a job it was
+    # not shown.
+    if not said or not worth_checking(said):
         return remembered(contact) or Verdict()
     metadata = dict(getattr(contact, "contact_metadata", None) or {})
     held = metadata.get(SCOPE_KEY) or {}
@@ -433,6 +480,21 @@ async def for_contact(organization, contact, said: str, documents=()) -> Verdict
         if named_other_work:
             forget_refusal(contact)
             metadata = dict(getattr(contact, "contact_metadata", None) or {})
+        elif accepted_job(contact) and not _mentions(verdict.job, message or said):
+            # Two requests in one conversation, one of them ours. This turn
+            # does not mention the work that was refused, and there is work
+            # this business agreed to do, so the turn is about that. The
+            # refusal stays on the contact - it is simply not what is being
+            # answered here. Without this, "what times do you have?" came back
+            # "that is not something we do" to a customer who had already been
+            # told yes to a kitchen remodel, because the window the check
+            # reads still held their question about the dog.
+            verdict = Verdict(
+                job=None,
+                service_fits=None,
+                place=verdict.place,
+                area_fits=verdict.area_fits,
+            )
         else:
             verdict = Verdict(
                 job=verdict.job or standing,
@@ -443,6 +505,9 @@ async def for_contact(organization, contact, said: str, documents=()) -> Verdict
 
     if verdict.service_fits is False:
         _remember_refusal(contact, verdict)
+        metadata = dict(getattr(contact, "contact_metadata", None) or {})
+    elif verdict.service_fits is True:
+        _remember_acceptance(contact, verdict)
         metadata = dict(getattr(contact, "contact_metadata", None) or {})
 
     metadata[SCOPE_KEY] = {"key": _key(said), "verdict": json.dumps(verdict.__dict__)}

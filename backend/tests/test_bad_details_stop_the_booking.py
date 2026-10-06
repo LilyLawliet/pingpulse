@@ -47,7 +47,13 @@ async def shop_and_contact(db_session):
     await db_session.flush()
     contact = CRMContact(
         organization_id=shop.id, phone_number="13055550333", name="Test",
-        pipeline_stage="NEW_LEAD", qualification={}, contact_metadata={},
+        pipeline_stage="NEW_LEAD", qualification={},
+        # They have already said what they want. This file is about what a
+        # bad phone number does to a booking, and a shop that lists its
+        # services does not offer times for work nobody has named - so
+        # without this the turn stops one gate earlier, for a different
+        # reason, and these would be testing that instead.
+        contact_metadata={"job_accepted": {"job": "phone repair"}},
     )
     db_session.add(contact)
     await db_session.flush()
