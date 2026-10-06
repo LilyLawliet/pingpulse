@@ -165,3 +165,36 @@ async def test_a_site_visit_needs_an_address_at_any_shop(remodeller, db_session,
     # And a shop that does not visit its customers says so.
     shop.agent_config = {**shop.agent_config, "appointments": {"min_notice_minutes": 0, "require_address": False}}
     assert not booking.requires_address(shop, "onsite")
+
+
+# --------------------------------------------------------------- October 6
+def test_the_state_backstop_reads_plainly():
+    shop = Organization(name="x", sales_prompt="Construction and remodeling in Miami / South Florida.")
+    assert scope.states_the_business_names(shop) == {"Florida"}
+    assert scope.states_in("my home in Seattle, Washington") == {"Washington"}
+    assert scope.states_in("400 Pine St, Seattle WA 98101") == {"Washington"}
+    # Not where the job is, or not a state at all.
+    assert scope.states_in("I live in California but the property is in Miami") == set()
+    assert scope.states_in("100 Washington Ave, Miami Beach, FL 33139") == {"Florida"}
+
+
+@pytest.mark.asyncio
+async def test_seattle_is_refused_with_the_model_silent(remodeller, db_session, monkeypatch):
+    shop, contact = remodeller
+    contact.contact_metadata = {}
+    model_says(monkeypatch, None)
+    shop.sales_prompt = "Remodeling in Miami / South Florida."
+    turn = await booking.handle_turn(
+        db_session, shop, contact, "Roof replacement at my home in Seattle, Washington - can you book a visit?"
+    )
+    assert turn.refusal.reason == "outside_area" and turn.offered == []
+
+
+@pytest.mark.asyncio
+async def test_the_property_in_miami_is_not_refused_for_where_they_live(remodeller, db_session, monkeypatch):
+    shop, contact = remodeller
+    model_says(monkeypatch, None)
+    turn = await booking.handle_turn(
+        db_session, shop, contact, "I live in California but the property is in Miami. What times do you have?"
+    )
+    assert turn.offered, turn.prompt_block

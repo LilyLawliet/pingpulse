@@ -237,6 +237,14 @@ def no_outbound_network(monkeypatch, request):
     import asyncio
     import socket
 
+    # No proxy either. A proxy on localhost is allowed through the guard below,
+    # and forwards the request on: with HTTPS_PROXY set, an async httpx call to
+    # Groq reached the internet by way of 127.0.0.1 and came back "403
+    # Forbidden" from the proxy rather than refused here. Without the proxy
+    # settings every request has to make its own connection, and meet this.
+    for name in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy"):
+        monkeypatch.delenv(name, raising=False)
+
     def refuse(host):
         raise RuntimeError(
             f"This test tried to connect to {host!r}. Unit tests must not use "

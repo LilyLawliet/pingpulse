@@ -152,7 +152,9 @@ Return exactly these keys:
              English - typos and shorthand fixed, any language translated, and words
              like "it", "that one" or "the 2nd" replaced with what they refer to in the
              conversation ("hw mch yrly 4 it" after the Growth plan was discussed ->
-             "How much is the Growth plan per year?"). Add nothing they did not say.
+             "How much is the Growth plan per year?"). Add nothing they did not say,
+             and drop nothing they did: every "not", "don't", "never", "stop", "not yet"
+             and condition stays ("DO NOT book it yet" -> "Do not book it yet").
 }}
 
 Rules:
@@ -304,11 +306,36 @@ def heuristic_analysis(message: str, current_stage: str = "NEW") -> dict[str, An
     }
 
 
-def _meaning(value: Any) -> str | None:
+def _meaning(value: Any, message: str = "") -> str | None:
     if not isinstance(value, str):
         return None
     text = " ".join(value.split())[:300]
-    return text if len(text) >= 3 and text.lower() not in ("null", "none", "n/a") else None
+    if len(text) < 3 or text.lower() in ("null", "none", "n/a"):
+        return None
+    if not keeps_what_they_ruled_out(message, text):
+        # The reply is told to "answer that", so a reading that lost the
+        # customer's "DO NOT" would be answered as the opposite request
+        # (October 6 retest). Their own words are used instead.
+        logger.warning("discarded a reading that dropped a negation: %r -> %r", message[:120], text[:120])
+        return None
+    return text
+
+
+# What a customer rules out, in the languages customers here write: English,
+# Spanish, Roman Urdu. Counted, not parsed - a reading with fewer of these than
+# the message has lost one of them.
+_RULED_OUT = re.compile(
+    r"\b(not|no|don'?t|dont|doesn'?t|didn'?t|never|nothing|stop|without|cancel|wait|"
+    r"hold off|nunca|nada|tampoco|nahi|nahin|nai|mat|na)\b|n't\b",
+    re.IGNORECASE,
+)
+
+
+def keeps_what_they_ruled_out(message: str, meaning: str) -> bool:
+    """Whether a rewording keeps every "not", "don't", "never", "stop" the customer wrote."""
+    # Strict on purpose: a reading discarded costs nothing - the reply works
+    # from the customer's own words - and one that lost "not" costs the answer.
+    return len(_RULED_OUT.findall(meaning or "")) >= len(_RULED_OUT.findall(message or ""))
 
 
 def _coerce(raw: dict[str, Any], message: str, current_stage: str) -> dict[str, Any]:
@@ -384,7 +411,7 @@ def _coerce(raw: dict[str, Any], message: str, current_stage: str) -> dict[str, 
         "wants_person": raw.get("wants_person") is True,
         # A reading used to search the business's documents and to help the
         # reply make sense of a garbled message. Never quoted, never a fact.
-        "meaning": _meaning(raw.get("meaning")),
+        "meaning": _meaning(raw.get("meaning"), message),
         "source": "llm",
     }
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -164,3 +165,46 @@ async def for_contact(organization, contact, said: str) -> Verdict:
     metadata[SCOPE_KEY] = {"key": _key(said), "verdict": json.dumps(verdict.__dict__)}
     contact.contact_metadata = metadata
     return verdict
+
+
+# --------------------------------------------------------------- US states
+# Data, not rules: the fifty states and DC, so a state the customer names can
+# be compared with the one the business names. Read only where it is plainly a
+# state - after a comma ("Seattle, Washington"), after "in", or as a postal
+# code before a ZIP ("WA 98101") - so "100 Washington Ave, Miami" is Florida.
+_STATES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California",
+    "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "DC": "District of Columbia",
+    "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois",
+    "IN": "Indiana", "IA": "Iowa", "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana",
+    "ME": "Maine", "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan",
+    "MN": "Minnesota", "MS": "Mississippi", "MO": "Missouri", "MT": "Montana",
+    "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey",
+    "NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota",
+    "OH": "Ohio", "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania",
+    "RI": "Rhode Island", "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee",
+    "TX": "Texas", "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington",
+    "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
+}
+_NAMES = "|".join(sorted((re.escape(n) for n in _STATES.values()), key=len, reverse=True))
+# The customer's side: only where a state is plainly the job's place - "City,
+# State" or a postal code before a ZIP. "I live in California but the
+# property is in Miami" names a state that is not where the job is.
+_BY_NAME = re.compile(rf",\s*({_NAMES})\b", re.IGNORECASE)
+_BY_CODE = re.compile(r"(?:,\s*|\s)([A-Z]{2})\s+\d{5}(?:-\d{4})?\b")
+# The business's side: its own words, so any state it names is one it works in.
+_ANY_NAME = re.compile(rf"\b({_NAMES})\b", re.IGNORECASE)
+_NAME_OF = {name.lower(): name for name in _STATES.values()}
+
+
+def states_in(text: str) -> set[str]:
+    """US states a customer names as the place of the job ("Seattle, Washington", "WA 98101")."""
+    found = {_NAME_OF[m.group(1).lower()] for m in _BY_NAME.finditer(text or "")}
+    found |= {_STATES[m.group(1)] for m in _BY_CODE.finditer(text or "") if m.group(1) in _STATES}
+    return found
+
+
+def states_the_business_names(organization) -> set[str]:
+    """Every US state the business's own words mention."""
+    text = what_the_business_says(organization)
+    return {_NAME_OF[m.group(1).lower()] for m in _ANY_NAME.finditer(text)}

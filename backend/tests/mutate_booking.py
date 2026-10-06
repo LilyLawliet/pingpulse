@@ -36,6 +36,7 @@ import subprocess, sys, pathlib
 SRC = pathlib.Path("app/services/booking.py")
 LLM = pathlib.Path("app/services/llm_service.py")
 HANDOVER = pathlib.Path("app/services/handover_question.py")
+ANALYZER = pathlib.Path("app/services/analyzer.py")
 
 
 # Read and write the bytes ourselves. read_text() decodes with the platform's
@@ -53,7 +54,7 @@ def _read(path: pathlib.Path) -> tuple[str, str]:
 
 SOURCES: dict[pathlib.Path, str] = {}
 ENDINGS: dict[pathlib.Path, str] = {}
-for _path in (SRC, LLM, HANDOVER):
+for _path in (SRC, LLM, HANDOVER, ANALYZER):
     SOURCES[_path], ENDINGS[_path] = _read(_path)
 
 
@@ -151,8 +152,32 @@ MUTATIONS = {
         "    if False:\n        forget_offer(contact)",
     ),
     "scope says not an area we serve - ignored": (
-        "        and in_area(organization, where) is None\n        and verdict.area_fits is False\n",
-        "        and in_area(organization, where) is None\n        and False\n",
+        "        and (verdict.area_fits is False or elsewhere)",
+        "        and elsewhere",
+    ),
+    "scope not checked before dates": (
+        "    if existing is None and about_times:",
+        "    if False:",
+    ),
+    "state backstop off": (
+        "        and (verdict.area_fits is False or elsewhere)",
+        "        and verdict.area_fits is False",
+    ),
+    "phone 123 accepted": (
+        "    return len(digits) < 7 or len(digits) > 15 or len(set(digits)) == 1",
+        "    return len(digits) < 3",
+    ),
+    "bad details not raised while offering times": (
+        "    _flag_bad_details(contact, turn)",
+        "    pass",
+    ),
+    "a corrected phone clears the bad email too": (
+        "            held.pop(field, None)",
+        "            held.clear()",
+    ),
+    "a reading may drop a not": (ANALYZER,
+        "    if not keeps_what_they_ruled_out(message, text):",
+        "    if False:",
     ),
     "analyzer meeting flag trusted": (
         "    asked_meeting = is_meeting(text)\n",

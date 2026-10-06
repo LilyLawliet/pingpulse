@@ -1,0 +1,177 @@
+{
+  "source": "Retest by the client's tester, built-in Test agent, 2026-10-06 America/New_York. Three loose ends reported in summary; prompts reconstructed from the earlier reports' wording.",
+  "business": "Constrivo Group",
+  "how_to_read": "As readiness_2026_09_30.json. The shop is set up as on October 3 and 6: no services, no areas, no appointment type - only its description.",
+  "excluded": [
+    "Issue 3 (the reading dropped DO NOT book) is about the analyzer's English reading, not booking; it is covered in test_readiness_report.py"
+  ],
+  "turns": [
+    {
+      "id": "S1",
+      "scenario": "Seattle, a date already gone",
+      "verdict_then": "FAIL",
+      "prompt": "I need a roof replacement at my home in Seattle, Washington. Can you book a site visit Monday October 5, 2026 in the morning?",
+      "reply_then": null,
+      "trace_then": "Offered from your diary: 6 times",
+      "assessment": "Suggested alternative times instead of rejecting the location."
+    },
+    {
+      "id": "C1",
+      "scenario": "Phone 123 and an invalid email",
+      "verdict_then": "FAIL",
+      "prompt": "Book a bathroom site visit for Wednesday October 7, 2026 at 10 AM. My phone is 123 and my email is not-an-email.",
+      "reply_then": null,
+      "trace_then": null,
+      "assessment": "Continued without asking for corrections."
+    }
+  ],
+  "shop": {
+    "now": "2026-10-06T10:00:00-04:00",
+    "timezone": "America/New_York",
+    "description": "Constrivo Group: residential and commercial construction and remodeling in Miami / South Florida.",
+    "agent_config": {
+      "business_hours": {
+        "monday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "tuesday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "wednesday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "thursday": {
+          "open": "09:00",
+          "close": "20:00"
+        },
+        "friday": {
+          "open": "09:00",
+          "close": "20:00"
+        }
+      },
+      "appointments": {
+        "duration_minutes": 60
+      }
+    },
+    "note": "Services, areas and appointment type blank."
+  },
+  "conversations": [
+    {
+      "name": "Seattle on a day already gone",
+      "steps": [
+        {
+          "turn": "S1",
+          "scope_says": {
+            "job": "roof replacement",
+            "service_fits": true,
+            "place": "Seattle, Washington",
+            "area_fits": false
+          },
+          "expect": {
+            "performed": null,
+            "refusal": "outside_area",
+            "offered": "none",
+            "proposed": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Seattle with the model silent",
+      "steps": [
+        {
+          "turn": "S1",
+          "scope_says": {},
+          "expect": {
+            "performed": null,
+            "refusal": "outside_area",
+            "offered": "none",
+            "proposed": null
+          },
+          "note": "No answer from the model; the business names Florida and the customer Washington"
+        }
+      ]
+    },
+    {
+      "name": "Bad phone and email, corrected one at a time",
+      "steps": [
+        {
+          "turn": "C1",
+          "expect": {
+            "performed": null,
+            "refusal": "needs_address",
+            "proposed": null,
+            "prompt_contains": [
+              "\"123\"",
+              "\"not-an-email\""
+            ]
+          }
+        },
+        {
+          "say": "It's 100 Test Avenue, Miami, FL 33101",
+          "added_because": "the address alone does not make the bad details good",
+          "expect": {
+            "performed": null,
+            "refusal": "contact_invalid",
+            "proposed": null,
+            "prompt_contains": [
+              "\"123\"",
+              "\"not-an-email\""
+            ]
+          }
+        },
+        {
+          "say": "my phone is 305 555 0100",
+          "added_because": "a corrected phone leaves the bad email standing",
+          "expect": {
+            "performed": null,
+            "refusal": "contact_invalid",
+            "proposed": null,
+            "prompt_contains": [
+              "\"not-an-email\""
+            ]
+          }
+        },
+        {
+          "say": "email jamie@example.com",
+          "added_because": "with both corrected, the time they chose is read back",
+          "expect": {
+            "performed": null,
+            "proposed": "book"
+          }
+        },
+        {
+          "say": "yes",
+          "added_because": "and booked on the yes",
+          "expect": {
+            "performed": "booked",
+            "slot": "2026-10-07 10:00",
+            "location_contains": "100 Test Avenue"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Bad details raised when only asking for times",
+      "contact_metadata": {
+        "visit_address": "100 Test Avenue, Miami, FL 33101"
+      },
+      "steps": [
+        {
+          "say": "What times do you have Wednesday? phone 123",
+          "added_because": "times offered used to say nothing about a phone of 123",
+          "expect": {
+            "performed": null,
+            "offered": "some",
+            "prompt_contains": [
+              "\"123\""
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

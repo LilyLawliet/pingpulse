@@ -525,3 +525,56 @@ def test_a_booking_reply_states_the_time(reply, expected):
 
 def test_a_time_on_the_hour_may_be_said_short():
     assert llm_service.confirms("See you Monday at 10 AM", "site visit on Monday 5 October at 10:00 am")
+
+
+# --------------------------------------------------------------- October 6
+@pytest.mark.parametrize(
+    "message, reading, kept",
+    [
+        ("I am considering an estimate on October 2 at 10 AM but DO NOT book it yet.",
+         "I am considering an estimate on October 2 at 10 AM.", False),
+        ("I am considering an estimate on October 2 at 10 AM but DO NOT book it yet.",
+         "Do not book the October 2 10 AM estimate yet.", True),
+        ("Cancel my Monday appointment. I do not want to reschedule.", "Cancel my Monday appointment.", False),
+        ("hw mch yrly 4 it", "How much is the Growth plan per year?", True),
+    ],
+)
+def test_a_reading_must_keep_what_they_ruled_out(message, reading, kept):
+    from app.services.analyzer import keeps_what_they_ruled_out
+
+    assert keeps_what_they_ruled_out(message, reading) is kept
+
+
+def test_a_reading_that_lost_do_not_is_discarded():
+    """The reply is told to answer the reading; one without "DO NOT" is not given to it."""
+    from app.services.analyzer import _coerce
+
+    message = "I am considering an estimate on October 2 at 10 AM but DO NOT book it yet."
+    analysis = _coerce({"meaning": "Book an estimate on October 2 at 10 AM."}, message, "NEW")
+    assert analysis["meaning"] is None
+
+
+@pytest.mark.parametrize(
+    "text, problems",
+    [
+        ("phone 123, email not-an-email", 2),
+        ("my phone is 123 and my email is not-an-email", 2),
+        ("reach me at jamie@example", 1),
+        ("phone: 0000000", 1),
+        ("my number is +1 305 555 0100 and email jamie@example.com", 0),
+        ("email me tomorrow", 0),
+        ("follow @constrivo", 0),
+    ],
+)
+def test_contact_details_read_without_is(text, problems):
+    assert len(booking.contact_problems(text)) == problems
+
+
+def test_a_corrected_phone_leaves_a_bad_email_standing():
+    contact = CRMContact(contact_metadata={})
+    booking.note_details(contact, "phone 123, email not-an-email")
+    assert len(booking.unusable_details(contact)) == 2
+    booking.note_details(contact, "my phone is 305 555 0100")
+    assert booking.unusable_details(contact) == ['the email address "not-an-email" is not a valid email address']
+    booking.note_details(contact, "email jamie@example.com")
+    assert booking.unusable_details(contact) == []

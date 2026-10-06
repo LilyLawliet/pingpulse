@@ -1993,34 +1993,67 @@ def visit_refusal(organization, kind: str, location: str | None) -> Refusal | No
 # number they write from is already known, so nothing here asks for one; but
 # "my email is not-an-email" is an answer nobody can use, and booking on it
 # means a confirmation that never reaches them.
+# A label, then the value. The word joining them is optional - "phone 123" and
+# "email not-an-email" are how people type on a phone, and requiring "is" let
+# both through (October 6 retest).
 _EMAIL_GIVEN = re.compile(
-    r"\be-?mail(?:\s+address)?(?:\s*(?:is|:|=|-)\s*[\"'“‘]?|\s*[\"'“‘])([^\s\"'”’,;]+)",
+    r"\be-?mail(?:\s+address)?(?:\s*(?:is|:|=|-)\s*|\s+)[\"'“‘]?([^\s\"'”’,;]+)",
     re.IGNORECASE,
 )
 _PHONE_GIVEN = re.compile(
     r"\b(?:phone(?:\s+number)?|cell(?:\s+number)?|mobile(?:\s+number)?|tel(?:ephone)?|"
-    r"contact number|my number)(?:\s*(?:is|:|=|-)\s*[\"'“‘]?|\s*[\"'“‘])(\+?\d[\d\s().-]{0,24})",
+    r"whatsapp(?:\s+number)?|contact number|my number)(?:\s*(?:is|:|=|-)\s*|\s+)[\"'“‘]?"
+    r"(\+?\d[\d\s().-]{0,24})",
     re.IGNORECASE,
 )
+# Anything with an @ in it is somebody's email, labelled or not - except a handle.
+_AT_WORD = re.compile(r"(?<![\w@])([^\s\"'”’,;:<>()@]+@[^\s\"'”’,;:<>()]*)")
 _EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.IGNORECASE)
+
+
+def _bad_email(value: str, labelled: bool, quoted: bool) -> bool:
+    value = value.strip(".")
+    if _EMAIL_SHAPE.match(value):
+        return False
+    # "my email is the same" is not an address given; anything with an @, a
+    # dot or a dash in it, or in quotes, is.
+    return "@" in value or "-" in value or "." in value or quoted
+
+
+def _bad_phone(value: str) -> bool:
+    digits = re.sub(r"\D", "", value)
+    return len(digits) < 7 or len(digits) > 15 or len(set(digits)) == 1
+
+
+def contact_details_in(text: str) -> dict:
+    """Each contact field this message gives, as "ok" or the reason it cannot be used."""
+    text = text or ""
+    found: dict = {}
+    for match in _EMAIL_GIVEN.finditer(text):
+        value = match.group(1).strip(".")
+        quoted = match.start(1) > 0 and text[match.start(1) - 1] in "\"'“‘"
+        if _bad_email(value, True, quoted):
+            found["email"] = f'the email address "{value}" is not a valid email address'
+        elif _EMAIL_SHAPE.match(value):
+            found.setdefault("email", "ok")
+    for match in _AT_WORD.finditer(text):
+        value = match.group(1).strip(".")
+        if value.startswith("@") or "email" in found:
+            continue
+        found["email"] = "ok" if _EMAIL_SHAPE.match(value) else (
+            f'the email address "{value}" is not a valid email address'
+        )
+    for match in _PHONE_GIVEN.finditer(text):
+        value = match.group(1).strip()
+        found["phone"] = (
+            f'the phone number "{value}" is not a usable phone number' if _bad_phone(value) else "ok"
+        )
+    return found
 
 
 def contact_problems(text: str) -> list[str]:
     """Contact details written in this message that cannot be used."""
-    problems = []
-    text = text or ""
-    for match in _EMAIL_GIVEN.finditer(text):
-        value = match.group(1).strip(".")
-        quoted = match.start(1) > 0 and text[match.start(1) - 1] in "\"'“‘"
-        # "my email is the same" is not an address given; "not-an-email" in
-        # quotes, or anything with an @ in it, is.
-        if not _EMAIL_SHAPE.match(value) and ("@" in value or "-" in value or "." in value or quoted):
-            problems.append(f'the email address "{value}" is not a valid email address')
-    for match in _PHONE_GIVEN.finditer(text or ""):
-        digits = re.sub(r"\D", "", match.group(1))
-        if len(digits) < 7:
-            problems.append(f'the phone number "{match.group(1).strip()}" is too short to be a phone number')
-    return problems
+    return [why for why in contact_details_in(text).values() if why != "ok"]
 
 
 def does_site_visits(organization) -> bool:
@@ -2064,20 +2097,33 @@ UNUSABLE_DETAILS_KEY = "unusable_details"
 
 
 def note_details(contact, text: str) -> None:
-    """Remember contact details they gave that cannot be used, until they correct them."""
-    if not (_EMAIL_GIVEN.search(text or "") or _PHONE_GIVEN.search(text or "")):
+    """Remember contact details they gave that cannot be used, field by field, until corrected.
+
+    By field: a message fixing the phone says nothing about the email, and
+    used to clear a bad email along with the bad phone.
+    """
+    given = contact_details_in(text)
+    if not given:
         return
     metadata = dict(getattr(contact, "contact_metadata", None) or {})
-    problems = contact_problems(text)
-    if problems:
-        metadata[UNUSABLE_DETAILS_KEY] = problems
+    held = metadata.get(UNUSABLE_DETAILS_KEY)
+    # Kept as a list before October 6; a list cannot say which field it was.
+    held = dict(held) if isinstance(held, dict) else {}
+    for field, verdict in given.items():
+        if verdict == "ok":
+            held.pop(field, None)
+        else:
+            held[field] = verdict
+    if held:
+        metadata[UNUSABLE_DETAILS_KEY] = held
     else:
         metadata.pop(UNUSABLE_DETAILS_KEY, None)
     contact.contact_metadata = metadata
 
 
 def unusable_details(contact) -> list[str]:
-    return list((getattr(contact, "contact_metadata", None) or {}).get(UNUSABLE_DETAILS_KEY) or [])
+    held = (getattr(contact, "contact_metadata", None) or {}).get(UNUSABLE_DETAILS_KEY) or []
+    return list(held.values()) if isinstance(held, dict) else list(held)
 
 
 def _missing_for_booking(organization, contact) -> list:
@@ -2401,12 +2447,30 @@ async def _handle_turn(
         )
 
     turn = await _decide(db, organization, contact, text, wants_meeting=wants_meeting)
+    _flag_bad_details(contact, turn)
     # "Yes, Monday at 10 is right" is a yes with the time said again: when it
     # reads as exactly what was put to them, it is the yes, not a new question.
     if held is not None and _STARTS_YES.match(text or "") and _same_action(turn.proposed, held):
         forget_pending(contact)
         return await _carry_out(db, organization, contact, held)
     return turn
+
+
+def _flag_bad_details(contact, turn: TurnResult) -> None:
+    """Contact details that cannot be used are raised on every booking turn, not only at the end.
+
+    They were only asked about once a time had been chosen, so times offered
+    in reply to "phone 123, email not-an-email" said nothing about either.
+    """
+    bad = unusable_details(contact)
+    if not bad or turn.performed or not turn.prompt_block.startswith("=== APPOINTMENTS ==="):
+        return
+    if any(problem in turn.prompt_block for problem in bad):
+        return
+    turn.prompt_block += (
+        "\nAlso: " + "; ".join(bad) + ". Ask them for a correct one - nothing can be "
+        "booked until it is."
+    )
 
 
 def agreed_to_it(text: str) -> bool:
@@ -2541,6 +2605,14 @@ async def _decide(
             f"cancel your {describe(existing)}",
             appointment=existing,
         )
+
+    # ------------------------------------------------------ not ours to book
+    # Before anything about the time: work or a place the business does not
+    # take gets no times, whatever else is wrong with the request.
+    if existing is None and about_times:
+        outside = await _outside_scope(organization, contact, said, new_kind)
+        if outside is not None:
+            return outside
 
     # ------------------------------------------------------------ the past
     # A day already gone is said to be gone. It is not offered, it is not
@@ -2710,60 +2782,7 @@ async def _decide(
     if not booking_enabled(organization):
         return TurnResult(prompt_block=as_prompt_block(organization, contact, []))
 
-    # Outside the area served: no times at all. Offering six slots to a job
-    # the reply was turning down is how the Test agent ended up "booking"
-    # Seattle for a Miami business.
     visit_kind = (new_kind or default_kind(organization)).lower()
-    where = job_place(contact)
-
-    # Work the business does not do, or a place it does not go, going by
-    # what it says about itself: no times at all. A read-back of "site visit
-    # for dog grooming" is faithful, and a yes to it is still a booking that
-    # should never have been offered.
-    verdict = await scope.for_contact(organization, contact, said)
-    if verdict.service_fits is False:
-        forget_offer(contact)
-        job = verdict.job or "That"
-        return TurnResult(
-            prompt_block=(
-                "=== APPOINTMENTS ===\n"
-                f"{job} is NOT something this business does, going by its own description. "
-                "Nothing is booked and no time may be offered. Say plainly that it is not "
-                "something the business does, and ask whether there is something it does "
-                "that they need."
-            ),
-            refusal=Refusal("outside_services", f"{job} is not something this business offers."),
-        )
-    if (
-        visit_kind == "onsite"
-        and in_area(organization, where) is None
-        and verdict.area_fits is False
-    ):
-        forget_offer(contact)
-        place = verdict.place or where or "That place"
-        return TurnResult(
-            prompt_block=(
-                "=== APPOINTMENTS ===\n"
-                f"{place} is NOT in the area this business works in, going by its own "
-                "description. Nothing is booked and no time may be offered. Say plainly that "
-                "it is outside the area served. If they think the property is inside it, ask "
-                "for its city or ZIP code."
-            ),
-            refusal=Refusal("outside_area", f"{place} is outside the area served."),
-        )
-
-    if visit_kind == "onsite" and in_area(organization, where) is False:
-        forget_offer(contact)
-        return TurnResult(
-            prompt_block=(
-                "=== APPOINTMENTS ===\n"
-                f"They are in {where}, which is NOT in the area this business serves "
-                f"({_areas_sentence(organization)}). Nothing is booked and no time may "
-                "be offered. Say plainly that it is outside the area served. If they "
-                "think the property is in one of those areas, ask for its city or ZIP code."
-            ),
-            refusal=Refusal("outside_area", f"{where} is outside the area served."),
-        )
 
     if target is not None:
         if stopping:
@@ -2858,13 +2877,17 @@ async def _propose_booking(
     length = timedelta(minutes=duration_minutes(organization, kind))
     refusal = await is_free(db, organization, target, target + length)
     problem = None
+    bad = unusable_details(contact)
     if requires_address(organization, visit_kind) and not location:
+        # Everything missing asked for at once: asking only for the address
+        # let a phone of "123" and an email of "not-an-email" go unremarked.
         problem = ("address", (
             "the street address of the property, with the unit or apartment "
             "number if there is one"
+            + (f"; and also: {'; '.join(bad)} - ask for a correct one" if bad else "")
         ))
-    elif unusable_details(contact):
-        problem = ("details", "; ".join(unusable_details(contact)) + " - ask for a correct one")
+    elif bad:
+        problem = ("details", "; ".join(bad) + " - ask for a correct one")
     if problem is not None and refusal is None:
         needs, ask = problem
         remember_offer(contact, [target], OFFER_BOOK, needs=needs, **keep)
@@ -2926,6 +2949,79 @@ async def _propose_booking(
         refusal=refusal,
         offered=slots,
     )
+
+
+async def _outside_scope(organization, contact, said: str, new_kind) -> TurnResult | None:
+    """Why this job gets no times at all - work or a place the business does not take - or None.
+
+    Asked before anything about the time. The past-date check used to come
+    first, so "a roof in Seattle on Monday the 5th", asked on the 6th, was
+    answered "that day has passed - here are other times": six offers to a
+    job the business does not take (October 6 retest).
+    """
+    visit_kind = (new_kind or default_kind(organization)).lower()
+    where = job_place(contact)
+
+    # A place the shop's own list does not cover: decided by the list.
+    if visit_kind == "onsite" and in_area(organization, where) is False:
+        forget_offer(contact)
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"They are in {where}, which is NOT in the area this business serves "
+                f"({_areas_sentence(organization)}). Nothing is booked and no time may "
+                "be offered. Say plainly that it is outside the area served. If they "
+                "think the property is in one of those areas, ask for its city or ZIP code."
+            ),
+            refusal=Refusal("outside_area", f"{where} is outside the area served."),
+        )
+
+    # Work the business does not do, or a place it does not go, going by
+    # what it says about itself: no times at all. A read-back of "site visit
+    # for dog grooming" is faithful, and a yes to it is still a booking that
+    # should never have been offered.
+    verdict = await scope.for_contact(organization, contact, said)
+    if verdict.service_fits is False:
+        forget_offer(contact)
+        job = verdict.job or "That"
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"{job} is NOT something this business does, going by its own description. "
+                "Nothing is booked and no time may be offered. Say plainly that it is not "
+                "something the business does, and ask whether there is something it does "
+                "that they need."
+            ),
+            refusal=Refusal("outside_services", f"{job} is not something this business offers."),
+        )
+    # With no list of areas and no answer from the model, one thing can still
+    # be read without one: the business names its state and the customer
+    # names another. "Seattle, Washington" for a business "in Miami / South
+    # Florida" is out whether or not a model is answering.
+    elsewhere = None
+    if visit_kind == "onsite" and in_area(organization, where) is None and verdict.area_fits is None:
+        ours = scope.states_the_business_names(organization)
+        theirs = scope.states_in(said or "") | scope.states_in(where or "")
+        if ours and theirs and not (ours & theirs):
+            elsewhere = ", ".join(sorted(theirs))
+    if (
+        visit_kind == "onsite"
+        and in_area(organization, where) is None
+        and (verdict.area_fits is False or elsewhere)
+    ):
+        forget_offer(contact)
+        place = verdict.place or where or elsewhere or "That place"
+        return TurnResult(
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"{place} is NOT in the area this business works in, going by its own "
+                "description. Nothing is booked and no time may be offered. Say plainly that "
+                "it is outside the area served. If they think the property is inside it, ask "
+                "for its city or ZIP code."
+            ),
+            refusal=Refusal("outside_area", f"{place} is outside the area served."),
+        )
+    return None
 
 
 async def _not_yet(
