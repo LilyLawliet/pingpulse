@@ -1155,6 +1155,15 @@ async def process_inbound_message(
         if outside_trade:
             generation.text = booking.not_our_trade_reply(outside_trade)
             generation.needs_team = None
+        elif offer and offer.reply():
+            # The shop's own price list already answered this message. Saying
+            # "I don't have that to hand, I've passed it to the team" while
+            # holding the answer spends a colleague and tells the customer
+            # something that is not true. `reply()` is the same rendering used
+            # when no model is reachable - the business's figures, not a
+            # model's - so it is safe to send as it stands.
+            generation.text = offer.reply()
+            generation.needs_team = None
         else:
             generation.text = await unanswered.handle(
                 db, organization, contact, generation.needs_team, body
@@ -1164,7 +1173,15 @@ async def process_inbound_message(
     # worked-out answer with no model to phrase it - goes out in the
     # customer's language, with every figure checked unchanged.
     if wrote_it_ourselves:
-        generation.text = await languages.in_customer_language(generation.text, body)
+        # The same allowance the read-back and the hand-over question get, and
+        # for the same reason: these are sentences the backend wrote, and the
+        # customer has to be able to read them. On four seconds, "I've passed
+        # it to the team" went out in English to a Roman Urdu message from a
+        # Pakistani shop - production logged "no translation within 4s" - and
+        # the one thing that reply has to do is be understood.
+        generation.text = await languages.in_customer_language(
+            generation.text, body, timeout=FIXED_REPLY_SECONDS
+        )
 
     await manager.broadcast(
         ws_manager.EVENT_GENERATION,

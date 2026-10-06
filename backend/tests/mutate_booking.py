@@ -38,6 +38,7 @@ LLM = pathlib.Path("app/services/llm_service.py")
 HANDOVER = pathlib.Path("app/services/handover_question.py")
 ANALYZER = pathlib.Path("app/services/analyzer.py")
 TASKS = pathlib.Path("app/tasks.py")
+ORDERS = pathlib.Path("app/services/orders.py")
 
 
 # Read and write the bytes ourselves. read_text() decodes with the platform's
@@ -55,7 +56,7 @@ def _read(path: pathlib.Path) -> tuple[str, str]:
 
 SOURCES: dict[pathlib.Path, str] = {}
 ENDINGS: dict[pathlib.Path, str] = {}
-for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS):
+for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS):
     SOURCES[_path], ENDINGS[_path] = _read(_path)
 
 
@@ -193,6 +194,10 @@ MUTATIONS = {
         "        bad = []\n        if bad:\n",
     ),
     # Entries for another file name it first.
+    "an order the customer says they have is believed": (ORDERS,
+        "    if not _ASKS_ABOUT_AN_ORDER.search(text or \"\"):\n        return None\n",
+        "    return None\n",
+    ),
     "a redelivered follow-up is sent again": (TASKS,
         "    claims = (metadata or {}).get(SENT_CLAIMS_KEY)\n"
         "    return isinstance(claims, list) and claim_key(token, attempt) in claims",

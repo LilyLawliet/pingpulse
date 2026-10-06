@@ -36,7 +36,8 @@ steps:
           tests/test_confirm_before_booking.py tests/test_sandbox_booking.py \
           tests/test_calendar_turns.py tests/test_booking_conversation.py \
           tests/test_scope.py tests/test_followup_is_sent_once.py \
-          tests/test_bad_details_stop_the_booking.py
+          tests/test_bad_details_stop_the_booking.py \
+          tests/test_no_order_on_record.py
 
   # ---------------------------------------------------------------- frontend
   # A build, not a lint. The dashboard has no test suite, so this catches what

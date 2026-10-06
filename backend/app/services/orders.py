@@ -644,6 +644,13 @@ async def _handle_turn(db, organization, contact, text: str, history, prepared, 
                 )
             )
 
+    # Before anything about taking an order: what they already have, when they
+    # write as though they have one. Checked whether or not a draft is under
+    # way - a customer saying "I already paid" mid-draft has not paid either.
+    existing = await about_an_order_they_have(db, organization, contact, text)
+    if existing is not None:
+        return existing
+
     if not (state or wants_to_order(text)):
         return OrderTurn()
     if not prepared.items:
@@ -701,6 +708,82 @@ _ORDER_CLAIMS = re.compile(
     r")",
     re.IGNORECASE,
 )
+
+
+# Somebody writing about an order they believe already exists: asking where
+# it is, when it arrives, or saying they have paid for it.
+#
+# "You confirmed my order yesterday and took my payment. Where is it?" was
+# answered "please let me know your city so I can give you the exact ETA" -
+# with the real delivery terms quoted underneath, which makes it read as
+# true. No order existed and no payment had been taken. The claim guard
+# watches what the agent writes; nothing watched what the agent was told and
+# simply believed. A customer can screenshot that.
+_ASKS_ABOUT_AN_ORDER = re.compile(
+    r"\b("
+    r"where(?:'s| is| are)\s+(?:my|our|the)\s+(?:order|parcel|package|delivery|shipment|stuff|items?)"
+    r"|my\s+(?:order|parcel|package|delivery|shipment)\b"
+    r"|order\s+(?:status|number|update|tracking|id)"
+    r"|track(?:ing)?\s+(?:my|our|the)\s+order"
+    r"|you\s+(?:already\s+)?(?:took|taken|charged|debited|received|have)\s+(?:my|the|our)\s+"
+    r"(?:payment|money|card)"
+    r"|i\s+(?:already\s+)?(?:paid|have\s+paid)\b"
+    r"|you\s+(?:already\s+)?confirmed\s+(?:my|our|the)\b"
+    r"|when\s+(?:will|does|is)\s+(?:my|our|the)\s+(?:order|delivery|parcel|package)\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+async def on_record(db, organization, contact, limit: int = 5):
+    """Every order actually recorded for this customer, newest first."""
+    rows = await db.execute(
+        select(Order)
+        .where(
+            Order.organization_id == organization.id,
+            Order.contact_id == contact.id,
+        )
+        .order_by(Order.created_at.desc())
+        .limit(limit)
+    )
+    return rows.scalars().all()
+
+
+async def about_an_order_they_have(db, organization, contact, text: str) -> OrderTurn | None:
+    """What is actually on record, when they write about an order as a thing that exists.
+
+    Answered from the orders table and nowhere else, because the failure here
+    is the agent believing the customer. A reading of the message cannot tell
+    whether an order exists; only the table can.
+    """
+    if not _ASKS_ABOUT_AN_ORDER.search(text or ""):
+        return None
+    orders = await on_record(db, organization, contact)
+    if not orders:
+        return OrderTurn(
+            prompt_block=(
+                "=== NO ORDER ON RECORD ===\n"
+                "They have written about an order, a delivery or a payment as something that "
+                "already exists. There is NO order recorded for this customer and NO payment "
+                "has been taken. Say that plainly and without blame: you cannot find an order "
+                "in their name. Do NOT discuss delivery, dispatch, tracking or an arrival time "
+                "for it, do NOT ask for their city or address as though one were coming, and "
+                "do NOT say anything has been paid, confirmed or processed. Offer to take an "
+                "order now, or to pass them to a colleague if they think this is wrong."
+            )
+        )
+    said = "; ".join(
+        f"order #{order.number}, {order.status}, placed {order.created_at:%d %B}"
+        for order in orders
+    )
+    return OrderTurn(
+        prompt_block=(
+            "=== ORDERS ON RECORD ===\n"
+            f"Their orders, exactly as recorded: {said}. Those are the only orders they "
+            "have. Answer from this and nothing else - do not invent a status, a dispatch "
+            "date or an arrival time that is not written here."
+        )
+    )
 
 
 def claims_order(text: str, placed: bool) -> str | None:

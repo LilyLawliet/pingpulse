@@ -1029,6 +1029,10 @@ async def simulate(
     if generation.needs_team is not None and outside_trade:
         generation.text = booking.not_our_trade_reply(outside_trade)
         generation.needs_team = None
+    elif generation.needs_team is not None and offer and offer.reply():
+        # The price list answered it. Same as the live webhook.
+        generation.text = offer.reply()
+        generation.needs_team = None
     elif generation.needs_team is not None:
         reachable = await notifications.can_reach(db, organization)
         generation.text = (
@@ -1044,7 +1048,11 @@ async def simulate(
             "is set up - so the customer is not promised a reply. Add one under Alerts."
         )
     if wrote_it_ourselves:
-        generation.text = await languages.in_customer_language(generation.text, message)
+        # As in the live webhook: a sentence the backend wrote gets the longer
+        # allowance, because being readable is the whole of its job.
+        generation.text = await languages.in_customer_language(
+            generation.text, message, timeout=languages.FIXED_REPLY_SECONDS
+        )
     return {
         "reply": generation.text,
         "escalated": False,

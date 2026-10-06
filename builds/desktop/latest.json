@@ -1,11 +1,11 @@
 {
-  "version": "1.11.0",
-  "notes": "Nothing is booked until the customer says yes to a read-back, handovers ask first, and a visit is never confused with a call.",
-  "pub_date": "2026-10-02T01:00:46+00:00",
+  "version": "1.12.0",
+  "notes": "Work this business does not do is answered plainly instead of fetching a colleague, the scope check reads your own documents, and the Test agent says whether a time is theirs to take or is being held.",
+  "pub_date": "2026-10-06T07:08:45+00:00",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMjl4cHJ4ZG5jQUMweHkxVVlOd3dpckttWkhYVlNlZmxzd0hlQ2xOZ1BTN3M1S2I4WVhqL01VNFpzYXV4b0lFSTZkZmg2b1hUOVhiTUhxRlU2Qm40Z0FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwOTAyODQ1CWZpbGU6UGluZ1B1bHNlXzEuMTEuMF94NjQtc2V0dXAuZXhlCjRlU0d4UWpxYVRzdk1uSy9haURJWlkyV3M0ZXh5bnNtYnBrZDUwYks3NVBqVVR0Y0ZYU04zMVFTQk5JZERKbHl2MVU4cU5GMkJpNjhWaUVvTFRpcERnPT0K",
-      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.11.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSdGZxbm9VeHpQMnhaVUZPWDhIN3EwUTJreGtDNUk1YzdHdm93U1BTa1IxVVUveS9yNHdxNzU5d25IL0N3OGtXSS9NRGFvMFlDdTdjUjRTQzA3dkpvOWFCQStUM3cyQlFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMjcwNTI1CWZpbGU6UGluZ1B1bHNlXzEuMTIuMF94NjQtc2V0dXAuZXhlCnZRZVhiR0dFZ0hlK0hycjJha1RuNENQZzFyZnNUdExaZkZpY0hHajhURWlLdXVyZ1JaTFJqYkhCYXRVK3BhclRXcllQUzVsV3JLcDZrZWIzL3hpK0RRPT0K",
+      "url": "https://pingpulse.duckdns.org/updates/PingPulse_1.12.0_x64-setup.exe"
     }
   }
 }
