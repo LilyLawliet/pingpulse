@@ -83,3 +83,40 @@ def test_nothing_is_claimed_about_a_booking_that_exists():
     assert unverified_claims(
         "Your 3 pm slot on Tuesday Oct 6 is confirmed.", appointment=appointment
     ) == []
+
+
+# --------------------------------------------- the widened guard, held open
+# The client's pack asks for these in as many words: "still widen the existing
+# claim patterns exactly as the report specifies" and "add the literal escaped
+# sentences to the mutation harness". The harness had the fault; nothing
+# failed when it was put back, which means the widening was not load-bearing.
+# These make it so.
+WIDENED = [
+    "Your consultation is confirmed.",
+    "Your consultation is now confirmed.",
+    "The estimate visit is booked.",
+    "Your appointment has been scheduled.",
+    "That inspection has been reserved.",
+    "Your site visit is set for Tuesday.",
+    "The meeting is now booked.",
+    "Your booking has been confirmed.",
+    "We have your visit scheduled for Tuesday.",
+    "We've got your consultation booked for Tuesday.",
+    "I have a site visit confirmed for you on Thursday.",
+    "We now have the appointment reserved for Friday.",
+    "I've got your estimate scheduled on Monday.",
+]
+
+
+@pytest.mark.parametrize("said", WIDENED)
+def test_the_widened_claim_phrasings_are_caught(said):
+    """Each of these says a booking exists. None of them may pass unbooked."""
+    problems = unverified_claims(said, appointment=None, cancelled=False, moved=False)
+    assert problems, f"nothing objected to {said!r} with no appointment"
+
+
+@pytest.mark.parametrize("said", WIDENED)
+def test_the_same_phrasings_are_fine_once_it_is_real(said):
+    """The guard is about the record, not about the words."""
+    booked = type("Appointment", (), {"starts_at": None})()
+    assert not unverified_claims(said, appointment=booked, cancelled=False, moved=False)

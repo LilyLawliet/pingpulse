@@ -278,6 +278,35 @@ def names_unmatched_work(organization, text: str) -> bool:
     return not (_stems(written) & wanted)
 
 
+def matched_service(organization, text: str) -> str | None:
+    """The service of this business's own that the message is asking for.
+
+    Read off the message against the list, with no model involved, so that a
+    customer who says what they want is understood whether or not a model
+    answers. The shared per-minute budget is real: under a 429 the scope
+    check comes back empty, and "I want a kitchen remodel" left nothing on
+    record, so three turns later the agent asked a customer who had already
+    said what they wanted what work they needed.
+    """
+    wanted = {word for word in _stems(text) if word not in _ARRANGING}
+    if not wanted:
+        return None
+    services = offered_services(organization)
+    if not services:
+        return None
+    stemmed = [(service, _stems(service)) for service in services]
+    seen: dict[str, int] = {}
+    for _, words in stemmed:
+        for word in words:
+            seen[word] = seen.get(word, 0) + 1
+    telling = {word for word, count in seen.items() if count < SHARED_BY}
+    for service, words in stemmed:
+        shared = words & wanted
+        if len(shared) >= 2 or (shared & telling):
+            return service
+    return None
+
+
 def worth_checking(text: str) -> bool:
     """Enough said to be naming something, rather than "yes" or "thanks"."""
     return len(_stems(text)) >= 2
@@ -329,6 +358,21 @@ def supports(organization, job: str | None) -> bool | None:
     return False
 
 
+def _without_a_model(organization, said: str) -> Verdict:
+    """What can still be said when no model answered.
+
+    The budget is shared across every key and a 429 is an ordinary event, so
+    this is a normal path rather than an error one. The list is ours and the
+    message is in front of us: if it names one of this business's own
+    services, that is an answer, and a better one than silence. If it does
+    not, nothing is claimed either way.
+    """
+    service = matched_service(organization, said)
+    if not service:
+        return Verdict()
+    return Verdict(job=service, service_fits=True)
+
+
 async def check(organization, said: str, documents=()) -> Verdict:
     """Whether this request fits. The model reads it; this decides.
 
@@ -350,9 +394,9 @@ async def check(organization, said: str, documents=()) -> Verdict:
         )
     except Exception as exc:  # noqa: BLE001 - a scope check never breaks a turn
         logger.info("scope check failed: %s", exc)
-        return Verdict()
+        return _without_a_model(organization, said)
     if not isinstance(answer, dict):
-        return Verdict()
+        return _without_a_model(organization, said)
 
     def flag(key):
         value = answer.get(key)
@@ -363,6 +407,11 @@ async def check(organization, said: str, documents=()) -> Verdict:
         return str(value).strip()[:120] if isinstance(value, str) and value.strip() else None
 
     job = text("job")
+    # No job from the model - it timed out, hit the shared rate limit, or read
+    # the message as nothing in particular - and the message plainly names
+    # something this business lists. The list answers it without the model.
+    if not job:
+        job = matched_service(organization, said)
     # The model named the job; the list decides whether it is ours. Its own
     # answer is kept only where the business has listed nothing to decide with.
     settled = supports(organization, job)

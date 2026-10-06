@@ -37,7 +37,13 @@ steps:
           tests/test_calendar_turns.py tests/test_booking_conversation.py \
           tests/test_scope.py tests/test_followup_is_sent_once.py \
           tests/test_bad_details_stop_the_booking.py \
-          tests/test_no_order_on_record.py
+          tests/test_no_order_on_record.py \
+          tests/test_multi_turn_adversarial.py \
+          tests/test_the_shop_decides_what_it_does.py \
+          tests/test_a_time_is_never_said_to_be_theirs.py \
+          tests/test_a_refusal_outlives_the_window.py \
+          tests/test_good_contact_details_are_kept.py \
+          tests/test_a_booked_kind_is_one_the_shop_has.py
 
   # ---------------------------------------------------------------- frontend
   # A build, not a lint. The dashboard has no test suite, so this catches what

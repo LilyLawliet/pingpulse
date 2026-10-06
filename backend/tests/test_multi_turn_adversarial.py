@@ -591,3 +591,46 @@ async def test_working_through_a_booking_is_not_a_new_request(constrivo, db_sess
         assert not (
             booking.asks_for_work(said) and scope.names_unmatched_work(shop, said)
         ), f"{said!r} was read as asking for work the shop does not do"
+
+
+async def test_a_customer_is_understood_when_no_model_answers(constrivo, db_session, monkeypatch):
+    """The rate limit is an ordinary event, not an error path.
+
+    The model budget is shared across every key. Under a 429 the scope check
+    came back empty, so "I want a kitchen remodel" left nothing on record,
+    and two turns later the agent asked a customer who had already said what
+    they wanted what work they needed. Seen in production, on the run that
+    was meant to be the evidence.
+    """
+    from app.services import understanding
+
+    async def rate_limited(prompt, timeout):
+        raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(understanding, "structured", rate_limited)
+    shop, contact = constrivo
+    chat = Conversation(db_session, shop, contact)
+
+    await chat.say("I want a kitchen remodel")
+    assert scope.accepted_job(contact), "nothing was understood with no model answering"
+
+    turn = await chat.say("what times do you have?")
+    assert turn.refusal is None or turn.refusal.reason != "needs_job", (
+        "a customer who said what they wanted was asked again"
+    )
+
+
+async def test_no_model_does_not_mean_anything_goes(constrivo, db_session, monkeypatch):
+    """And the fallback claims nothing it cannot read off the list."""
+    from app.services import understanding
+
+    async def rate_limited(prompt, timeout):
+        raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(understanding, "structured", rate_limited)
+    shop, contact = constrivo
+    chat = Conversation(db_session, shop, contact)
+    await chat.say("can you groom my dog?")
+    assert scope.accepted_job(contact) is None, "grooming was accepted with no model answering"
+    turn = await chat.say("what times do you have?")
+    assert not turn.offered, "times were offered with nothing understood"

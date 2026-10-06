@@ -263,9 +263,23 @@ MUTATIONS = {
         "        return Refusal(\n            \"unknown_kind\",\n            \"That isn't a kind of appointment this business books.\",\n        )\n",
         "        chosen_kind = default_kind(organization)\n",
     ),
-    "the turn that refuses does not write the refusal down": (
-        "    if contact is not None:\n        scope.remember_refusal(contact, job, verdict.place)\n",
-        "    if False:\n        scope.remember_refusal(contact, job, verdict.place)\n",
+    # The scope question asked twice in one turn, by a model that does not
+    # have to answer it the same way twice. Five bugs came out of this.
+    "the scope question is asked twice in one turn": (
+        "        verdict = await scope.for_contact(\n"
+        "            organization,\n"
+        "            contact,\n"
+        "            said,\n"
+        "            await _business_documents(db, organization),\n"
+        "            message=said,\n"
+        "        )\n",
+        "        verdict = await scope.check(\n"
+        "            organization, said, await _business_documents(db, organization)\n"
+        "        )\n",
+    ),
+    "a time is offered for work nobody named": (
+        "        and scope.offered_services(organization)\n",
+        "        and False\n",
     ),
     "a standing refusal is not re-checked at the yes": (
         "        refused = scope.refused_job(contact)\n",
