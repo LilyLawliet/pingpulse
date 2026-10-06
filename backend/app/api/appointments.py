@@ -19,7 +19,7 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -55,6 +55,28 @@ class BookIn(BaseModel):
     location: str | None = Field(default=None, max_length=300)
     notes: str | None = Field(default=None, max_length=2000)
     tell_customer: bool = False
+
+    @field_validator("kind")
+    @classmethod
+    def _a_kind_this_shop_can_book(cls, value: str | None) -> str | None:
+        """An unknown kind is refused here rather than quietly made the default.
+
+        `book()` falls back to the shop's default for anything it does not
+        recognise, and inside a conversation that is right: a reading that
+        comes back "call" must not end the turn with nothing booked.
+
+        At this boundary somebody has sent a value deliberately. Booking with
+        kind "call" returned an appointment described as "site visit", with
+        nothing anywhere to say it had been changed - the caller asked for one
+        thing, the diary recorded another, and both sides thought they agreed.
+        Say no instead, and name what this takes.
+        """
+        if value is None:
+            return None
+        chosen = value.strip().lower()
+        if chosen not in APPOINTMENT_KINDS:
+            raise ValueError("kind must be one of: " + ", ".join(APPOINTMENT_KINDS))
+        return chosen
 
 
 class MoveIn(BaseModel):
