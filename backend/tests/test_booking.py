@@ -527,10 +527,25 @@ async def test_a_failed_move_leaves_the_original_confirmed(booked_shop, db_sessi
 from zoneinfo import ZoneInfo  # noqa: E402
 
 UTC = ZoneInfo("UTC")
+# Relative to now, not written down. These were fixed dates in October 2026,
+# and `remembered_offer` drops a slot once it is in the past - so the suite
+# passed every morning and failed every afternoon, once the clock went by
+# 2pm. A test that depends on the hour it is run at reports the time of day,
+# not the state of the code.
+def _next_tuesday() -> datetime:
+    """The next Tuesday strictly ahead of now, so the offers never go stale."""
+    day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    day += timedelta(days=1)
+    while day.weekday() != 1:
+        day += timedelta(days=1)
+    return day
+
+
+_TUESDAY = _next_tuesday()
 OFFERED = [
-    datetime(2026, 10, 6, 14, 0, tzinfo=timezone.utc),   # Tuesday 2pm
-    datetime(2026, 10, 6, 15, 30, tzinfo=timezone.utc),  # Tuesday 3:30pm
-    datetime(2026, 10, 7, 10, 0, tzinfo=timezone.utc),   # Wednesday 10am
+    _TUESDAY + timedelta(hours=14),                  # Tuesday 2pm
+    _TUESDAY + timedelta(hours=15, minutes=30),      # Tuesday 3:30pm
+    _TUESDAY + timedelta(days=1, hours=10),          # Wednesday 10am
 ]
 
 
@@ -627,8 +642,11 @@ def test_offered_times_reach_the_prompt_exactly(db_session):
     block = booking.as_prompt_block(organization, None, OFFERED)
 
     # No leading zero on the day: "Tuesday 06 October" reads like a receipt.
-    assert "Tuesday 6 October at 2:00 pm" in block
-    assert "Wednesday 7 October at 10:00 am" in block
+    # Built from the offer rather than written out, so this keeps checking the
+    # wording and not the date the suite happens to be run on.
+    tuesday, wednesday = OFFERED[0], OFFERED[2]
+    assert f"Tuesday {tuesday.day} {tuesday:%B} at 2:00 pm" in block
+    assert f"Wednesday {wednesday.day} {wednesday:%B} at 10:00 am" in block
     assert "not say anything is confirmed" in block.lower()
 
 

@@ -779,7 +779,11 @@ async def simulate(
     outside_trade = None
     read_as_a_person = not escalation and booking.heard_as_a_person(analysis, message)
     if read_as_a_person:
-        outside_trade = await booking.not_our_trade(db, organization, message)
+        # The pretend contact carries the refusal so it reaches the probe below
+        # and comes back in booking_state, which is how the page remembers one
+        # turn in the sandbox the way a real contact row remembers it.
+        outside_trade = await booking.not_our_trade(db, organization, message, pretend)
+        state = {**state, **(pretend.contact_metadata or {})}
     if read_as_a_person and not outside_trade:
         return {
             "reply": await languages.in_customer_language(
@@ -1025,7 +1029,8 @@ async def simulate(
     team = None
     wrote_it_ourselves = generation.needs_team is not None or generation.provider == "none"
     if generation.needs_team is not None and not outside_trade:
-        outside_trade = await booking.not_our_trade(db, organization, message)
+        outside_trade = await booking.not_our_trade(db, organization, message, pretend)
+        state = {**state, **(pretend.contact_metadata or {})}
     if generation.needs_team is not None and outside_trade:
         generation.text = booking.not_our_trade_reply(outside_trade)
         generation.needs_team = None

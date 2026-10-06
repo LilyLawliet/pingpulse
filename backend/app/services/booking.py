@@ -841,6 +841,86 @@ def claims_appointment(text: str) -> str | None:
     return _asserted(_BOOKING_CLAIMS, text)
 
 
+# Something that names a moment: a clock time, a weekday, a date.
+_WHEN = re.compile(
+    r"\b(?:"
+    r"\d{1,2}[:.]\d{2}\s*(?:am|pm)?"
+    r"|\d{1,2}\s*(?:am|pm)\b"
+    r"|(?:mon|tues?|wed(?:nes)?|thur?s?|fri|sat(?:ur)?|sun)(?:day)?\b"
+    r"|today|tomorrow|tonight|this (?:morning|afternoon|evening|week)|next week"
+    r"|\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
+    r"|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}"
+    r")",
+    re.IGNORECASE,
+)
+# A word that says the moment is now settled - that it belongs to them.
+# The customer is the thing put in the diary, so they are usually named in
+# the middle of the phrase: "penciled YOU in", "got you down for". Written
+# adjacent, this missed "I've penciled you in for a 3 pm consultation" on
+# Constrivo in production.
+#
+# This is a backstop and is treated as one. It reads the model's prose, so
+# it can only ever list ways of saying "booked" that somebody thought of,
+# and the list will always be short by one. Nothing is allowed to depend on
+# it: where the backend knows there is nothing to book, it writes the reply
+# itself rather than asking the model to and checking the answer.
+_WHO = r"(?:\s+(?:you|u|us|him|her|them|it|your \w+|the \w+))?"
+_SETTLED = re.compile(
+    r"\b(?:confirmed|booked|scheduled|reserved|noted|secured|all set"
+    rf"|locked{_WHO} in|pencill?ed{_WHO} in|down for"
+    r"|in the (?:diary|calendar)|on the (?:books|calendar))\b",
+    re.IGNORECASE,
+)
+# "already booked", "fully booked" - a time that is gone, not a time that is
+# theirs. The slot-contention reply says exactly this and must not be caught.
+_NOT_THEIRS = re.compile(
+    r"\b(?:already|fully|all|no longer|someone else|taken|unavailable)\b[^.!?]{0,20}$",
+    re.IGNORECASE,
+)
+# A plain negator near the verb, for the shapes `_NOT_DOING` does not cover
+# ("not yet confirmed", "nothing is booked").
+_NOTHING_SETTLED = re.compile(
+    r"\b(?:not|no|nothing|none|never|cannot|can'?t|won'?t|isn'?t|aren'?t|hasn'?t|"
+    r"haven'?t|unable)\b",
+    re.IGNORECASE,
+)
+
+
+def asserts_a_time_is_theirs(text: str) -> str | None:
+    """A sentence telling the customer a moment is now theirs, or None.
+
+    The broad half of the booking guard, and the one that is allowed false
+    positives, because it only ever runs when the diary holds nothing for this
+    customer - the cost of catching too much is the agent rephrasing, and the
+    cost of catching too little is somebody turning up to a locked door.
+
+    `_BOOKING_CLAIMS` is a list of phrasings somebody thought of. It carries
+    "slot is confirmed" and missed "Your 3 pm slot on Tuesday Oct 6 is
+    confirmed", because four words sat between the noun and the verb; it
+    carries "confirmed" and missed "noted". A client found both. Enumerating
+    sentences a model might write is a race that cannot be won, so this asks
+    the structural question instead: does this clause name a moment, and say
+    that moment is settled? Nothing is booked, so either half alone is fine -
+    "Tuesday at 3 works for me too" and "you're all booked up" both pass -
+    and only the pair is a claim.
+    """
+    for clause in _CLAUSE.findall(text or ""):
+        stripped = clause.strip()
+        if not stripped or stripped.endswith("?") or _MODAL.search(stripped):
+            continue
+        # "it is NOT booked", "I cannot confirm that" - said plainly, and said
+        # often, because that is what the agent is supposed to say here.
+        cleaned = _without_refusals(stripped)
+        settled = _SETTLED.search(cleaned)
+        if not settled or not _WHEN.search(cleaned):
+            continue
+        before = cleaned[: settled.start()]
+        if _NOTHING_SETTLED.search(before) or _NOT_THEIRS.search(before):
+            continue
+        return stripped[:140]
+    return None
+
+
 def claims_cancellation(text: str) -> str | None:
     """The phrase asserting something was cancelled, or None.
 
@@ -866,8 +946,12 @@ def unverified_claims(
     """
     problems: list[str] = []
 
-    booked = claims_appointment(text)
-    if booked and appointment is None:
+    booked = claims_appointment(text) if appointment is None else None
+    # The broad check, only where nothing is booked: there, any sentence
+    # putting a moment together with a settled word is wrong however it is
+    # phrased, and the narrow list has already been walked past twice.
+    booked = booked or (asserts_a_time_is_theirs(text) if appointment is None else None)
+    if booked:
         problems.append(
             f'you wrote "{booked}", but there is no confirmed appointment for this '
             "customer; never state that a booking exists unless it does"
@@ -2103,6 +2187,45 @@ def lacks_for_a_visit(organization, contact) -> list[str]:
 UNUSABLE_DETAILS_KEY = "unusable_details"
 
 
+#: Where a working phone the customer typed is kept. Their WhatsApp number is
+#: already on the contact; this is the one they asked to be reached on.
+GIVEN_PHONE_KEY = "given_phone"
+
+
+def _keep_the_good_ones(contact, text: str, given: dict) -> None:
+    """Write a valid email and phone onto the contact, so the shop has them.
+
+    The agent refuses to book until it has a working email and a working
+    phone number, and then kept neither: `note_details` only ever recorded
+    the ones that were wrong, so it could chase a correction. A valid address
+    was checked, used for one sentence, and dropped. `CRMContact.email` has
+    existed all along and nothing in the conversation ever wrote it, so the
+    shop's only copy of an email it insisted on was a line in the transcript.
+
+    Only values that passed validation are written, and a later bad value
+    never overwrites a good one - it is recorded as a problem to chase
+    instead, which is what `note_details` goes on to do.
+    """
+    if given.get("email") == "ok":
+        match = _EMAIL_GIVEN.search(text) or _AT_WORD.search(text)
+        address = (match.group(1).strip(".") if match else "").lower()
+        if address and _EMAIL_SHAPE.match(address):
+            contact.email = address[:320]
+    if given.get("phone") == "ok":
+        match = _PHONE_GIVEN.search(text)
+        number = " ".join((match.group(1) if match else "").split())
+        if number:
+            metadata = dict(getattr(contact, "contact_metadata", None) or {})
+            metadata[GIVEN_PHONE_KEY] = number[:40]
+            contact.contact_metadata = metadata
+
+
+def given_phone(contact) -> str | None:
+    """The phone number they asked to be reached on, if they gave a usable one."""
+    held = (getattr(contact, "contact_metadata", None) or {}).get(GIVEN_PHONE_KEY)
+    return str(held) if held else None
+
+
 def note_details(contact, text: str) -> None:
     """Remember contact details they gave that cannot be used, field by field, until corrected.
 
@@ -2112,6 +2235,7 @@ def note_details(contact, text: str) -> None:
     given = contact_details_in(text)
     if not given:
         return
+    _keep_the_good_ones(contact, text, given)
     metadata = dict(getattr(contact, "contact_metadata", None) or {})
     held = metadata.get(UNUSABLE_DETAILS_KEY)
     # Kept as a list before October 6; a list cannot say which field it was.
@@ -2313,6 +2437,22 @@ async def _carry_out(db, organization, contact, held: dict) -> TurnResult:
 
     if action == "book":
         at = datetime.fromisoformat(held["at"])
+        # A standing refusal is checked first and on its own. The verdict
+        # below is whatever the last check wrote; this is the business's "no"
+        # to the job they actually asked for, which outlives it.
+        refused = scope.refused_job(contact)
+        if refused:
+            return TurnResult(
+                reply=not_our_trade_reply(refused),
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    f"They said yes, but {refused} is NOT something this business does, and "
+                    "that has not changed during this conversation. NOTHING was booked. Say "
+                    "plainly that it is not something the business does, and ask whether "
+                    "there is something it does that they need."
+                ),
+                refusal=Refusal("outside_scope", f"{refused} is not something the business takes on."),
+            )
         # Checked again now, not trusted from when it was read back.
         verdict = scope.remembered(contact)
         if verdict is not None and (
@@ -2532,7 +2672,7 @@ async def _business_documents(db, organization):
     return rows.scalars().all()
 
 
-async def not_our_trade(db, organization, said: str) -> str | None:
+async def not_our_trade(db, organization, said: str, contact=None) -> str | None:
     """The work they asked for, when it is plainly not work this business does.
 
     Asked outside a booking turn, where the only other answer was a person.
@@ -2542,16 +2682,23 @@ async def not_our_trade(db, organization, said: str) -> str | None:
     shop would have answered itself in four words. Spending a handover on it
     is both the wrong answer and the expensive one.
 
-    Stateless on purpose: `check` rather than `for_contact`, so a question
-    asked on the way past does not overwrite the verdict a booking in the
-    same conversation was read back against.
+    The verdict is read statelessly - `check` rather than `for_contact` - so a
+    question asked on the way past does not overwrite the verdict a booking in
+    the same conversation was read back against. A refusal is still written
+    down against the contact, because this is usually the first place the
+    customer is told no, and until it was, it was also the last: four turns
+    later "can you book me in?" names no job for `check` to refuse, and the
+    agent offered times for the grooming it had already turned down.
     """
     if not (said or "").strip():
         return None
     verdict = await scope.check(organization, said, await _business_documents(db, organization))
     if verdict.service_fits is not False:
         return None
-    return verdict.job or "That"
+    job = verdict.job or "That"
+    if contact is not None:
+        scope.remember_refusal(contact, job, verdict.place)
+    return job
 
 
 def not_our_trade_reply(job: str) -> str:
@@ -3082,7 +3229,14 @@ async def _outside_scope(db, organization, contact, said: str, new_kind) -> Turn
     if verdict.service_fits is False:
         forget_offer(contact)
         job = verdict.job or "That"
+        # Written here, not asked for. Told to say no nicely, the model said
+        # "I've penciled you in for a 3 pm consultation" on the turn after -
+        # it had the customer's address, their phone and their yes, and a
+        # prompt block is an instruction, not a constraint. Whether a booking
+        # is permitted is settled before this line; all that is left is to
+        # say so, and the backend can say it without asking.
         return TurnResult(
+            reply=not_our_trade_reply(job),
             prompt_block=(
                 "=== APPOINTMENTS ===\n"
                 f"{job} is NOT something this business does, going by its own description. "

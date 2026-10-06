@@ -755,7 +755,7 @@ async def process_inbound_message(
     outside_trade = None
     read_as_a_person = booking.heard_as_a_person(analysis, body) and contact.ai_enabled
     if read_as_a_person:
-        outside_trade = await booking.not_our_trade(db, organization, body)
+        outside_trade = await booking.not_our_trade(db, organization, body, contact)
     if read_as_a_person and not outside_trade:
         contact.contact_metadata = handover_question.ask(contact.contact_metadata)
         text = await languages.in_customer_language(
@@ -1150,7 +1150,7 @@ async def process_inbound_message(
     # on a turn that was already going to cost somebody's attention.
     wrote_it_ourselves = generation.needs_team is not None or generation.provider == "none"
     if generation.needs_team is not None and not outside_trade:
-        outside_trade = await booking.not_our_trade(db, organization, body)
+        outside_trade = await booking.not_our_trade(db, organization, body, contact)
     if generation.needs_team is not None:
         if outside_trade:
             generation.text = booking.not_our_trade_reply(outside_trade)

@@ -39,6 +39,7 @@ HANDOVER = pathlib.Path("app/services/handover_question.py")
 ANALYZER = pathlib.Path("app/services/analyzer.py")
 TASKS = pathlib.Path("app/tasks.py")
 ORDERS = pathlib.Path("app/services/orders.py")
+SCOPE = pathlib.Path("app/services/scope.py")
 
 
 # Read and write the bytes ourselves. read_text() decodes with the platform's
@@ -56,7 +57,7 @@ def _read(path: pathlib.Path) -> tuple[str, str]:
 
 SOURCES: dict[pathlib.Path, str] = {}
 ENDINGS: dict[pathlib.Path, str] = {}
-for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS):
+for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS, SCOPE):
     SOURCES[_path], ENDINGS[_path] = _read(_path)
 
 
@@ -194,6 +195,26 @@ MUTATIONS = {
         "        bad = []\n        if bad:\n",
     ),
     # Entries for another file name it first.
+    "a time is said to be theirs with nothing booked": (
+        "    booked = booked or (asserts_a_time_is_theirs(text) if appointment is None else None)\n",
+        "    booked = booked\n",
+    ),
+    "a refusal expires out of the message window": (SCOPE,
+        "    standing = refused_job(contact)\n",
+        "    standing = None\n",
+    ),
+    "a valid email is checked and thrown away": (
+        "    _keep_the_good_ones(contact, text, given)\n",
+        "    pass\n",
+    ),
+    "the turn that refuses does not write the refusal down": (
+        "    if contact is not None:\n        scope.remember_refusal(contact, job, verdict.place)\n",
+        "    if False:\n        scope.remember_refusal(contact, job, verdict.place)\n",
+    ),
+    "a standing refusal is not re-checked at the yes": (
+        "        refused = scope.refused_job(contact)\n",
+        "        refused = None\n",
+    ),
     "an order the customer says they have is believed": (ORDERS,
         "    if not _ASKS_ABOUT_AN_ORDER.search(text or \"\"):\n        return None\n",
         "    return None\n",
