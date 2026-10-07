@@ -927,3 +927,31 @@ def test_a_split_taught_answer_still_loses_its_marker():
 
     for rule in offers.rules_for("do I pay a deposit?", [("Financing", Split.content)]):
         assert "the answer is" not in rule.lower(), rule
+
+
+def test_the_framing_is_taken_off_a_joined_document_too():
+    """Not only at the start of the string. That is where it never was.
+
+    The quote panel reads every chunk of a source as one text, joined with
+    blank lines, so a marker that began a passage sits in the middle of what
+    it is handed. Two fixes in a row could only see position zero, and "The
+    answer is: Financing is through GreenSky..." went on being shown to the
+    customer under "Quoted from your terms" after both of them.
+    """
+    from app.services import offers, taught
+
+    joined = (
+        "Constrivo Group builds to Miami-Dade HVHZ standards.\n\n"
+        "When a customer asks: What is the interest rate on the financing?\n"
+        "The answer is: Financing is through GreenSky, and GreenSky sets the terms. "
+        "A deposit of 25% is taken before work starts.\n\n"
+        "When a customer asks: Do you offer a warranty?\n"
+        "The answer is: Completed projects carry two to five years."
+    )
+    said = taught.spoken(joined)
+    assert "the answer is" not in said.lower(), said
+    assert "when a customer asks" not in said.lower(), said
+    assert "greensky" in said.lower() and "hvhz" in said.lower(), said
+
+    for rule in offers.rules_for("do I pay a deposit?", [("Financing", joined)]):
+        assert "the answer is" not in rule.lower(), rule

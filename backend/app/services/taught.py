@@ -53,10 +53,27 @@ SOURCE = "Answers you taught"
 _ASKED = re.compile(r"^\s*when a customer asks\s*:[^\n]*\n?", re.IGNORECASE)
 _ANSWERED = re.compile(r"^\s*the answer is\s*:\s*", re.IGNORECASE)
 
+#: The same two markers, wherever a line starts with one. Passages are joined
+#: before some readers see them - the quote panel reads every chunk of a
+#: source as one text, separated by blank lines - so a marker that began a
+#: passage ends up in the middle of a string, where an anchored pattern
+#: cannot reach it. That is how "The answer is: Financing is through
+#: GreenSky..." was still being shown under "Quoted from your terms" after
+#: two fixes: both of them could only see the start.
+_ASKED_LINE = re.compile(r"^[ \t]*when a customer asks[ \t]*:[^\n]*\n?", re.IGNORECASE | re.MULTILINE)
+_ANSWERED_LINE = re.compile(r"^[ \t]*the answer is[ \t]*:[ \t]*", re.IGNORECASE | re.MULTILINE)
+
 
 def spoken(content: str) -> str:
-    """A stored passage as a customer should hear it, without the framing."""
-    return parts(content)[1]
+    """A stored passage as a customer should hear it, without the framing.
+
+    Line-wise rather than anchored, because the callers differ: one hands in
+    a single chunk and another hands in every chunk of a document joined
+    together. Both are passages a customer may be shown.
+    """
+    text = _ASKED_LINE.sub("", content or "")
+    text = _ANSWERED_LINE.sub("", text)
+    return text.strip() or (content or "")
 
 
 def parts(content: str) -> tuple[str | None, str]:
