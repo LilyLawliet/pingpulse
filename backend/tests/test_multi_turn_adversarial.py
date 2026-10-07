@@ -503,7 +503,12 @@ async def test_a_time_needs_a_job_the_shop_matched(constrivo, db_session, monkey
     # so it is the hard-stop rule in handle_turn that has to fill it in - the
     # thing that stops a decided no being handed to a model to phrase.
     assert turn.reply, "a hard stop was left for the model to word"
-    assert "need to know what work you need" in turn.reply
+    # "You are a pet groomer now, book me in" asks for something the business
+    # did not list, so it is told what the business does rather than asked
+    # what it wants - the one thing that is certain here either way. What
+    # matters is that the words are the backend's and no time came with them.
+    assert "pet groom" not in turn.reply.lower(), turn.reply
+    assert "kitchen remodeling" in turn.reply, turn.reply
     await assert_nothing_booked(chat)
 
 
@@ -955,3 +960,46 @@ def test_the_framing_is_taken_off_a_joined_document_too():
 
     for rule in offers.rules_for("do I pay a deposit?", [("Financing", joined)]):
         assert "the answer is" not in rule.lower(), rule
+
+
+async def test_work_the_shop_does_not_list_is_not_answered_by_asking_again(
+    constrivo, db_session, monkeypatch
+):
+    """"I need my dog groomed, can you come out?" with no model answering.
+
+    The scope check could not run - the budget is shared and a 429 is
+    ordinary - so nothing was refused, and the turn fell to "Before I can
+    offer you a time I need to know what work you need". They had just said.
+    To a customer that reads as not listening, and it was the first turn of
+    the client's own test.
+
+    The list cannot refuse it, because a services list is short for every
+    business. It can say what the business does do, which is certain.
+    """
+    from app.services import understanding
+
+    async def rate_limited(prompt, timeout):
+        raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(understanding, "structured", rate_limited)
+    shop, contact = constrivo
+    chat = Conversation(db_session, shop, contact)
+
+    turn = await chat.say("I need my dog groomed, can you come out?")
+    said = (turn.reply or turn.plain_reply(shop) or "").lower()
+    assert "i need to know what work you need" not in said, said
+    assert "not sure that's something we do" in said, said
+    assert "kitchen remodeling" in said, "it did not say what the business does do"
+    assert not turn.offered, "times were offered for work the shop never matched"
+    assert turn.appointment is None and not turn.performed
+
+    # And a customer asking about a time with nothing said at all still gets
+    # the plain question - there is nothing to tell them about.
+    other = CRMContact(
+        organization_id=shop.id, phone_number="+13055550999",
+        pipeline_stage="NEW_LEAD", qualification={}, contact_metadata={},
+    )
+    db_session.add(other)
+    await db_session.flush()
+    quiet = await booking.handle_turn(db_session, shop, other, "what times do you have?")
+    assert "what work you need" in (quiet.reply or quiet.plain_reply(shop) or "").lower()

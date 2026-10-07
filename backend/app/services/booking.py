@@ -3139,6 +3139,29 @@ async def _decide(
         # further down; asking what work they need instead would bury it.
         and not unusable_details(contact)
     ):
+        # They did say what they want; it is just nothing on the list. Asking
+        # again is the wrong question, and it is the one a customer gets
+        # whenever the scope check cannot run - the shared model budget is
+        # real and a 429 is ordinary. "I need my dog groomed, can you come
+        # out?" was answered "I need to know what work you need" by a
+        # remodeller, which reads as not listening.
+        #
+        # The list cannot refuse it - a services list is short for every
+        # business and "my countertops are cracked" is real work it does not
+        # name - but it can say what is certain, which is what this business
+        # does do. Nothing is refused and no time is offered either way.
+        if asks_for_work(text) and scope.names_unmatched_work(organization, text):
+            unsure = unsure_what_we_do_reply(organization)
+            if unsure:
+                return TurnResult(
+                    refusal=Refusal("needs_job", unsure),
+                    prompt_block=(
+                        "=== APPOINTMENTS ===\n"
+                        "They have asked for something this business did not list. Say "
+                        "what it does do and ask whether it is one of those. Do NOT "
+                        "offer a time and do NOT say anything is booked."
+                    ),
+                )
         return TurnResult(
             refusal=Refusal(
                 "needs_job",

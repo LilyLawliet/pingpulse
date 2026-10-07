@@ -327,6 +327,13 @@ MUTATIONS = {
         "    answered = _ANSWERED.match(text)\n",
         "    answered = None\n",
     ),
+    # The one that survived two fixes: both anchored to the start of the
+    # string, and the reader that showed it to the customer never gets a
+    # string that starts there.
+    "the framing is only taken off the start of a passage": (TAUGHT,
+        '    text = _ANSWERED_LINE.sub("", text)\n',
+        "    text = text\n",
+    ),
     "a standing refusal answers every turn": (
         "        (asks_for_work(said) and names_ours) or scope.remembered(contact) is None\n",
         "        asks_for_work(said) or scope.remembered(contact) is None\n",
