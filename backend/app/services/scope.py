@@ -288,6 +288,20 @@ _ORDINARY = frozenset({
     "some", "any", "all", "more", "much", "many", "very", "just", "also",
     "too", "now", "about", "for", "with", "from", "to", "of", "on", "at",
     "by", "as", "into", "up", "down", "again", "still", "back", "around",
+    # Speech and knowing. "can you tell me what times you have this week?"
+    # left "tell" behind, which read as naming work the shop does not do -
+    # tolerable while the answer hedged, and a flat no to a customer who
+    # asked about times once the answer stopped hedging. A verb for talking
+    # is not a trade in any business.
+    "tell", "told", "say", "says", "said", "ask", "asks", "asked", "know",
+    "knows", "knew", "let", "see", "saw", "hear", "heard", "explain", "mean",
+    "mention", "speak", "spoke", "talk", "answer", "reply", "share", "show",
+    # And the words that stand in for a thing without naming one. "hi, can I
+    # ask you something?" left "something" behind, and "I'll have a think"
+    # left "think": both would be told no for work they never named.
+    "something", "anything", "nothing", "everything", "someone", "anyone",
+    "think", "thinks", "thought", "wonder", "wondering", "idea", "thing",
+    "things", "bit", "little", "else", "other", "another",
     "hi", "hello", "hey", "thank", "sorry", "sure", "maybe", "actually",
     "possible", "possibly", "help", "helping", "work", "works", "job", "jobs",
     "service", "services", "quote", "price", "prices", "cost", "costs",

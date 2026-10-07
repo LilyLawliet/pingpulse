@@ -2815,19 +2815,25 @@ def asks_for_unlisted_work(organization, text: str) -> bool:
 
 
 def unsure_what_we_do_reply(organization) -> str | None:
-    """For a request we cannot place, answered with what this business does do.
+    """A no, for work this business did not list, with what it does instead.
 
     Used where the scope check could not run - the shared model budget is
     real and a 429 is ordinary - and the message plainly asks for something
     the business's own list does not carry. Without this, "can you groom my
     dog?" was answered "I don't have that to hand, I've passed it to the
-    team": a person spent on a question the shop answers itself, which is
-    the fault `not_our_trade` exists to prevent, reappearing whenever the
-    model was busy.
+    team": a person spent on a question the shop answers itself.
 
-    It does not refuse. Naming the work would need a reading we do not have,
-    and a list is short for every business, so it says what is certain - what
-    this one does - and asks.
+    It used to hedge - "I'm not sure that's something we do" - on the
+    reasoning that a services list is short for every business and naming
+    the work would need a reading we do not have. That reasoning is about
+    this code's confidence, and the customer is not asking about that. They
+    asked whether the business does something, and a shop that cannot say no
+    to work it never listed cannot say no at all: the answer arrives as
+    hesitation, which reads as a maybe and invites them to push.
+
+    So: no, and then what the business does do. There are three answers a
+    customer can be given here - yes, no, or a person - and "I'm not sure"
+    is none of them.
     """
     from app.services import scope
 
@@ -2836,8 +2842,8 @@ def unsure_what_we_do_reply(organization) -> str | None:
         return None
     named = ", ".join(services[:6])
     return (
-        f"I'm not sure that's something we do. We do {named}. "
-        "Is it one of those, or tell me what you need and I will check."
+        f"No - that's not something we do. We do {named}. "
+        "Tell me if one of those is what you need and I'll help."
     )
 
 

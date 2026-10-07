@@ -278,3 +278,33 @@ def test_arranging_a_time_is_never_read_as_naming_work(trade, description, said)
     assert scope.names_unmatched_work(shop, said) is False, (
         f"{trade}: {said!r} was read as asking for work the shop does not do"
     )
+
+
+# A flat no is only safe if the thing it is read off is precise. These are
+# messages that name no work at all, and a "no" to any of them is a refusal
+# of something the customer never asked for - which is worse than the
+# hedging the no replaced. Checked for every trade, for the same reason as
+# the arranging words above.
+NAMES_NO_WORK = [
+    "can you tell me what times you have this week?",
+    "hi, can I ask you something?",
+    "could you let me know how it works?",
+    "what do you need from me?",
+    "sorry, can you say that again?",
+    "ok thanks, I'll have a think",
+]
+
+
+@pytest.mark.parametrize("said", NAMES_NO_WORK, ids=[s[:22] for s in NAMES_NO_WORK])
+@pytest.mark.parametrize(
+    "trade,description",
+    [(row[0], row[1]) for row in OTHER_TRADES] + [("remodelling", None)],
+    ids=[row[0] for row in OTHER_TRADES] + ["remodelling"],
+)
+def test_a_message_naming_no_work_is_never_refused(trade, description, said):
+    shop = constrivo() if description is None else Organization(
+        name=trade, sales_prompt=description, product_rules=""
+    )
+    assert scope.names_unmatched_work(shop, said) is False, (
+        f"{trade}: {said!r} would be told no, and it asks for nothing"
+    )

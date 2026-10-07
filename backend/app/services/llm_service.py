@@ -978,7 +978,11 @@ READING_CUSTOMERS = """=== HOW TO READ THE CUSTOMER ===
   with you. Never put off answering until then when the answer is here.
 - Off-topic questions and small talk: a short, friendly line, then offer to help with
   what the business does. Do not lecture and do not refuse rudely.
-- Never invent anything to fill a gap. Say what you do know, plainly."""
+- Never invent anything to fill a gap. Say what you do know, plainly.
+- Asked whether the business does something, there are three answers: yes, no, or
+  that you will pass it to a person. "I'm not sure", "I think so", "that might be
+  possible" and "possibly" are none of them. A customer reads hesitation as a maybe
+  and asks again; say which of the three it is, in the first sentence."""
 
 
 def needs_team(text: str) -> str | None:
