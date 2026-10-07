@@ -939,8 +939,14 @@ def rules_for(
     rounded into a different one. Only sentences with a figure or a
     percentage in them: the rule, not the paragraph about it.
     """
+    from app.services import taught
+
     wanted = [topic for topic in RULE_TOPICS if topic in topics_in(message)]
-    texts = list(texts)
+    # Without the framing a taught answer is stored with. It is there so the
+    # passage is found from a customer's own phrasing, and it was being
+    # quoted along with the rule: "The answer is: Financing is through
+    # GreenSky..." was shown to a customer as one of the business's terms.
+    texts = [(title, taught.spoken(text)) for title, text in texts]
     found: list[str] = []
     for topic in wanted:
         written = RULE_TOPICS[topic][1]

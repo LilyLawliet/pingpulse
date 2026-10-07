@@ -3083,8 +3083,25 @@ async def _decide(
     # will not let a turn that names no job clear anything, so asking it on
     # every request costs nothing and is the only way back for a customer who
     # asked wrongly once.
+    #
+    # But only for a message naming work this shop lists, while a refusal
+    # stands. Re-checking every request re-announced the refusal on turns
+    # that named no work at all: "I already paid for this, where is my
+    # order?" was answered "dog grooming is not something we do", which is a
+    # non-sequitur to the customer and took the answer the orders table had.
+    # The only message that can lift a refusal is one naming work the shop
+    # takes, so that is the only one worth re-checking for; every other turn
+    # belongs to whatever path owns it, and the refusal stays on the contact
+    # either way. Where the shop has listed nothing there is nothing to match
+    # against, so any request is re-checked as before.
+    standing = scope.refused_job(contact)
+    names_ours = (
+        standing is None
+        or not scope.offered_services(organization)
+        or scope.matched_service(organization, said) is not None
+    )
     first_ask = scope.worth_checking(said) and (
-        asks_for_work(said) or scope.remembered(contact) is None
+        (asks_for_work(said) and names_ours) or scope.remembered(contact) is None
     )
     if existing is None and (about_times or first_ask):
         outside = await _outside_scope(db, organization, contact, said, new_kind, text)

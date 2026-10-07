@@ -832,3 +832,60 @@ def test_a_taught_answer_is_read_out_without_its_framing():
     assert taught.spoken("Our warranty is two to five years.") == (
         "Our warranty is two to five years."
     )
+
+
+async def test_a_standing_refusal_does_not_answer_a_question_about_an_order(
+    constrivo, db_session, hostile_model
+):
+    """"I already paid for this, where is my order?" is not about the dog.
+
+    Caught in the evidence run of 7 October, and caused by the fix made that
+    morning: re-checking the scope on every request is what lets a customer
+    name different work and lift a refusal, but it also re-announced the
+    refusal on turns that named no work at all. An order question was
+    answered "dog grooming is not something we do" - a non-sequitur to the
+    customer, and it took the answer the orders table had.
+
+    While a refusal stands, the check is re-run only for a message naming
+    work this shop lists, because that is the only kind of message that can
+    lift one. Everything else belongs to whatever path owns it.
+    """
+    shop, contact = constrivo
+    chat = Conversation(db_session, shop, contact)
+
+    await chat.say("I need my dog groomed, can you come out?")
+    assert scope.refused_job(contact) == "dog grooming"
+
+    turn = await chat.say("I already paid for this, where is my order?")
+    said = (turn.reply or turn.plain_reply(shop) or "").lower()
+    assert "not something we do" not in said, said
+    # And the refusal is still on the contact - it is simply not the answer here.
+    assert scope.refused_job(contact) == "dog grooming"
+
+    # A time, though, is still refused: that turn *is* about the dog.
+    later = await chat.say("what times do you have?")
+    assert not later.offered, "times were offered for work the shop refused"
+
+
+def test_a_taught_answer_is_not_quoted_as_one_of_the_business_terms():
+    """The quote panel reads the documents too, and it was reading the framing.
+
+    "The answer is: Financing is through GreenSky, and GreenSky sets the
+    terms..." was shown to a customer under "Quoted from your terms" in the
+    evidence run of 7 October. The words are the shop's; the two labels
+    around them are not, and a term quoted to a customer is the kind of
+    thing that gets held against a business.
+    """
+    from app.services import offers
+
+    taught_passage = (
+        "When a customer asks: What is the interest rate on the financing?\n"
+        "The answer is: Financing is through GreenSky, and GreenSky sets the terms. "
+        "We don't publish rates, loan amounts, repayment lengths or eligibility criteria. "
+        "A deposit of 25% is taken before work starts."
+    )
+    rules = offers.rules_for("do I pay a deposit?", [("Financing", taught_passage)])
+    assert rules, "the taught passage was not read at all"
+    for rule in rules:
+        assert "the answer is" not in rule.lower(), rule
+        assert "when a customer asks" not in rule.lower(), rule
