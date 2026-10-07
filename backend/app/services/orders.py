@@ -238,10 +238,11 @@ async def read_order(prepared, history, message: str, timeout: float | None = No
     customer_text = " \n".join(_customer_lines(history, message))
     shown = understanding._candidates(prepared.items, customer_text, "")
     listing, ids = understanding.product_lines(shown)
-    answer = await understanding.structured(
-        ORDER_PROMPT.format(products=listing, chat=_chat(history, message)),
-        timeout or settings.understanding_timeout_seconds + 2,
-    )
+    with understanding.output_budget(understanding.LISTING_OUTPUT_TOKENS):
+        answer = await understanding.structured(
+            ORDER_PROMPT.format(products=listing, chat=_chat(history, message)),
+            timeout or settings.understanding_timeout_seconds + 2,
+        )
     if answer is None:
         return None
     reading = understanding.check_reading(answer, ids, customer_text)

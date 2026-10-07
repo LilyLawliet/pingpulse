@@ -949,6 +949,10 @@ async def process_inbound_message(
     appointment_turn = await booking.handle_turn(
         db, organization, contact, body, wants_meeting=bool(analysis.get("wants_meeting"))
     )
+    # Work the business already said no to, asked about again on a turn no
+    # check claimed: answered the same way as on the turn it was refused.
+    if not outside_trade and not appointment_turn.performed:
+        outside_trade = booking.refused_and_asked_about(contact, body)
     if appointment_turn.calendar_down:
         # The owner's own calendar is set and couldn't be read, so no time was
         # offered. Somebody has to hear about it: until it is fixed, nobody
@@ -1045,6 +1049,10 @@ async def process_inbound_message(
     if order_turn.prompt_block and not order_turn.reply:
         knowledge = "\n\n".join(filter(None, [knowledge, order_turn.prompt_block]))
 
+    if outside_trade and not appointment_turn.reply:
+        # The answer is "we do not do that", and the backend can say it.
+        # Handed to a model, it is a sentence the model is free to soften.
+        appointment_turn.reply = booking.not_our_trade_reply(outside_trade)
     if appointment_turn.reply:
         # What they are asked to confirm, rendered from the record. Not left to
         # a model: a yes to it books exactly this, so it has to say exactly this.
@@ -1181,6 +1189,16 @@ async def process_inbound_message(
             generation.text = await unanswered.handle(
                 db, organization, contact, generation.needs_team, body
             )
+
+    # The last check before anything is sent: a reply that says yes to work
+    # this business has refused is replaced by the refusal, whichever route
+    # produced it.
+    if generation.provider not in ("booking", "order"):
+        instead = booking.overreach(organization, contact, body, generation.text or "")
+        if instead:
+            logger.warning("reply said yes to work the business has not; sent its own answer instead")
+            generation.text = instead
+            wrote_it_ourselves = True
 
     # A sentence the backend wrote rather than the model - the hand-over, the
     # worked-out answer with no model to phrase it - goes out in the

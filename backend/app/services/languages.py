@@ -201,9 +201,10 @@ async def in_customer_language(text: str, customer_message: str, timeout: float 
         return text
     from app.services import understanding
 
-    answer = await understanding.structured(
-        TRANSLATE_PROMPT.format(customer=customer_message[:500], text=text), timeout
-    )
+    with understanding.output_budget(understanding.MESSAGE_OUTPUT_TOKENS):
+        answer = await understanding.structured(
+            TRANSLATE_PROMPT.format(customer=customer_message[:500], text=text), timeout
+        )
     rewritten = str((answer or {}).get("text") or "").strip()
     # Each way back to English is logged with its reason: a Spanish customer
     # asked "shall I pass you to the team?" in English (October 3, R21) left

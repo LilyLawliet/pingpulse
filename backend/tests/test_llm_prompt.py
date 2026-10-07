@@ -192,6 +192,15 @@ async def test_truncated_groq_reply_falls_back(monkeypatch):
     assert result.text == "A complete reply."
 
 
-def test_token_budget_exceeds_a_reply_length():
-    """Reasoning models spend this budget thinking before writing anything."""
-    assert llm_service.MAX_OUTPUT_TOKENS >= 2048
+def test_token_budget_exceeds_a_reply_length_and_no_more():
+    """Room to think and to write a short reply - and not the minute's pool.
+
+    Reasoning models spend this budget thinking before writing anything, so
+    it is well above a 45-word reply. Groq also reserves all of it against
+    the per-minute token limit, so it is not set higher than that needs.
+    """
+    from app.services import understanding
+
+    assert 1024 <= llm_service.MAX_OUTPUT_TOKENS <= 1536
+    assert understanding.MESSAGE_OUTPUT_TOKENS <= 1024
+    assert understanding.DOCUMENT_OUTPUT_TOKENS >= 4096

@@ -77,6 +77,7 @@ TASKS = pathlib.Path("app/tasks.py")
 ORDERS = pathlib.Path("app/services/orders.py")
 SCOPE = pathlib.Path("app/services/scope.py")
 TAUGHT = pathlib.Path("app/services/taught.py")
+OPS = pathlib.Path("app/api/operations.py")
 
 
 # Read and write the bytes ourselves. read_text() decodes with the platform's
@@ -94,7 +95,7 @@ def _read(path: pathlib.Path) -> tuple[str, str]:
 
 SOURCES: dict[pathlib.Path, str] = {}
 ENDINGS: dict[pathlib.Path, str] = {}
-for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS, SCOPE, TAUGHT):
+for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS, SCOPE, TAUGHT, OPS):
     SOURCES[_path], ENDINGS[_path] = _read(_path)
 
 
@@ -282,9 +283,11 @@ MUTATIONS = {
         "        and scope.offered_services(organization)\n",
         "        and False\n",
     ),
+    # The yes trusting what was read back instead of deciding again from the
+    # record - which is where a standing refusal is checked at the yes now.
     "a standing refusal is not re-checked at the yes": (
-        "        refused = scope.refused_job(contact)\n",
-        "        refused = None\n",
+        "        now = scope.what_is_being_booked(organization, contact)\n",
+        "        now = scope.Bookable(service=held.get(\"service\"))\n",
     ),
     "an order the customer says they have is believed": (ORDERS,
         "    if not _ASKS_ABOUT_AN_ORDER.search(text or \"\"):\n        return None\n",
@@ -337,6 +340,55 @@ MUTATIONS = {
     "a standing refusal answers every turn": (
         "        (asks_for_work(said) and names_ours) or scope.remembered(contact) is None\n",
         "        asks_for_work(said) or scope.remembered(contact) is None\n",
+    ),
+    # The client's report of 7 October: dog grooming, then details and a
+    # Miami address, read back as a construction site visit and booked on
+    # "yes". Each of these is one of the things that now stands in the way,
+    # put back on its own.
+    "a model's yes counts without the customer naming the work": (SCOPE,
+        "    if verdict.service_fits is True and not named_by_them(\n",
+        "    if False and not named_by_them(\n",
+    ),
+    "a booking is read back with no listed service": (
+        "    if being_booked.service is None and (\n"
+        "        being_booked.refused or (being_booked.needs_job and not meeting)\n"
+        "    ):\n",
+        "    if False:\n",
+    ),
+    "the yes does not check what was read back": (
+        "        if (held.get(\"service\") or None) != now.service:\n",
+        "        if False:\n",
+    ),
+    "the yes does not check the service again": (
+        "        if now.service is None and (now.refused or (now.needs_job and not meeting)):\n",
+        "        if False:\n",
+    ),
+    "a refusal leaves the read-back waiting on a yes": (SCOPE,
+        "    metadata.pop(PENDING_KEY, None)\n",
+        "",
+    ),
+    "a place reads as a trade": (SCOPE,
+        "    return wanted - _place_words(organization, text) - _business_places(organization)\n",
+        "    return wanted\n",
+    ),
+    "the first listed service is read back, not the closest": (SCOPE,
+        "            if ranked > score:\n",
+        "            if best is None:\n",
+    ),
+    "a reply may say yes to refused work": (
+        "    refused = says_yes_to_refused(contact, reply)\n"
+        "    if refused:\n"
+        "        return not_our_trade_reply(refused)\n",
+        "",
+    ),
+    "a reply may say yes to unlisted work while the model is busy": (
+        "    if scope.agrees_to(reply, unlisted):\n",
+        "    if False:\n",
+    ),
+    "the simulator checks scope on a contact with no memory": (OPS,
+        "    # memory - so the sandbox forgot the conversation where WhatsApp would not.\n"
+        "    pretend.contact_metadata = dict(state)\n",
+        "",
     ),
 }
 

@@ -773,6 +773,12 @@ async def simulate(
     if not escalation and handover_question.asked(state) and booking.agreed_to_it(message):
         escalation = "agreed to be passed to the team"
     state = handover_question.forget(state)
+    # The pretend contact remembers what the page sent back, the way a real
+    # contact row remembers it. Left empty, every scope check here was asked
+    # about a stranger: a refusal or an agreed job from three turns ago did
+    # not exist for it, and what it then wrote was laid over the page's
+    # memory - so the sandbox forgot the conversation where WhatsApp would not.
+    pretend.contact_metadata = dict(state)
     # Work this business plainly does not do is answered, not handed on. The
     # same check the live webhook makes, in the same place, because a sandbox
     # that answers differently from the live one tests nothing.
@@ -783,7 +789,9 @@ async def simulate(
         # and comes back in booking_state, which is how the page remembers one
         # turn in the sandbox the way a real contact row remembers it.
         outside_trade = await booking.not_our_trade(db, organization, message, pretend)
-        state = {**state, **(pretend.contact_metadata or {})}
+        # Its memory replaces the page's rather than being laid over it: a
+        # refusal it lifted or an offer it dropped has to stay gone.
+        state = dict(pretend.contact_metadata or {})
     if read_as_a_person and not outside_trade:
         return {
             "reply": await languages.in_customer_language(
@@ -946,6 +954,13 @@ async def simulate(
                 order_note = "The AI couldn't read this order; on WhatsApp you'd get an alert to take it."
         state = dict(probe.contact_metadata or {})
         state.pop(SANDBOX_APPOINTMENT_KEY, None)
+        pretend.contact_metadata = dict(state)
+        # The same as the live webhook: refused work asked about again on a
+        # turn no check claimed is answered as it was the first time.
+        if not outside_trade and not performed:
+            outside_trade = booking.refused_and_asked_about(probe, message)
+            if outside_trade and not turn_reply:
+                turn_reply = booking.not_our_trade_reply(outside_trade)
         kept = await booking.upcoming_for(db, probe.id)
         if kept is not None:
             state[SANDBOX_APPOINTMENT_KEY] = {
@@ -1029,8 +1044,9 @@ async def simulate(
     team = None
     wrote_it_ourselves = generation.needs_team is not None or generation.provider == "none"
     if generation.needs_team is not None and not outside_trade:
+        pretend.contact_metadata = dict(state)
         outside_trade = await booking.not_our_trade(db, organization, message, pretend)
-        state = {**state, **(pretend.contact_metadata or {})}
+        state = dict(pretend.contact_metadata or {})
     if generation.needs_team is not None and outside_trade:
         generation.text = booking.not_our_trade_reply(outside_trade)
         generation.needs_team = None
@@ -1069,6 +1085,13 @@ async def simulate(
             else "Nothing in your documents answers this, and no alert address or device "
             "is set up - so the customer is not promised a reply. Add one under Alerts."
         )
+    # The last check before the reply is shown, as in the live webhook.
+    if generation.provider not in ("booking", "order"):
+        pretend.contact_metadata = dict(state)
+        instead = booking.overreach(organization, pretend, message, generation.text or "")
+        if instead:
+            generation.text = instead
+            wrote_it_ourselves = True
     if wrote_it_ourselves:
         # As in the live webhook: a sentence the backend wrote gets the longer
         # allowance, because being readable is the whole of its job.

@@ -23,6 +23,8 @@ the old pattern reader in `offers` is the fallback - no longer the main path.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import json
 import logging
 import re
@@ -143,7 +145,7 @@ async def _groq_json(prompt: str, timeout: float) -> dict | None:
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0,
                 "response_format": {"type": "json_object"},
-                "max_tokens": 4096,
+                "max_tokens": _budget.get(),
                 **groq_reasoning(model),
             },
         )
@@ -191,6 +193,37 @@ def _as_object(text: str) -> dict | None:
     except json.JSONDecodeError:
         return None
     return value if isinstance(value, dict) else None
+
+
+# What a JSON answer may run to on Groq. Groq counts a request's max_tokens
+# against the per-minute token pool before a word is written, so a reading
+# that will answer in sixty tokens but reserves four thousand spends half of a
+# free key's minute on its own - and the scope check, the reading, the order
+# reading and the reply all come out of the same minute for every message.
+# Reading a whole document needs the room; reading one message does not.
+DOCUMENT_OUTPUT_TOKENS = 4096
+#: A small JSON answer about one message, with room for a reasoning model
+#: thinking at low effort before it writes.
+MESSAGE_OUTPUT_TOKENS = 1024
+#: A reading that lists products or order lines from one message.
+LISTING_OUTPUT_TOKENS = 2048
+_budget: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "structured_output_tokens", default=DOCUMENT_OUTPUT_TOKENS
+)
+
+
+@contextlib.contextmanager
+def output_budget(tokens: int):
+    """How much the structured calls inside this block may reserve on Groq.
+
+    A scope rather than an argument, so the callers' signature - and every
+    test that stands in for it - stays as it is.
+    """
+    token = _budget.set(tokens)
+    try:
+        yield
+    finally:
+        _budget.reset(token)
 
 
 async def structured(prompt: str, timeout: float) -> dict | None:
@@ -672,15 +705,16 @@ async def read_message(
         return None
     shown = _candidates(items, message, context)
     listing, ids = product_lines(shown)
-    answer = await structured(
-        READ_PROMPT.format(
-            context=context.strip() or "(nothing earlier)",
-            terms=terms.strip() or "(none written)",
-            products=listing,
-            message=message,
-        ),
-        timeout or settings.understanding_timeout_seconds,
-    )
+    with output_budget(LISTING_OUTPUT_TOKENS):
+        answer = await structured(
+            READ_PROMPT.format(
+                context=context.strip() or "(nothing earlier)",
+                terms=terms.strip() or "(none written)",
+                products=listing,
+                message=message,
+            ),
+            timeout or settings.understanding_timeout_seconds,
+        )
     if answer is None:
         return None
     return check_reading(answer, ids, message)

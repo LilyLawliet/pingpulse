@@ -711,12 +711,30 @@ def describe(appointment) -> str:
     clock = local.strftime("%I:%M %p").lstrip("0").lower()
     label = KIND_WORDS.get(appointment.kind, "appointment")
 
+    job = job_of(appointment)
+    if job:
+        # What it is for, from the row: "site visit for kitchen remodeling",
+        # so the confirmation names the work they asked for and not only a van.
+        label = f"{label} for {job}"
+
     location = appointment.location or ""
     if location.lower().startswith("http"):
         where = f" (join: {location})"
     else:
         where = f" at {location}" if location else ""
     return f"{label} on {day} at {clock}{where}"
+
+
+#: How the work a booking is for is written into its notes.
+JOB_NOTE = "Job: "
+
+
+def job_of(appointment) -> str | None:
+    """The work this appointment was booked for, as written on the row."""
+    notes = str(getattr(appointment, "notes", None) or "")
+    if not notes.startswith(JOB_NOTE):
+        return None
+    return notes[len(JOB_NOTE):].strip().splitlines()[0][:120] or None
 
 
 # ------------------------------------------------- claims the agent may not make
@@ -2080,7 +2098,7 @@ _NOT_PLACES = {
 # can you come" - not "interested in Bathroom remodeling", where a capital
 # letter is only somebody's typing.
 _PLACE_AFTER = re.compile(
-    r"\b(?:in|near|around|from|based in|located in|live in|lives in|living in)\s+"
+    r"\b(?:in|near|around|from|across|throughout|based in|located in|live in|lives in|living in)\s+"
     r"((?:(?:St|Ft|Mt)\.\s+)?[A-Z][\w'-]+(?:\s+[A-Z][\w'-]+){0,2})(?=\s*(?:[.,!?;:)]|$|\s+(?:area|county|and|but)\b))"
 )
 _CITY_STATE = re.compile(r"\b([A-Z][\w'.-]+(?:\s+[A-Z][\w'.-]+){0,2}),\s*([A-Z]{2})\b")
@@ -2452,7 +2470,7 @@ def _why_not(organization, refusal: Refusal, moment: datetime, their_zone: ZoneI
 # customers have more phrasings than any list. With a read-back in between a
 # misreading is something they see and correct, not something they find on
 # the day.
-PENDING_KEY = "pending_action"
+PENDING_KEY = scope.PENDING_KEY
 
 _NO = re.compile(
     r"^\W*(no|nope|nah|no thanks|no thank you|not that|that'?s wrong|wrong|wait|hold on|"
@@ -2533,26 +2551,39 @@ async def _carry_out(db, organization, contact, held: dict) -> TurnResult:
 
     if action == "book":
         at = datetime.fromisoformat(held["at"])
-        # A standing refusal is checked first and on its own. The verdict
-        # below is whatever the last check wrote; this is the business's "no"
-        # to the job they actually asked for, which outlives it.
-        refused = scope.refused_job(contact)
-        if refused:
-            return TurnResult(
-                reply=not_our_trade_reply(refused),
-                prompt_block=(
-                    "=== APPOINTMENTS ===\n"
-                    f"They said yes, but {refused} is NOT something this business does, and "
-                    "that has not changed during this conversation. NOTHING was booked. Say "
-                    "plainly that it is not something the business does, and ask whether "
-                    "there is something it does that they need."
-                ),
-                refusal=Refusal("outside_scope", f"{refused} is not something the business takes on."),
+        # What it is for, decided again now from the record - not trusted from
+        # when it was read back, and never from what a model thinks the
+        # conversation is about. The client's report of 7 October: dog
+        # grooming was asked for, details and an address followed, a "site
+        # visit" was read back with no job in it, and "yes" booked it.
+        meeting = bool(held.get("meeting"))
+        now = scope.what_is_being_booked(organization, contact)
+        if now.service is None and (now.refused or (now.needs_job and not meeting)):
+            forget_pending(contact)
+            return _no_service(organization, contact, now, reason="outside_scope")
+        if (held.get("service") or None) != now.service:
+            # What they would be booking is not what they were read back -
+            # the job on record changed in between, or the read-back named
+            # none. A yes is only ever to the sentence they were shown, so
+            # nothing is booked and the right one is put to them instead.
+            forget_pending(contact)
+            return await _propose_booking(
+                db, organization, contact, at,
+                keep={
+                    "kind": held.get("kind") if meeting else None,
+                    "about": str(held.get("notes") or "").removeprefix("Meeting request: ") or None
+                    if meeting else None,
+                    "meeting": meeting,
+                },
+                visit_kind=(held.get("kind") or default_kind(organization)).lower(),
+                their_zone=their_zone,
             )
-        # Checked again now, not trusted from when it was read back.
+        # The place, checked again now for the same reason - and, where the
+        # business keeps no list and a model's reading is all there is, that
+        # reading too: the latest one turning against the work stops it.
         verdict = scope.remembered(contact)
         if verdict is not None and (
-            verdict.service_fits is False
+            (verdict.service_fits is False and not scope.offered_services(organization))
             or (
                 held.get("kind") == "onsite"
                 and verdict.area_fits is False
@@ -2690,7 +2721,7 @@ async def _carry_out(db, organization, contact, held: dict) -> TurnResult:
 
 
 def _same_action(one: dict | None, other: dict | None) -> bool:
-    keys = ("action", "at", "appointment_id", "location", "kind")
+    keys = ("action", "at", "appointment_id", "location", "kind", "service")
     return bool(one and other) and all(one.get(k) == other.get(k) for k in keys)
 
 
@@ -2815,25 +2846,22 @@ def asks_for_unlisted_work(organization, text: str) -> bool:
 
 
 def unsure_what_we_do_reply(organization) -> str | None:
-    """A no, for work this business did not list, with what it does instead.
+    """For work the business did not list, read with no model: what it does, and which.
 
     Used where the scope check could not run - the shared model budget is
-    real and a 429 is ordinary - and the message plainly asks for something
-    the business's own list does not carry. Without this, "can you groom my
+    real and a 429 is ordinary - and the message asks for something the
+    business's own list does not carry. Without this, "can you groom my
     dog?" was answered "I don't have that to hand, I've passed it to the
     team": a person spent on a question the shop answers itself.
 
-    It used to hedge - "I'm not sure that's something we do" - on the
-    reasoning that a services list is short for every business and naming
-    the work would need a reading we do not have. That reasoning is about
-    this code's confidence, and the customer is not asking about that. They
-    asked whether the business does something, and a shop that cannot say no
-    to work it never listed cannot say no at all: the answer arrives as
-    hesitation, which reads as a maybe and invites them to push.
-
-    So: no, and then what the business does do. There are three answers a
-    customer can be given here - yes, no, or a person - and "I'm not sure"
-    is none of them.
+    Neither a maybe nor a no. It hedged once ("I'm not sure that's something
+    we do"), which reads as an opening to push; then it said a flat "No",
+    which a word list cannot know - a services list is short for every
+    business, and "my countertops are cracked" is a remodeller's work in
+    words its list does not carry. A false no loses a real customer without
+    anyone hearing of it. What the list does know is said plainly: this is
+    not on it, here is what is, which one is it. Nothing is offered or booked
+    until they name one, so a yes cannot slip through either.
     """
     from app.services import scope
 
@@ -2841,10 +2869,93 @@ def unsure_what_we_do_reply(organization) -> str | None:
     if not services:
         return None
     named = ", ".join(services[:6])
-    return (
-        f"No - that's not something we do. We do {named}. "
-        "Tell me if one of those is what you need and I'll help."
+    return f"That isn't on our list of services. We do {named}. Which of those do you need?"
+
+
+def _no_service(organization, contact, being_booked, reason: str = "outside_services") -> TurnResult:
+    """No booking, because nothing it could be for is something this business does.
+
+    `reason` is "outside_scope" when this is the answer to a yes, so the two
+    moments a refusal can land on stay told apart in the record.
+    """
+    forget_offer(contact)
+    if being_booked.refused:
+        job = being_booked.refused
+        return TurnResult(
+            reply=not_our_trade_reply(job),
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                f"{job} is NOT something this business does. Nothing is booked and no "
+                "time may be offered. Say so plainly and ask whether there is something "
+                "it does that they need."
+            ),
+            refusal=Refusal(reason, f"{job} is not something this business offers."),
+        )
+    ask = unsure_what_we_do_reply(organization) or (
+        "Before I can offer you a time I need to know what work you need. "
+        "What can we help you with?"
     )
+    return TurnResult(
+        refusal=Refusal("needs_job", ask),
+        prompt_block=(
+            "=== APPOINTMENTS ===\n"
+            "Nothing they have asked for is one of the services this business lists, so "
+            "nothing can be booked. Say what it does do and ask which one they need. Do "
+            "NOT offer a time and do NOT say anything is booked."
+        ),
+    )
+
+
+def refused_and_asked_about(contact, said: str) -> str | None:
+    """The refused work this message is about, if any. Read off the record.
+
+    Every route through a turn answers it the same way. The scope check used
+    to be consulted only on some of them - a booking turn, a turn read as
+    wanting a person, a turn the model could not answer - and on any other,
+    a model wrote the reply to "and you'd groom the dog too, right?" from a
+    prompt telling it a partial answer is better than none.
+    """
+    standing = scope.refused_job(contact)
+    return standing if standing and scope.mentions(standing, said) else None
+
+
+def says_yes_to_refused(contact, reply: str) -> str | None:
+    """The refused work this reply says yes to, if it does."""
+    standing = scope.refused_job(contact)
+    return standing if standing and scope.affirms(reply, standing) else None
+
+
+def overreach(organization, contact, said: str, reply: str) -> str | None:
+    """What to send instead of a reply that says yes to work the business has not.
+
+    The last check before a reply goes out, on every route. Two cases, both
+    read off the record and the words, with no model:
+
+    - work this business refused: the refusal, as it was first given;
+    - work they asked for that nothing the business wrote carries, on a turn
+      where no check could say whether it is theirs (the model was busy):
+      what the business does do, and which one they need. A model that
+      answered "sure, we can groom your dog" because the scope check was
+      rate-limited is the yes this stops.
+    """
+    refused = says_yes_to_refused(contact, reply)
+    if refused:
+        return not_our_trade_reply(refused)
+    # What they asked for on this turn and on the recent ones about the job:
+    # a reply three messages on can still say yes to the first request.
+    recent = [said] + list(
+        (getattr(contact, "contact_metadata", None) or {}).get(scope.SAID_KEY) or []
+    )
+    accepted = scope.accepted_job(contact)
+    unlisted: set[str] = set()
+    for text in recent:
+        if accepted and scope.mentions(accepted, text):
+            continue  # the scope check said yes to this one
+        if scope.names_unmatched_work(organization, text) and scope.matched_service(organization, text) is None:
+            unlisted |= scope.unlisted_words(organization, text)
+    if scope.agrees_to(reply, unlisted):
+        return unsure_what_we_do_reply(organization)
+    return None
 
 
 def not_our_trade_reply(job: str) -> str:
@@ -3133,7 +3244,9 @@ async def _decide(
         # for tomorrow", with a kitchen remodel already agreed, came back
         # unnamed and was answered with six consultation slots.
         and (
-            not scope.accepted_job(contact)
+            # Nothing on record that this business lists. A job a model
+            # accepted is not enough on its own: it has to be one of theirs.
+            scope.what_is_being_booked(organization, contact).service is None
             # Only when they are actually asking for something. "what times do
             # you have?" and "the first one please" name no work either, and
             # are a customer working through a booking rather than opening a
@@ -3418,6 +3531,18 @@ async def _propose_booking(
     about = keep.get("about")
     kind = (new_kind or visit_kind).lower()
 
+    # What it is for, before anything about the time. A booking that cannot
+    # say what it is for is not read back at all: "site visit on Tuesday" with
+    # no job in it is how a refused job became a generic visit on "yes".
+    # A meeting about something else - a demo, a partnership call - names no
+    # job and is still a meeting, but not for someone whose only request has
+    # been refused.
+    being_booked = scope.what_is_being_booked(organization, contact)
+    if being_booked.service is None and (
+        being_booked.refused or (being_booked.needs_job and not meeting)
+    ):
+        return _no_service(organization, contact, being_booked)
+
     # Everything the shop said it needs before sending somebody out.
     # A meeting is a conversation, not a van: the questions a shop asks
     # before sending somebody out don't hold it back.
@@ -3481,11 +3606,12 @@ async def _propose_booking(
         refusal = visit_refusal(organization, kind, location)
     if refusal is None:
         when = _readback_of(organization, target, kind, location)
-        verdict = scope.remembered(contact)
-        job = verdict.job if verdict is not None else None
+        # What is being booked, said back too: "site visit for kitchen
+        # remodeling", so the yes is to the job as well as the time - and to
+        # the job as the business itself wrote it down, not as a model last
+        # labelled the conversation.
+        job = being_booked.service
         if job:
-            # What is being booked, said back too: "site visit for roof
-            # replacement", so the yes is to the job as well as the time.
             when = when.replace(" on ", f" for {job} on ", 1)
         # The time stays the standing offer, so the next message is read as
         # about it: "make it 11 instead" corrects it, "yes, 10 is right" agrees.
@@ -3497,9 +3623,11 @@ async def _propose_booking(
                 "at": target.isoformat(),
                 "kind": kind,
                 "location": location,
+                # Checked against the record again when they say yes.
+                "service": job,
                 "notes": (
                     f"Meeting request: {about}" if meeting and about
-                    else f"Job: {job}" if job else None
+                    else f"{JOB_NOTE}{job}" if job else None
                 ),
                 "meeting": meeting,
                 "their_zone": their_zone.key if their_zone else None,

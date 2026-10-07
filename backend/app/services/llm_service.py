@@ -31,8 +31,14 @@ from app.services.understanding import groq_reasoning
 logger = logging.getLogger(__name__)
 
 # Reasoning models spend part of this budget thinking before emitting text, so
-# it must comfortably exceed the length of the reply we actually want.
-MAX_OUTPUT_TOKENS = 2048
+# it must comfortably exceed the length of the reply we actually want - and
+# no more than that, because Groq reserves all of it against the per-minute
+# token pool before a word is written. A reply is under 45 words and the model
+# thinks at low effort; 2048 reserved for that left a free key room for about
+# one customer message a minute once the readings were counted too. A reply
+# that does run out is caught as truncated and goes to the other provider,
+# never to the customer half-written.
+MAX_OUTPUT_TOKENS = 1024
 # Gemini counts its thinking against the same budget, so it needs more room.
 GEMINI_OUTPUT_TOKENS = 8192
 

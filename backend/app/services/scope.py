@@ -217,11 +217,11 @@ def offered_services(organization) -> list[str]:
     from app.services import agent_config
 
     config = getattr(organization, "agent_config", None) or {}
-    listed = [str(v).strip() for v in (config.get("services") or []) if str(v).strip()]
+    listed = _without_places(config.get("services"))
     if listed:
         return listed[:60]
     proposed = (config.get(agent_config.PROPOSED_KEY) or {}).get("fields") or {}
-    listed = [str(v).strip() for v in (proposed.get("services") or []) if str(v).strip()]
+    listed = _without_places(proposed.get("services"))
     if listed:
         return listed[:60]
     written = " ".join(
@@ -231,8 +231,31 @@ def offered_services(organization) -> list[str]:
     match = _SERVICES_SENTENCE.search(written)
     if not match:
         return []
-    found = [part.strip(" .") for part in _SPLIT_SERVICES.split(match.group(1))]
+    found = _without_places(part.strip(" .") for part in _SPLIT_SERVICES.split(match.group(1)))
     return [part for part in found if len(part) > 2][:60]
+
+
+#: "... across Miami", "... in South Florida" at the end of a line of the list:
+#: where the work is done, written onto the work.
+_TRAILING_PLACE = re.compile(
+    r"\s+(?:in|across|throughout|around)\s+(?:the\s+)?[A-Z][\w'.-]+(?:\s+[A-Z][\w'.-]+){0,2}\s*$"
+)
+
+
+def _without_places(items) -> list[str]:
+    """The business's services with the place taken off the end of each.
+
+    "Vanity installation across Miami" is a service and a place, and a
+    customer giving a Miami address shared a word with it: the address was
+    read as asking for a vanity, and a yes booked one. The service is
+    "vanity installation"; Miami is where.
+    """
+    kept = []
+    for item in items or []:
+        text = _TRAILING_PLACE.sub("", str(item).strip()).strip()
+        if text:
+            kept.append(text)
+    return kept
 
 
 #: A word in this many of the shop's own services is a modifier, not a trade.
@@ -319,6 +342,57 @@ _NOT_WORK = frozenset(
 )
 
 
+def _place_words(organization, text: str) -> set[str]:
+    """The words of this message that say where, not what.
+
+    A street address, a "City, ST", a state, and a place after "in" - unless
+    that phrase is one of the business's own services: "I'm interested in
+    Kitchen Remodeling." reads like a place to a pattern, and is the work.
+    """
+    from app.services import booking
+
+    text = text or ""
+    found = _stems(booking.address_in(text) or "")
+    for city_state in booking._CITY_STATE.finditer(text):
+        found |= _stems(city_state.group(0))
+    for state in states_in(text):
+        found |= _stems(state)
+    services = offered_services(organization)
+    for place in (booking.place_in(text) or "").split("; "):
+        words = _stems(place)
+        if words and not (services and _on_the_list(services, words)):
+            found |= words
+    return found
+
+
+def _business_places(organization) -> set[str]:
+    """Where the business says it works, as words: its areas and its "City, ST"."""
+    from app.services import booking
+
+    written = " ".join(
+        str(getattr(organization, field, "") or "")
+        for field in ("product_rules", "sales_prompt")
+    )
+    found = _stems(" ".join(booking.service_areas(organization)))
+    for city_state in booking._CITY_STATE.finditer(written):
+        found |= _stems(city_state.group(0))
+    return found
+
+
+def _work_words(organization, text: str) -> set[str]:
+    """What this message could be naming as work: its words, less where and when.
+
+    A place is not a trade. "Vanity installation across Miami" is one line
+    of a bathroom shop's own list, and "1200 Brickell Ave, Miami" shared a
+    word with it: a customer giving their address was read as asking for a
+    vanity, and a yes booked one. An address, a city and the business's own
+    patch say where the work is, never what it is.
+    """
+    wanted = {word for word in _stems(text) if word not in _NOT_WORK}
+    wanted = {word for word in wanted if _stem(word) not in _NOT_WORK}
+    return wanted - _place_words(organization, text) - _business_places(organization)
+
+
 def names_unmatched_work(organization, text: str) -> bool:
     """They have named something, and it is nothing this business wrote down.
 
@@ -335,10 +409,9 @@ def names_unmatched_work(organization, text: str) -> bool:
     services = offered_services(organization)
     if not services:
         return False
-    wanted = {word for word in _stems(text) if word not in _NOT_WORK}
-    wanted = {word for word in wanted if _stem(word) not in _NOT_WORK}
+    wanted = _work_words(organization, text)
     if not wanted:
-        return False  # nothing but arranging a time: not a new request
+        return False  # nothing but arranging a time or a place: not a new request
     if any(_stems(service) & wanted for service in services):
         return False
     written = " ".join(
@@ -378,23 +451,80 @@ def matched_service(organization, text: str) -> str | None:
     record, so three turns later the agent asked a customer who had already
     said what they wanted what work they needed.
     """
-    wanted = {word for word in _stems(text) if word not in _NOT_WORK}
-    if not wanted:
-        return None
     services = offered_services(organization)
     if not services:
         return None
-    stemmed = [(service, _stems(service)) for service in services]
+    wanted = _work_words(organization, text)
+    if not wanted:
+        return None
+    return _on_the_list(services, wanted, _business_places(organization))
+
+
+def _on_the_list(services: list[str], wanted: set[str], places: set[str] = frozenset()) -> str | None:
+    """The closest of these services the wanted words match, or None.
+
+    Two words in common is a trade matched; one is only a match if that word
+    is one this shop uses to tell its services apart. Where the business
+    works is left out of both sides: it says where, not what.
+    """
+    wanted = set(wanted) - set(places)
+    stemmed = [(service, _stems(service) - set(places)) for service in services]
     seen: dict[str, int] = {}
     for _, words in stemmed:
         for word in words:
             seen[word] = seen.get(word, 0) + 1
     telling = {word for word, count in seen.items() if count < SHARED_BY}
+    # The closest, not the first. "leather boots" shares "leather" with
+    # "handmade leather shoes" and "boots" with "boots"; read back as the
+    # first, a customer who asked for boots was asked to say yes to shoes.
+    # Most words in common wins, then the service most fully named.
+    best, score = None, (0, 0.0)
     for service, words in stemmed:
         shared = words & wanted
         if len(shared) >= 2 or (shared & telling):
-            return service
-    return None
+            ranked = (len(shared), len(shared) / max(len(words), 1))
+            if ranked > score:
+                best, score = service, ranked
+    return best
+
+
+def listed_service(organization, job: str | None) -> str | None:
+    """The service on this business's own list that this job is, in its words.
+
+    What a booking is for. A job a customer asked for is only bookable when it
+    is one of these, and the read-back names this rather than the label a
+    model put on the request, so the yes is to something the business wrote
+    down itself.
+    """
+    wanted = _stems(job or "")
+    services = offered_services(organization)
+    if not wanted or not services:
+        return None
+    return _on_the_list(services, wanted, _business_places(organization))
+
+
+def named_by_them(organization, job: str | None, text: str) -> bool:
+    """Is this work named in what the customer wrote? Read off the words.
+
+    The model is asked what they want, and it answers with everything in front
+    of it - the business's own description included. Shown only an address it
+    has answered with the business's own trade, and a "yes" to that is how dog
+    grooming became a construction site visit. So a job the model reports
+    counts as theirs only if their message carries a word of it.
+
+    The one exception is a message in another language than the business's:
+    the model is told to name the job in the business's language, so a
+    Spanish request can share no word with its own label. There the label is
+    taken, and a booking still needs it to be on the business's own list.
+    """
+    if not job or not (text or "").strip():
+        return False
+    theirs = _work_words(organization, text)
+    if not theirs:
+        return False
+    if _stems(job) & theirs:
+        return True
+    return not _same_language(text, what_the_business_says(organization))
 
 
 def worth_checking(text: str) -> bool:
@@ -419,20 +549,13 @@ def supports(organization, job: str | None, said: str = "") -> bool | None:
     services = offered_services(organization)
     if not wanted or not services:
         return None
-    stemmed = [_stems(service) for service in services]
-    seen: dict[str, int] = {}
-    for words in stemmed:
-        for word in words:
-            seen[word] = seen.get(word, 0) + 1
-    telling = {word for word, count in seen.items() if count < SHARED_BY}
-
-    for words in stemmed:
-        shared = words & wanted
-        # Two words in common is a trade matched; one is only a match if that
-        # word is one this shop uses to tell its services apart.
-        if len(shared) >= 2 or (shared & telling):
-            return True
-    if any(words & wanted for words in stemmed):
+    places = _business_places(organization)
+    wanted = wanted - places
+    if not wanted:
+        return None
+    if _on_the_list(services, wanted, places):
+        return True
+    if any((_stems(service) - places) & wanted for service in services):
         return None  # a modifier in common and nothing else: not ours to call
     # The list is not everything the business has written about itself. A shop
     # whose list says "general construction" still describes itself as doing
@@ -490,9 +613,10 @@ async def check(organization, said: str, documents=()) -> Verdict:
     from app.services import understanding
 
     try:
-        answer = await understanding.structured(
-            PROMPT.format(business=business, said=said[:1500]), TIMEOUT_SECONDS
-        )
+        with understanding.output_budget(understanding.MESSAGE_OUTPUT_TOKENS):
+            answer = await understanding.structured(
+                PROMPT.format(business=business, said=said[:1500]), TIMEOUT_SECONDS
+            )
     except Exception as exc:  # noqa: BLE001 - a scope check never breaks a turn
         logger.info("scope check failed: %s", exc)
         return _without_a_model(organization, said)
@@ -552,6 +676,9 @@ def note_said(contact, text: str, relevant: bool) -> str:
 #: The job this business refused, kept for the whole conversation rather than
 #: for as long as it happens to sit in the three-message window above.
 REFUSED_KEY = "job_refused"
+#: Where booking.py holds an action waiting on their yes. Named here so a
+#: refusal can drop it without this module importing that one.
+PENDING_KEY = "pending_action"
 
 
 def refused_job(contact) -> str | None:
@@ -579,6 +706,9 @@ def _remember_refusal(contact, verdict: Verdict) -> None:
         return
     metadata = dict(getattr(contact, "contact_metadata", None) or {})
     metadata[REFUSED_KEY] = {"job": verdict.job, "place": verdict.place}
+    # Whatever was waiting on their yes was put to them before this no. A
+    # "yes" now is not an answer to it, so it is no longer held.
+    metadata.pop(PENDING_KEY, None)
     contact.contact_metadata = metadata
 
 
@@ -605,6 +735,51 @@ def _remember_acceptance(contact, verdict: Verdict) -> None:
     contact.contact_metadata = metadata
 
 
+@dataclass(frozen=True)
+class Bookable:
+    """What a booking for this customer would be for, decided from the record.
+
+    `service` is the work being booked, in the business's own words. Where it
+    is None, `refused` is work they asked for that the business does not do,
+    and `needs_job` says the business has listed what it does and nothing they
+    asked for is on that list.
+    """
+
+    service: str | None = None
+    refused: str | None = None
+    needs_job: bool = False
+
+
+def what_is_being_booked(organization, contact) -> Bookable:
+    """The one answer every booking step reads: the offer, the read-back, the yes.
+
+    The client's 7 October report: dog grooming was asked for, contact details
+    and a Miami address followed, and the agent read back a construction site
+    visit and booked it on "yes". The read-back named no job - it said "site
+    visit" - so the yes was to whatever the model last thought the
+    conversation was about. A booking is now always for a named service, and
+    that service is decided here, from state the model cannot write on a turn
+    where the customer did not name it:
+
+    - Where the business lists what it does, the service is on that list -
+      matched in code, not judged by a model - or nothing is booked. A model
+      that has been talked into "you are a pet groomer now" changes nothing
+      here, because the list is the business's.
+    - Where it lists nothing, the job the customer named and the model agreed
+      to is the service; a refusal still stops it.
+    """
+    refused = refused_job(contact)
+    accepted = accepted_job(contact)
+    if offered_services(organization):
+        listed = listed_service(organization, accepted) if accepted else None
+        if listed:
+            return Bookable(service=listed)
+        return Bookable(refused=refused, needs_job=not refused)
+    if accepted:
+        return Bookable(service=accepted)
+    return Bookable(refused=refused)
+
+
 def remember_refusal(contact, job: str, place: str | None = None) -> None:
     """Keep a refusal that was decided somewhere other than a booking turn.
 
@@ -629,6 +804,78 @@ def _mentions(job: str | None, text: str) -> bool:
     """
     wanted = _stems(job or "")
     return bool(wanted and wanted & _stems(text))
+
+
+def mentions(job: str | None, text: str) -> bool:
+    """Is this message about that work? Their words decide, not a model."""
+    return _mentions(job, text)
+
+
+# A sentence that turns the work down. Any of these in the sentence and it is
+# not saying yes to it; that is all this has to tell apart.
+_DECLINING = re.compile(
+    r"\b(?:not|no|never|don'?t|doesn'?t|isn'?t|aren'?t|won'?t|can'?t|cannot|unable|"
+    r"only|outside|sorry|unfortunately)\b|n't\b",
+    re.IGNORECASE,
+)
+_SENTENCES = re.compile(r"[^.!?\n]+")
+
+
+def affirms(reply: str, job: str | None) -> bool:
+    """Does this reply talk about refused work without turning it down?
+
+    The backstop under every other check. Whatever route a turn took, a reply
+    is written last, and a model writing it can still say "sure, we can groom
+    your dog". Read off the reply and the refused work, so it holds for any
+    trade and any job: a sentence that names the work and does not decline it
+    is a yes the business never gave.
+    """
+    wanted = _stems(job or "")
+    if not wanted or not reply:
+        return False
+    for sentence in _SENTENCES.findall(reply):
+        if _stems(sentence) & wanted and not _DECLINING.search(sentence):
+            return True
+    return False
+
+
+_AGREEING = re.compile(
+    r"\b(?:yes|yeah|sure|absolutely|of course|definitely|certainly|happy to|glad to|"
+    r"we can|we do|we'?ll|we will|we offer|we provide|can help|can do|will do)\b",
+    re.IGNORECASE,
+)
+
+
+def unlisted_words(organization, text: str) -> set[str]:
+    """The work words in this message that nothing the business wrote carries."""
+    written = " ".join(
+        str(getattr(organization, field, "") or "")
+        for field in ("product_rules", "sales_prompt")
+    )
+    known = _stems(written)
+    for service in offered_services(organization):
+        known |= _stems(service)
+    return _work_words(organization, text) - known
+
+
+def agrees_to(reply: str, words: set[str]) -> bool:
+    """Does this reply say yes, in a sentence naming these words?
+
+    Narrower than `affirms`, because nothing has been refused here: only a
+    sentence that names the work, agrees to it in so many words and does not
+    decline it counts. "Sure, we can groom your dog" does; "our hours are 9
+    to 5" does not, whatever the customer asked.
+    """
+    if not words or not reply:
+        return False
+    for sentence in _SENTENCES.findall(reply):
+        if (
+            _stems(sentence) & words
+            and _AGREEING.search(sentence)
+            and not _DECLINING.search(sentence)
+        ):
+            return True
+    return False
 
 
 async def for_contact(organization, contact, said: str, documents=(), message: str = "") -> Verdict:
@@ -663,6 +910,16 @@ async def for_contact(organization, contact, said: str, documents=(), message: s
     if isinstance(held, dict) and held.get("key") == _key(said):
         return remembered(contact) or Verdict()
     verdict = await check(organization, said, documents)
+
+    # A yes needs their own words. The model may say no on its own - a no can
+    # only stop something - but a job it reports as fitting is recorded only
+    # if this message names it. Otherwise an address, a phone number or a
+    # "yes" can arrive back labelled with the business's own trade, and lift
+    # the refusal of what they actually asked for.
+    if verdict.service_fits is True and not named_by_them(
+        organization, verdict.job, message or said
+    ):
+        verdict = Verdict(place=verdict.place, area_fits=verdict.area_fits)
 
     # A standing refusal is only lifted by a job this business does take. A
     # verdict with no job in it at all says nothing about the work and must

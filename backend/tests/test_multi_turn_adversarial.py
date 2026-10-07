@@ -651,7 +651,7 @@ async def test_unlisted_work_is_answered_not_handed_to_a_person(constrivo, db_se
     shop, _ = constrivo
     assert booking.asks_for_unlisted_work(shop, "can you groom my dog?") is True
     said = booking.unsure_what_we_do_reply(shop)
-    assert said and said.lower().startswith("no"), said
+    assert said and "which of those" in said.lower(), said
     assert "not sure" not in said.lower(), said
     # It says what the business does do, from the business's own list.
     assert "kitchen remodeling" in said
@@ -989,7 +989,7 @@ async def test_work_the_shop_does_not_list_is_not_answered_by_asking_again(
     turn = await chat.say("I need my dog groomed, can you come out?")
     said = (turn.reply or turn.plain_reply(shop) or "").lower()
     assert "i need to know what work you need" not in said, said
-    assert said.lower().startswith("no"), said
+    assert "which of those" in said, said
     assert "not sure" not in said.lower(), said
     assert "kitchen remodeling" in said, "it did not say what the business does do"
     assert not turn.offered, "times were offered for work the shop never matched"
@@ -1007,15 +1007,16 @@ async def test_work_the_shop_does_not_list_is_not_answered_by_asking_again(
     assert "what work you need" in (quiet.reply or quiet.plain_reply(shop) or "").lower()
 
 
-def test_work_the_shop_never_listed_gets_a_no_not_a_maybe():
-    """Yes, no, or a person. "I'm not sure" is none of them.
+def test_work_the_shop_never_listed_gets_neither_a_maybe_nor_a_guessed_no():
+    """Read with no model, unlisted work is told what is certain, and asked which.
 
-    The reply used to hedge, on the reasoning that a services list is short
-    for every business and naming the work would need a reading we do not
-    have. That reasoning is about this code's confidence and the customer is
-    not asking about that: a shop that cannot say no to work it never listed
-    cannot say no at all, and the hesitation reads as a maybe and invites
-    them to push.
+    It hedged once ("I'm not sure that's something we do"), which reads as a
+    maybe and invites a push. Then it said a flat "No", which a word list
+    cannot know: a services list is short for every business, and "my
+    countertops are cracked" is a remodeller's work in words its list does
+    not carry. What the list does know - this is not on it, these are - is
+    said plainly, and the customer is asked which one. Nothing is offered or
+    booked until they name one.
     """
     from app.services import booking, llm_service
 
@@ -1023,17 +1024,19 @@ def test_work_the_shop_never_listed_gets_a_no_not_a_maybe():
     shop.product_rules = CONSTRIVO
     said = booking.unsure_what_we_do_reply(shop)
     assert said
-    assert said.lower().startswith("no"), said
     for hedge in ("not sure", "i think", "might", "possibly", "perhaps", "maybe"):
         assert hedge not in said.lower(), f"{hedge!r} in {said!r}"
-    # And it still says what the business does do, so the customer has
-    # somewhere to go.
+    # Not a guessed refusal, and not a yes.
+    assert not said.lower().startswith(("no", "yes", "sure")), said
+    assert "not something we do" not in said.lower(), said
+    # What the business does do, and the question that moves it on.
     assert "kitchen remodeling" in said, said
+    assert said.rstrip().endswith("?"), said
 
-    # A shop that listed nothing has no no to give, and says nothing here.
+    # A shop that listed nothing has nothing certain to say here.
     assert booking.unsure_what_we_do_reply(Organization(name="Quiet", sales_prompt="")) is None
 
-    # The model is told the same thing.
+    # The model is told to answer yes, no or a person, never a hedge.
     assert "yes, no, or" in llm_service.READING_CUSTOMERS.lower()
 
 
