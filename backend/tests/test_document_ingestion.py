@@ -329,3 +329,45 @@ async def test_one_tenant_cannot_delete_anothers_upload(org_a, org_b):
 
     still_there = await org_a.get("/api/v1/knowledge/sources")
     assert len(still_there.json()) == 1
+
+
+# ------------------------------------------------- markdown is for the eyes
+def test_markdown_syntax_does_not_reach_the_customer():
+    """What is stored here is quoted a sentence at a time, asterisks and all.
+
+    A client's knowledge base had agent scripting in it and the agent read it
+    back word for word - "OPEN: 'Absolutely — Constrivo Group handles...'".
+    Markdown is the same fault in a different form: "**Kitchen remodeling.**
+    Custom designs" is a heading and a bold phrase to a reader, and two
+    asterisks and a full stop to a customer.
+    """
+    from app.services.documents import extract
+
+    source = (
+        "# Constrivo Group\n\n"
+        "## Services\n\n"
+        "**Kitchen remodeling.** Custom designs, premium materials and expert installation.\n\n"
+        "- Home additions\n"
+        "- Roofing\n\n"
+        "> Build Now. Pay Over Time.\n\n"
+        "| Service | Price |\n|---|---|\n| Kitchen | free estimate |\n\n"
+        "See [our site](https://constrivogroup.com/) for more.\n\n"
+        "---\n"
+    )
+    text = extract("knowledge-base.md", source.encode("utf-8")).text
+
+    for syntax in ("#", "**", "](", "|", "> "):
+        assert syntax not in text, f"{syntax!r} survived into the stored text"
+    # The words are all still there.
+    assert "Kitchen remodeling. Custom designs" in text
+    assert "Home additions" in text
+    assert "Build Now. Pay Over Time." in text
+    assert "our site" in text
+    assert "free estimate" in text
+
+
+def test_a_plain_text_file_is_left_alone():
+    from app.services.documents import extract
+
+    plain = "Constrivo Group works in Miami and South Florida.\nCall +1 305-748-3629."
+    assert extract("notes.txt", plain.encode("utf-8")).text == plain

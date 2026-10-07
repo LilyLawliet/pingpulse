@@ -179,8 +179,43 @@ def _from_docx(data: bytes) -> Extracted:
 
 
 # ---------------------------------------------------------------------- plain
+#: Markdown syntax, removed on the way in. What is stored here is quoted to
+#: customers a sentence at a time, so a heading's hashes and a bold phrase's
+#: asterisks are read out with the words: "**Kitchen remodeling.** Custom
+#: designs, premium materials". The same fault as the agent scripting a client
+#: had in their knowledge base, which was quoted back word for word.
+_MD_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
+_MD_QUOTE = re.compile(r"^\s{0,3}>\s?", re.MULTILINE)
+_MD_BULLET = re.compile(r"^\s{0,3}[-*+]\s+", re.MULTILINE)
+_MD_RULE = re.compile(r"^\s{0,3}([-*_])(?:\s*\1){2,}\s*$", re.MULTILINE)
+_MD_EMPHASIS = re.compile(r"(\*{1,3}|_{2,3})(?=\S)(.+?)(?<=\S)\1", re.DOTALL)
+_MD_CODE = re.compile(r"`{1,3}([^`]*)`{1,3}", re.DOTALL)
+_MD_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+
+
+def strip_markdown(text: str) -> str:
+    """The words, without the syntax that was only ever for a reader's eyes."""
+    text = _MD_RULE.sub("", text)
+    text = _MD_HEADING.sub("", text)
+    text = _MD_QUOTE.sub("", text)
+    text = _MD_BULLET.sub("", text)
+    text = _MD_LINK.sub(r"\1", text)
+    text = _MD_CODE.sub(r"\1", text)
+    text = _MD_EMPHASIS.sub(r"\2", text)
+    # Table rows become plain lines rather than a row of pipes.
+    lines = []
+    for line in text.splitlines():
+        if set(line.strip()) <= set("|-: ") and "|" in line:
+            continue  # the ---|--- separator under a table header
+        lines.append(" ".join(part.strip() for part in line.split("|")).strip()
+                     if "|" in line else line)
+    return "\n".join(lines).strip()
+
+
 def _from_text(data: bytes) -> Extracted:
-    return Extracted(text=data.decode("utf-8", errors="replace").strip(), kind="text")
+    return Extracted(
+        text=strip_markdown(data.decode("utf-8", errors="replace")), kind="text"
+    )
 
 
 READERS = {
