@@ -1034,6 +1034,14 @@ async def simulate(
     if generation.needs_team is not None and outside_trade:
         generation.text = booking.not_our_trade_reply(outside_trade)
         generation.needs_team = None
+    elif generation.needs_team is not None and booking.asks_for_unlisted_work(organization, message):
+        # The scope check could not run and the message asks for something
+        # this business's list does not carry. Answered here, with what it
+        # does do, rather than spent on a colleague. Same as the live webhook.
+        unsure = booking.unsure_what_we_do_reply(organization)
+        if unsure:
+            generation.text = unsure
+            generation.needs_team = None
     # A turn that says no does not also hold times open. The scope check is
     # asked twice on some turns - once by the booking code, once here - and a
     # model asked the same question twice can answer it twice differently:

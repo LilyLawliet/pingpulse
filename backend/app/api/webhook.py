@@ -1160,6 +1160,14 @@ async def process_inbound_message(
         if outside_trade:
             generation.text = booking.not_our_trade_reply(outside_trade)
             generation.needs_team = None
+        elif booking.asks_for_unlisted_work(organization, body):
+            # The scope check could not run - the model was busy - and the
+            # message asks for something this business's list does not carry.
+            # Answered here rather than spent on a colleague.
+            unsure = booking.unsure_what_we_do_reply(organization)
+            if unsure:
+                generation.text = unsure
+                generation.needs_team = None
         elif offer and offer.reply():
             # The shop's own price list already answered this message. Saying
             # "I don't have that to hand, I've passed it to the team" while

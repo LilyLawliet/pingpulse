@@ -240,6 +240,19 @@ def deterministic_reply(
             "Would you like me to reserve one, or show you something else?"
         )
 
+    # Only where they asked something. A customer supplying their address or
+    # their phone number is not asking a question, and reading out whichever
+    # passage scored highest answered "the address is 1200 Brickell Ave,
+    # Miami" with the company's own address in Dania Beach, and "my phone is
+    # ..." with it too. Searching a message that was never a question finds
+    # something every time, and it is never the reply.
+    # Them handing over an address or a number is not a question, and it is
+    # not something to alert a colleague about either. Blocking the document
+    # search without answering sent "the address is 1200 Brickell Ave" to
+    # "I don't have that to hand, I've passed it to the team".
+    if _is_them_giving_details(message):
+        return "Thanks, I've got that. What else can I help you with?"
+
     if knowledge_chunks:
         answer = relevant_sentences(message, knowledge_chunks)
         if answer:
@@ -258,6 +271,26 @@ def deterministic_reply(
         "Could you tell me a little more about what you're looking for, and I'll "
         "check exactly what we have?"
     )
+
+
+def _is_them_giving_details(message: str) -> bool:
+    """They are handing over a phone number, an email or an address.
+
+    Searching the documents for a message like that finds something every
+    time and it is never the reply: "the address is 1200 Brickell Ave,
+    Miami" came back with the company's own address in Dania Beach, and so
+    did "my name is Ali, phone ..., email ...". A statement that is really a
+    question about terms - "I'll pay everything after delivery" - is not
+    this, and is still answered from the documents.
+    """
+    from app.services import booking
+
+    try:
+        if booking.contact_details_in(message or ""):
+            return True
+        return bool(booking.address_in(message or "") or booking.place_in(message or ""))
+    except Exception:  # noqa: BLE001 - a reply never depends on this working
+        return False
 
 
 _FILLER = (

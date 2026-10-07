@@ -634,3 +634,93 @@ async def test_no_model_does_not_mean_anything_goes(constrivo, db_session, monke
     assert scope.accepted_job(contact) is None, "grooming was accepted with no model answering"
     turn = await chat.say("what times do you have?")
     assert not turn.offered, "times were offered with nothing understood"
+
+
+async def test_unlisted_work_is_answered_not_handed_to_a_person(constrivo, db_session):
+    """With no model, "can you groom my dog?" still does not cost a colleague.
+
+    In production, under a 429, it came back "I don't have the answer to
+    hand, I've passed it to the team" - the exact fault not_our_trade exists
+    to prevent, reappearing whenever the model was busy.
+    """
+    shop, _ = constrivo
+    assert booking.asks_for_unlisted_work(shop, "can you groom my dog?") is True
+    said = booking.unsure_what_we_do_reply(shop)
+    assert said and "not sure that's something we do" in said
+    # It says what the business does do, from the business's own list.
+    assert "kitchen remodeling" in said
+    # And it does not refuse: naming the work would need a reading we do not have.
+    assert "is not something we do" not in said
+
+
+async def test_work_the_shop_lists_is_not_called_unlisted(constrivo, db_session):
+    shop, _ = constrivo
+    for said in ("I want a kitchen remodel", "can you do my bathroom?", "book me in for tomorrow"):
+        assert booking.asks_for_unlisted_work(shop, said) is False, said
+
+
+async def test_a_detail_that_cannot_be_used_is_not_called_recorded(constrivo, db_session):
+    """"Got it - phone 123 and email ali@ recorded" was a claim about our
+    records, and it was false. Said here instead of left to the model."""
+    shop, contact = constrivo
+    chat = Conversation(db_session, shop, contact)
+    turn = await chat.say("my phone is 123 and my email is ali@")
+    assert turn.refusal is not None and turn.refusal.reason == "contact_invalid"
+    assert turn.reply, "the backend left this for the model to word"
+    assert not turn.offered
+
+
+def test_details_are_not_answered_out_of_the_documents():
+    """With no model, a customer handing over details got a document sentence.
+
+    "the address is 1200 Brickell Ave, Miami FL 33131" came back "Address:
+    120 N Compass Way, Dania Beach, FL 33004" - the company's own address -
+    and "my name is Ali, phone ..., email ..." came back with it too.
+    Searching the documents for a message that was never a question finds
+    something every time, and it is never the reply.
+    """
+    from app.services import sales_policy
+
+    class Chunk:
+        def __init__(self, content):
+            self.content = content
+
+    chunks = [Chunk("Address: 120 N Compass Way, Dania Beach, FL 33004. "
+                    "Who it is for: Miami-area landowners and families.")]
+    for said in (
+        "the address is 1200 Brickell Ave, Miami FL 33131",
+        "my name is Ali, phone +1 305 555 0144, email ali@example.com",
+    ):
+        reply = sales_policy.deterministic_reply({}, chunks, None, message=said)
+        assert "Dania Beach" not in reply, f"{said!r} was answered with the company's own address"
+
+    # A statement that is really a question about terms still is answered.
+    terms = [Chunk("Payment terms: a deposit is taken before work begins.")]
+    reply = sales_policy.deterministic_reply(
+        {}, terms, None, message="I'll pay everything after delivery."
+    )
+    assert "payment" in reply.lower()
+
+
+def test_giving_details_is_not_a_question_for_a_colleague():
+    """Blocking the document search is not the same as having no answer.
+
+    "the address is 1200 Brickell Ave, Miami FL 33131" came back "I don't
+    have that to hand, I've passed it to the team" - a handover spent on a
+    customer telling us where the job is.
+    """
+    from app.services import sales_policy
+
+    class Chunk:
+        def __init__(self, content):
+            self.content = content
+
+    chunks = [Chunk("Address: 120 N Compass Way, Dania Beach, FL 33004.")]
+    for said in (
+        "the address is 1200 Brickell Ave, Miami FL 33131",
+        "my name is Ali, phone +1 305 555 0144, email ali@example.com",
+    ):
+        reply = sales_policy.deterministic_reply({}, chunks, None, message=said)
+        assert "Dania Beach" not in reply
+        assert reply and "I've got that" in reply
+        assert "passed it to the team" not in reply

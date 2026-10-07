@@ -2800,6 +2800,40 @@ async def not_our_trade(db, organization, said: str, contact=None) -> str | None
     return verdict.job
 
 
+def asks_for_unlisted_work(organization, text: str) -> bool:
+    """They are asking for something, and it is nothing this business listed."""
+    from app.services import scope
+
+    return bool(asks_for_work(text) and scope.names_unmatched_work(organization, text))
+
+
+def unsure_what_we_do_reply(organization) -> str | None:
+    """For a request we cannot place, answered with what this business does do.
+
+    Used where the scope check could not run - the shared model budget is
+    real and a 429 is ordinary - and the message plainly asks for something
+    the business's own list does not carry. Without this, "can you groom my
+    dog?" was answered "I don't have that to hand, I've passed it to the
+    team": a person spent on a question the shop answers itself, which is
+    the fault `not_our_trade` exists to prevent, reappearing whenever the
+    model was busy.
+
+    It does not refuse. Naming the work would need a reading we do not have,
+    and a list is short for every business, so it says what is certain - what
+    this one does - and asks.
+    """
+    from app.services import scope
+
+    services = scope.offered_services(organization)
+    if not services:
+        return None
+    named = ", ".join(services[:6])
+    return (
+        f"I'm not sure that's something we do. We do {named}. "
+        "Is it one of those, or tell me what you need and I will check."
+    )
+
+
 def not_our_trade_reply(job: str) -> str:
     """What to say back. Written here, not by the model, and not by a colleague.
 
@@ -2824,6 +2858,29 @@ async def _decide(
     # said it - a booking three messages later needs the address from the first.
     note_where(contact, text)
     note_details(contact, text)
+    # A number or an address that cannot be used is said so on the turn it
+    # arrives, not held until a booking turn. Left to the model, "my phone is
+    # 123 and my email is ali@" was answered "Got it - phone 123 and email
+    # ali@ recorded", which is a claim about our records and was false.
+    # Only where the turn is nothing else: with a time named or an offer
+    # waiting, the detail is raised beside the times by the gates below, which
+    # is what a customer correcting one number mid-booking needs.
+    unusable_now = contact_problems(text)
+    if (
+        unusable_now
+        and not remembered_offer(contact)
+        and not wants_booking(text)
+        and not named_time(text, zone).any
+    ):
+        return TurnResult(
+            refusal=Refusal("contact_invalid", " ".join(unusable_now)),
+            prompt_block=(
+                "=== CONTACT DETAILS ===\n"
+                f"What they just gave cannot be used: {' '.join(unusable_now)} "
+                "Nothing has been saved and nothing can be booked until it is corrected. "
+                "Ask for it again. Do NOT say it has been recorded, noted or saved."
+            ),
+        )
     # What they have said about the job and the place, for the scope check.
     # What goes into the window the scope check reads. "dog grooming please"
     # is not shaped like a request and names a trade, so the first message
@@ -3468,7 +3525,12 @@ async def _outside_scope(
     # names another. "Seattle, Washington" for a business "in Miami / South
     # Florida" is out whether or not a model is answering.
     elsewhere = None
-    if visit_kind == "onsite" and in_area(organization, where) is None and verdict.area_fits is None:
+    # Not conditional on what the model said about the area. It used to run
+    # only where the model had no opinion, so a model answering "area_fits:
+    # true" switched off the one check that does not need it: a business that
+    # names Florida, a job in Washington, and nothing in common. In production
+    # that offered six Miami consultation slots for a property in Seattle.
+    if visit_kind == "onsite" and in_area(organization, where) is None:
         ours = scope.states_the_business_names(organization)
         theirs = scope.states_in(said or "") | scope.states_in(where or "")
         if ours and theirs and not (ours & theirs):

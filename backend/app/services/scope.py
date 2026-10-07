@@ -133,6 +133,17 @@ def what_the_business_says(organization, documents=()) -> str:
         listed("Services, as its documents state them", proposed.get("services"))
     if not config.get("service_areas"):
         listed("Areas, as its documents state them", proposed.get("service_areas"))
+    # Both fields, and the rules first. `sales_prompt` is how the agent is
+    # told to behave - "greet the customer by name, never quote a price" -
+    # while `product_rules` is what the business actually does and where.
+    # Only the first was read here, so Constrivo's "Miami / South Florida
+    # area (Dania Beach, FL)" and its whole services list were invisible:
+    # the business named no state, the check that compares its states to the
+    # customer's could never fire, and a property in Seattle was offered six
+    # Miami consultation slots.
+    rules = str(getattr(organization, "product_rules", "") or "").strip()
+    if rules:
+        parts.append("What it does and where: " + rules[:2000])
     description = str(getattr(organization, "sales_prompt", "") or "").strip()
     if description:
         parts.append("In its own description: " + description[:2000])
