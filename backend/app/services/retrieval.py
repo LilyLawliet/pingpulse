@@ -148,9 +148,15 @@ def as_prompt_block(chunks: list[RetrievedChunk]) -> str:
     """Render retrieved chunks for the prompt, or an empty string if none."""
     if not chunks:
         return ""
+    from app.services import taught
+
     lines = ["=== KNOWLEDGE BASE (use only if relevant) ==="]
     for chunk in chunks:
-        lines.append(f"[{chunk.title}] {chunk.content}")
+        # A taught answer's title is already the question it answers, so the
+        # framing stored with it repeats the title and gives the model a
+        # phrase to parrot: "The answer is: ..." reached a customer. The
+        # words the shop typed are what belongs here.
+        lines.append(f"[{chunk.title}] {taught.spoken(chunk.content)}")
     return "\n".join(lines)
 
 

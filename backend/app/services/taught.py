@@ -33,6 +33,52 @@ logger = logging.getLogger(__name__)
 
 SOURCE = "Answers you taught"
 
+#: A taught passage is stored as the question and the answer together, so
+#: retrieval finds it from a customer asking the same thing in different
+#: words. The framing is for the search, not for the customer - and it was
+#: being read out with the answer. In the evidence run of 7 October, "so how
+#: much will the kitchen cost me?" came back "When a customer asks: How much
+#: will my project cost? ...", and "where is my order?" came back "The answer
+#: is: Financing is through GreenSky ...".
+#:
+#: The same fault as a knowledge base full of `OPEN:` and `DISCOVER:` lines:
+#: a passage written for one reader, read aloud to another.
+_SCAFFOLD = re.compile(
+    r"^\s*when a customer asks\s*:.*?(?:\n|\s)the answer is\s*:\s*",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def spoken(content: str) -> str:
+    """A stored passage as a customer should hear it, without the framing."""
+    return parts(content)[1]
+
+
+def parts(content: str) -> tuple[str | None, str]:
+    """The question this passage was taught against, and the shop's answer.
+
+    Both halves matter and they matter to different readers. The question is
+    the half a customer's words actually match - "how much will the kitchen
+    cost me?" shares nothing with "we don't publish fixed prices" - so it is
+    what the passage should be *found* by. The answer is the only half that
+    should be read out.
+
+    Returning them separately is what lets a passage be searched on one and
+    quoted from the other. Stripping the framing on its own made every taught
+    answer unreachable, which is the same fault the other way round.
+
+    An ordinary passage has no question: `(None, the passage)`.
+    """
+    text = content or ""
+    match = _SCAFFOLD.match(text)
+    if not match:
+        return None, text
+    answer = text[match.end():].strip()
+    if not answer:
+        return None, text
+    question = match.group(0).strip()
+    return question, answer
+
 WAITING = "waiting"
 SUGGESTED = "suggested"
 TAUGHT = "taught"

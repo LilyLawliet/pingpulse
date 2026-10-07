@@ -342,13 +342,35 @@ def relevant_sentences(message: str, knowledge_chunks: list[Any], limit: int = 2
     wrote are used, never a table row, and nothing at all is better than
     something unrelated.
     """
+    from app.services import taught
+
     asked = _stems(message)
     if not asked:
         return ""
+
+    def overlap(text: str) -> int:
+        words = _stems(text)
+        return sum(1 for stem in asked if any(word.startswith(stem) for word in words))
+
     scored: list[tuple[int, int, str]] = []
     order = 0
     for chunk in knowledge_chunks:
-        body = _from_a_sentence_start(getattr(chunk, "content", "") or "")
+        content = getattr(chunk, "content", "") or ""
+        # An answer somebody at the shop typed, against the question it was
+        # taught for. The question is what the customer's words match - "how
+        # much will the kitchen cost me?" shares nothing with "we don't
+        # publish fixed prices" - and the answer is the only half to read
+        # out. Both were being read out: a customer asking exactly that got
+        # "When a customer asks: How much will my project cost? ...".
+        question, answer = taught.parts(content)
+        if question is not None:
+            hits = overlap(question) + overlap(answer)
+            if hits:
+                scored.append((hits, -order, " ".join(answer.split())))
+            order += 1
+            continue
+
+        body = _from_a_sentence_start(content)
         for sentence in re.split(offers_text.SENTENCE_END + r"|\n+", body):
             sentence = sentence.strip()
             if len(sentence.split()) < 5 or "|" in sentence or not sentence[:1].isalnum():
