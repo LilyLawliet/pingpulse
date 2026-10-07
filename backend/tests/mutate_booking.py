@@ -76,6 +76,7 @@ ANALYZER = pathlib.Path("app/services/analyzer.py")
 TASKS = pathlib.Path("app/tasks.py")
 ORDERS = pathlib.Path("app/services/orders.py")
 SCOPE = pathlib.Path("app/services/scope.py")
+TAUGHT = pathlib.Path("app/services/taught.py")
 
 
 # Read and write the bytes ourselves. read_text() decodes with the platform's
@@ -93,7 +94,7 @@ def _read(path: pathlib.Path) -> tuple[str, str]:
 
 SOURCES: dict[pathlib.Path, str] = {}
 ENDINGS: dict[pathlib.Path, str] = {}
-for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS, SCOPE):
+for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS, SCOPE, TAUGHT):
     SOURCES[_path], ENDINGS[_path] = _read(_path)
 
 
@@ -301,6 +302,23 @@ MUTATIONS = {
     "a booking need not be confirmed": (LLM,
         "    done = \"booked\" if did_book else \"moved\" if did_move else \"cancelled\" if did_cancel else None",
         "    done = None",
+    ),
+    # The three the evidence run of 7 October found. Each one reproduces with
+    # the model answering normally, so each one is here rather than in a note.
+    "a refusal can never be lifted": (
+        "    first_ask = scope.worth_checking(said) and (\n",
+        "    first_ask = scope.refused_job(contact) is None and scope.worth_checking(said) and (\n",
+    ),
+    "the words that are not work are not stemmed": (SCOPE,
+        "_NOT_WORK = frozenset(\n"
+        "    {word for word in _ARRANGING | _ORDINARY}\n"
+        "    | {_stem(word) for word in _ARRANGING | _ORDINARY}\n"
+        ")\n",
+        "_NOT_WORK = _ARRANGING\n",
+    ),
+    "a taught answer is read out with its framing": (TAUGHT,
+        "    match = _SCAFFOLD.match(text)\n",
+        "    match = None\n",
     ),
 }
 
