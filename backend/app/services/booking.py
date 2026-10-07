@@ -2879,8 +2879,16 @@ async def _decide(
         and not wants_booking(text)
         and not named_time(text, zone).any
     ):
+        # Joined as a sentence. Run together they read as one broken line:
+        # 'the email address "ali@" is not a valid email address the phone
+        # number "123" is not a usable phone number'.
+        said_plainly = " and ".join(unusable_now)
+        said_plainly = said_plainly[:1].upper() + said_plainly[1:]
         return TurnResult(
-            refusal=Refusal("contact_invalid", " ".join(unusable_now)),
+            refusal=Refusal(
+                "contact_invalid",
+                f"{said_plainly.rstrip('.')}. Nothing is saved until I have one that works.",
+            ),
             prompt_block=(
                 "=== CONTACT DETAILS ===\n"
                 f"What they just gave cannot be used: {' '.join(unusable_now)} "
