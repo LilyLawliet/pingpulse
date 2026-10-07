@@ -1035,3 +1035,34 @@ def test_work_the_shop_never_listed_gets_a_no_not_a_maybe():
 
     # The model is told the same thing.
     assert "yes, no, or" in llm_service.READING_CUSTOMERS.lower()
+
+
+def test_work_the_shop_does_list_gets_a_yes_with_no_model():
+    """The other half of the clean no. A job and an address in one sentence.
+
+    "I want a kitchen remodel at 1200 Brickell Ave, Miami" came back "Thanks,
+    I've got that" - an answer to the address, leaving the thing they asked
+    unanswered. A customer rarely names a job on its own, and the job is the
+    question.
+    """
+    from app.services import sales_policy
+
+    shop = Organization(name="Constrivo Group", sales_prompt=CONSTRIVO)
+    shop.product_rules = CONSTRIVO
+
+    said = sales_policy.deterministic_reply(
+        {}, [], shop, message="I want a kitchen remodel at 1200 Brickell Ave, Miami"
+    )
+    assert said.lower().startswith("yes"), said
+    assert "kitchen remodeling" in said, said
+
+    # An address on its own is still an address, not a yes to anything.
+    only_address = sales_policy.deterministic_reply(
+        {}, [], shop, message="The address is 1200 Brickell Ave, Miami FL 33131"
+    )
+    assert not only_address.lower().startswith("yes"), only_address
+    assert "got that" in only_address.lower(), only_address
+
+    # And a customer working through a booking is not opening a new request.
+    picking = sales_policy.deterministic_reply({}, [], shop, message="the first one please")
+    assert not picking.lower().startswith("yes - we do"), picking

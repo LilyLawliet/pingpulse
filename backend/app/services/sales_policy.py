@@ -250,6 +250,20 @@ def deterministic_reply(
     # not something to alert a colleague about either. Blocking the document
     # search without answering sent "the address is 1200 Brickell Ave" to
     # "I don't have that to hand, I've passed it to the team".
+    # They named work this business does. Say yes to it before anything else
+    # here looks at the message, because a customer rarely names a job on its
+    # own: "I want a kitchen remodel at 1200 Brickell Ave, Miami" is a job
+    # and an address in one sentence, and it came back "Thanks, I've got
+    # that" - an answer to the address, leaving the thing they actually asked
+    # unanswered. A yes is one of the three answers a customer can be given
+    # and this is where it is given with no model to phrase it.
+    matched = _service_they_named(organization, message)
+    if matched:
+        return (
+            f"Yes - we do {matched}. Tell me a bit more about what you need and "
+            "I can get you booked in for a free consultation."
+        )
+
     if _is_them_giving_details(message):
         return "Thanks, I've got that. What else can I help you with?"
 
@@ -271,6 +285,25 @@ def deterministic_reply(
         "Could you tell me a little more about what you're looking for, and I'll "
         "check exactly what we have?"
     )
+
+
+def _service_they_named(organization, message: str) -> str | None:
+    """A service of this business's own that the message asks for.
+
+    Read off the message against the business's own list, with no model
+    involved, so a customer who says what they want hears yes whether or not
+    a model answered. Only where they are asking for it: "the first one
+    please" during a booking for a kitchen remodel names no new work, and
+    neither does a customer working through times.
+    """
+    from app.services import booking, scope
+
+    try:
+        if not booking.asks_for_work(message or ""):
+            return None
+        return scope.matched_service(organization, message or "")
+    except Exception:  # noqa: BLE001 - a reply never depends on this working
+        return None
 
 
 def _is_them_giving_details(message: str) -> bool:
