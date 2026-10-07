@@ -43,10 +43,15 @@ SOURCE = "Answers you taught"
 #:
 #: The same fault as a knowledge base full of `OPEN:` and `DISCOVER:` lines:
 #: a passage written for one reader, read aloud to another.
-_SCAFFOLD = re.compile(
-    r"^\s*when a customer asks\s*:.*?(?:\n|\s)the answer is\s*:\s*",
-    re.IGNORECASE | re.DOTALL,
-)
+#:
+#: Each half is matched on its own, because a long answer is chunked before
+#: it is embedded and the two can end up in different chunks. The first fix
+#: looked for both together and missed exactly that: the passage behind
+#: "The answer is: Financing is through GreenSky..." had been split, so the
+#: chunk the customer was shown began at the marker with no question above
+#: it. Either half, at the start of a passage, is framing.
+_ASKED = re.compile(r"^\s*when a customer asks\s*:[^\n]*\n?", re.IGNORECASE)
+_ANSWERED = re.compile(r"^\s*the answer is\s*:\s*", re.IGNORECASE)
 
 
 def spoken(content: str) -> str:
@@ -67,17 +72,24 @@ def parts(content: str) -> tuple[str | None, str]:
     quoted from the other. Stripping the framing on its own made every taught
     answer unreachable, which is the same fault the other way round.
 
-    An ordinary passage has no question: `(None, the passage)`.
+    An ordinary passage has no question: `(None, the passage)`. So does a
+    chunk that carries only the answer half - there is no question in it to
+    be found by - but its marker is still taken off, because the second half
+    of the pair is read out exactly like the first.
     """
     text = content or ""
-    match = _SCAFFOLD.match(text)
-    if not match:
-        return None, text
-    answer = text[match.end():].strip()
-    if not answer:
-        return None, text
-    question = match.group(0).strip()
-    return question, answer
+    question = None
+    asked = _ASKED.match(text)
+    if asked:
+        question = asked.group(0).strip()
+        text = text[asked.end():]
+    answered = _ANSWERED.match(text)
+    if answered:
+        text = text[answered.end():]
+    body = text.strip()
+    if not body:
+        return None, content or ""
+    return question, body
 
 WAITING = "waiting"
 SUGGESTED = "suggested"

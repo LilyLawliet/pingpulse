@@ -316,9 +316,20 @@ MUTATIONS = {
         ")\n",
         "_NOT_WORK = _ARRANGING\n",
     ),
-    "a taught answer is read out with its framing": (TAUGHT,
-        "    match = _SCAFFOLD.match(text)\n",
-        "    match = None\n",
+    # Both halves of the taught framing, separately. A long answer is chunked
+    # before it is embedded, so the question and the answer can land in
+    # different chunks and each marker has to come off on its own.
+    "a taught question is read out as an answer": (TAUGHT,
+        "    asked = _ASKED.match(text)\n",
+        "    asked = None\n",
+    ),
+    "a split taught answer keeps its marker": (TAUGHT,
+        "    answered = _ANSWERED.match(text)\n",
+        "    answered = None\n",
+    ),
+    "a standing refusal answers every turn": (
+        "        (asks_for_work(said) and names_ours) or scope.remembered(contact) is None\n",
+        "        asks_for_work(said) or scope.remembered(contact) is None\n",
     ),
 }
 

@@ -889,3 +889,41 @@ def test_a_taught_answer_is_not_quoted_as_one_of_the_business_terms():
     for rule in rules:
         assert "the answer is" not in rule.lower(), rule
         assert "when a customer asks" not in rule.lower(), rule
+
+
+def test_a_split_taught_answer_still_loses_its_marker():
+    """A long answer is chunked before it is embedded, and the pair comes apart.
+
+    The chunk the customer was shown on 7 October began "The answer is:
+    Financing is through GreenSky..." with no question above it - the two
+    halves had landed in different chunks. A first fix looked for both
+    together and so matched neither. Either half, at the start of a passage,
+    is framing.
+    """
+    from app.services import offers, retrieval, sales_policy, taught
+
+    class Split:
+        title = "What is the interest rate on the financing?"
+        content = (
+            "The answer is: Financing is through GreenSky, and GreenSky sets the terms. "
+            "We don't publish rates, loan amounts, repayment lengths or eligibility "
+            "criteria. A deposit of 25% is taken before work starts."
+        )
+
+    class QuestionOnly:
+        title = "What are your opening hours?"
+        content = "When a customer asks: What are your opening hours?"
+
+    assert not taught.spoken(Split.content).lower().startswith("the answer is")
+    assert "greensky" in taught.spoken(Split.content).lower()
+    # A chunk holding only the question keeps its words rather than going empty.
+    assert taught.spoken(QuestionOnly.content)
+
+    said = sales_policy.relevant_sentences("what rate do you charge?", [Split()])
+    assert "the answer is" not in said.lower(), said
+
+    block = retrieval.as_prompt_block([Split()])
+    assert "the answer is" not in block.lower(), block
+
+    for rule in offers.rules_for("do I pay a deposit?", [("Financing", Split.content)]):
+        assert "the answer is" not in rule.lower(), rule

@@ -370,7 +370,10 @@ def relevant_sentences(message: str, knowledge_chunks: list[Any], limit: int = 2
             order += 1
             continue
 
-        body = _from_a_sentence_start(content)
+        # `answer` rather than `content`: a chunk holding only the second half
+        # of a taught pair has no question to be found by, but its marker
+        # still has to come off before anything in it is read out.
+        body = _from_a_sentence_start(answer)
         for sentence in re.split(offers_text.SENTENCE_END + r"|\n+", body):
             sentence = sentence.strip()
             if len(sentence.split()) < 5 or "|" in sentence or not sentence[:1].isalnum():
