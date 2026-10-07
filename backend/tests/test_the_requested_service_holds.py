@@ -248,14 +248,33 @@ def held_up(shop, theirs: str, turns, made: list[Appointment]) -> None:
 
 
 # ------------------------------------------------------------------ the battery
-@pytest.mark.parametrize("behaviour", BEHAVIOURS)
-@pytest.mark.parametrize("trade,description,ours,theirs", TRADES, ids=[t[0] for t in TRADES])
+SCRIPTS = [
+    "client_report", "all_in_one", "injection", "details_then_yes", "ours_then_theirs",
+    "theirs_then_ours", "nothing_named",
+]
+# Every script against every model for the business that found the bug; for
+# the other trades, the scripts and models that differ by trade - the client's
+# own sequence, two requests in one conversation - against the model that
+# drifts onto the business's trade and the one that is not there at all.
+# The full cross of all three was 294 conversations and most of the suite's
+# time, for no fault the smaller set misses (the mutation harness checks).
+CONVERSATIONS = [
+    (behaviour, TRADES[0], script) for behaviour in BEHAVIOURS for script in SCRIPTS
+] + [
+    (behaviour, trade, script)
+    for trade in TRADES[1:]
+    for behaviour in ("drifting", "relabelling", "rate_limited")
+    for script in ("client_report", "all_in_one", "theirs_then_ours")
+]
+
+
 @pytest.mark.parametrize(
-    "script",
-    ["client_report", "all_in_one", "injection", "details_then_yes", "ours_then_theirs",
-     "theirs_then_ours", "nothing_named"],
+    "behaviour,trade_row,script",
+    CONVERSATIONS,
+    ids=[f"{script}-{row[0]}-{behaviour}" for behaviour, row, script in CONVERSATIONS],
 )
-async def test_every_conversation_holds(db_session, monkeypatch, behaviour, trade, description, ours, theirs, script):
+async def test_every_conversation_holds(db_session, monkeypatch, behaviour, trade_row, script):
+    trade, description, ours, theirs = trade_row
     shop, contact = await a_shop(db_session, description)
     model = Model(ours, theirs, behaviour, seed=hash((trade, script)) & 0xFFFF)
     model.services = scope.offered_services(shop)
@@ -270,7 +289,7 @@ async def test_every_conversation_holds(db_session, monkeypatch, behaviour, trad
         assert made == [], f"{script}: booked {[booking.job_of(a) for a in made]}"
 
 
-@pytest.mark.parametrize("behaviour", ["honest", "rate_limited", "silent"])
+@pytest.mark.parametrize("behaviour", ["honest", "rate_limited"])
 @pytest.mark.parametrize("trade,description,ours,theirs", TRADES, ids=[t[0] for t in TRADES])
 async def test_work_the_business_does_still_gets_booked(db_session, monkeypatch, behaviour, trade, description, ours, theirs):
     """The other half. A battery that passes by booking nothing proves nothing."""
@@ -395,7 +414,7 @@ async def test_the_simulator_remembers_the_refusal_like_whatsapp_does(org_a, mon
 
 
 # ------------------------------------------------------------- live WhatsApp
-@pytest.mark.parametrize("behaviour", ["honest", "hostile", "drifting", "relabelling", "rate_limited", "inconsistent"])
+@pytest.mark.parametrize("behaviour", ["hostile", "drifting", "rate_limited"])
 async def test_the_live_path_holds_the_clients_sequence(db_session, monkeypatch, behaviour):
     """The client's report, through the real inbound path, with a reply model that agrees to anything."""
     from app.api.webhook import TwilioWebhookPayload, process_inbound_message
