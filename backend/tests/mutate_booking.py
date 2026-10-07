@@ -35,6 +35,9 @@ are refused rather than reported:
 
 runs the files as one pytest call per fault: the question CI asks is whether
 anything catches each one, not which file does, and it is six times faster.
+
+Faults run side by side, one per CPU core, each in its own copy of the
+backend; --jobs=N sets how many.
 """
 import os, shutil, subprocess, sys, pathlib, tempfile
 
@@ -99,8 +102,8 @@ for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS, SCOPE, TAUGHT, OPS):
     SOURCES[_path], ENDINGS[_path] = _read(_path)
 
 
-def _write(path: pathlib.Path, text: str) -> None:
-    path.write_bytes(text.replace("\n", ENDINGS[path]).encode("utf-8"))
+def _write(path: pathlib.Path, text: str, base: pathlib.Path = pathlib.Path(".")) -> None:
+    (base / path).write_bytes(text.replace("\n", ENDINGS[path]).encode("utf-8"))
 
 MUTATIONS = {
     "holding_off ignored": (
@@ -394,17 +397,24 @@ MUTATIONS = {
 
 args = sys.argv[1:]
 together = "--together" in args
-files = [a for a in args if a != "--together"]
+# One fault per worker at a time, each worker in its own copy of the backend.
+# Run one after another, sixty-odd faults against the booking tests took an
+# hour on a slow laptop and left seven of Cloud Build's eight cores idle.
+jobs = os.cpu_count() or 1
+for arg in list(args):
+    if arg.startswith("--jobs="):
+        jobs = max(1, int(arg.split("=", 1)[1]))
+files = [a for a in args if a != "--together" and not a.startswith("--jobs=")]
 if not files:
     sys.exit("name the test files to run against each fault")
 # One column per file, or one column for all of them.
 columns = {" + ".join(pathlib.Path(f).stem for f in files): files} if together else {f: [f] for f in files}
 
 
-def _run(paths):
+def _run(paths, cwd: pathlib.Path = pathlib.Path(".")):
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", *paths],
-        capture_output=True, text=True,
+        capture_output=True, text=True, cwd=cwd,
     )
 
 
@@ -416,27 +426,59 @@ for column, paths in columns.items():
             "every fault would read as caught. Fix it first.\n" + baseline.stdout[-2000:]
         )
 
-results = {}
-try:
-    for name, mutation in MUTATIONS.items():
-        path, old, new = mutation if len(mutation) == 3 else (SRC, *mutation)
-        original = SOURCES[path]
-        count = original.count(old)
-        if count != 1:
-            sys.exit(f"mutation {name!r} matches {count} times in {path}; fix the harness")
+for name, mutation in MUTATIONS.items():
+    path, old, new = mutation if len(mutation) == 3 else (SRC, *mutation)
+    count = SOURCES[path].count(old)
+    if count != 1:
+        sys.exit(f"mutation {name!r} matches {count} times in {path}; fix the harness")
+
+import concurrent.futures
+import queue
+import threading
+
+# Each worker owns one copy for the whole run, and only ever writes inside it.
+workers: "queue.Queue[pathlib.Path]" = queue.Queue()
+for index in range(min(jobs, len(MUTATIONS))):
+    copy = _ROOT / f"worker-{index}" / "backend"
+    shutil.copytree(pathlib.Path("."), copy)
+    workers.put(copy)
+_broken: list[str] = []
+_lock = threading.Lock()
+
+
+def _try(name: str) -> dict:
+    mutation = MUTATIONS[name]
+    path, old, new = mutation if len(mutation) == 3 else (SRC, *mutation)
+    base = workers.get()
+    try:
         for other, text in SOURCES.items():
-            _write(other, text)
-        _write(path, original.replace(old, new))
+            _write(other, text, base)
+        _write(path, SOURCES[path].replace(old, new), base)
         row = {}
         for column, paths in columns.items():
-            proc = _run(paths)
+            proc = _run(paths, base)
             if proc.returncode not in (0, 1):
-                raise SystemExit(
-                    f"{column} could not run with {name!r} applied (pytest exit {proc.returncode}); "
-                    "that is a broken mutation, not a caught one.\n" + proc.stdout[-2000:]
-                )
+                with _lock:
+                    _broken.append(
+                        f"{column} could not run with {name!r} applied (pytest exit {proc.returncode}); "
+                        "that is a broken mutation, not a caught one.\n" + proc.stdout[-2000:]
+                    )
+                row[column] = "broken"
+                continue
             row[column] = "RED" if proc.returncode == 1 else "green"
-        results[name] = row
+        return row
+    finally:
+        workers.put(base)
+
+
+results = {}
+try:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers.qsize()) as pool:
+        rows = dict(zip(MUTATIONS, pool.map(_try, MUTATIONS)))
+    # In the order they are written, whatever order they finished in.
+    results = {name: rows[name] for name in MUTATIONS}
+    if _broken:
+        raise SystemExit("\n\n".join(_broken))
 finally:
     # Nothing here is the working tree, so this is tidiness rather than repair.
     os.chdir(pathlib.Path.home())

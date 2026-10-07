@@ -27,11 +27,24 @@ steps:
         set -euo pipefail
         pip install --quiet --no-cache-dir -r backend/requirements.txt
         cd backend && python -m pytest tests -q
+
+  # The faults run as their own step, beside the suite rather than after it,
+  # and spread across all eight cores of the machine below.
+  - id: faults
+    name: python:3.13-slim
+    entrypoint: bash
+    waitFor: ['-']
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        pip install --quiet --no-cache-dir -r backend/requirements.txt
+        cd backend
         # A green suite says nothing about what it would catch. Each booking
         # fault fixed since the September 30 readiness test is put back, one
         # at a time, and the build fails if no test notices one. It caught
         # coverage moving during a rewrite that left the suite green.
-        python tests/mutate_booking.py --together \
+        python tests/mutate_booking.py --together --jobs=8 \
           tests/test_readiness_replay.py tests/test_readiness_report.py \
           tests/test_confirm_before_booking.py tests/test_sandbox_booking.py \
           tests/test_calendar_turns.py tests/test_booking_conversation.py \
