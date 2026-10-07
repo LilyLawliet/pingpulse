@@ -213,7 +213,13 @@ async def test_a_booking_the_analyzer_reads_as_wanting_a_person_is_not_handed_ov
 async def test_work_the_shop_does_not_do_is_answered_not_handed_on(org_a, monkeypatch):
     """The Test agent is where a shop finds this out, so it must answer the
     same way the live chat does: "we do not do that", not "shall I pass you
-    to the team?"."""
+    to the team?".
+
+    Said by the backend, not by a model asked to phrase a refusal - the model
+    here is willing to agree to the grooming and never gets asked. A sandbox
+    that reached a model where the live chat does not would be showing the
+    shop a different agent from the one its customers get.
+    """
     from app.services import analyzer, understanding
 
     session = _session_for(org_a._client)
@@ -231,7 +237,7 @@ async def test_work_the_shop_does_not_do_is_answered_not_handed_on(org_a, monkey
 
     async def groq(prompt):
         prompts.append(prompt)
-        return "We don't do dog grooming, I'm afraid."
+        return "Of course, we'd be delighted to groom your dog!"
 
     monkeypatch.setattr("app.api.operations.analyzer.analyse", reads_it)
     monkeypatch.setattr(understanding, "structured", scope_says)
@@ -243,8 +249,8 @@ async def test_work_the_shop_does_not_do_is_answered_not_handed_on(org_a, monkey
         )
     ).json()
     assert body.get("provider") != "handover", body
-    assert prompts, "no reply was generated"
-    assert "NOT something this business does" in prompts[-1], prompts[-1]
+    assert "dog grooming is not something we do" in (body.get("reply") or "").lower(), body
+    assert prompts == [], "a model was asked to phrase a refusal"
 
 
 @pytest.mark.asyncio

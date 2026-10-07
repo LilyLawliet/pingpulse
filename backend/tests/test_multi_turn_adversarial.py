@@ -738,3 +738,97 @@ def test_giving_your_own_details_is_not_asking_for_a_person():
     assert booking.heard_as_a_person(wants, "my phone is +1 305 555 0144") is False
     # The explicit words for a person are checked before this and still work.
     assert booking.heard_as_a_person(wants, "I want to speak to a manager") is True
+
+
+async def test_work_named_after_a_refusal_lifts_it(constrivo, db_session, hostile_model):
+    """The other order of the same conversation, and the one that was broken.
+
+    Caught in the evidence run of 7 October, not by a test: the dog was
+    refused on turn one and a kitchen remodel asked for on turn eleven, and
+    five turns later "what times do you have?" still came back "dog grooming
+    is not something we do".
+
+    `scope.for_contact` lifts a refusal correctly and is tested directly. It
+    was simply never asked: the booking turn only ran the scope check when
+    there was *no* standing refusal, so the one message that could lift one -
+    them naming different work - was the one message that never reached it.
+    A customer who asked wrongly once could not come back.
+    """
+    shop, contact = constrivo
+    chat = Conversation(db_session, shop, contact)
+
+    await chat.say("I need my dog groomed, can you come out?")
+    assert scope.refused_job(contact) == "dog grooming"
+
+    await chat.say("Actually, I want a kitchen remodel instead.")
+    assert scope.accepted_job(contact), "the work they do was not written down"
+    assert scope.refused_job(contact) is None, "naming other work did not lift the refusal"
+
+    turn = await chat.say("what times do you have?")
+    assert "not something we do" not in (turn.reply or turn.plain_reply(shop) or "").lower()
+    assert turn.offered, "no times for work the shop does, after a refusal was lifted"
+
+
+async def test_a_time_outside_hours_is_refused_by_the_diary_not_re_asked(
+    constrivo, db_session, monkeypatch
+):
+    """"I want a bathroom remodel" then "can you come at 3am tomorrow?".
+
+    The evidence run of 7 October answered the second with "before I can
+    offer you a time I need to know what work you need" - a question the
+    customer had answered one message earlier. The hours are the reason to
+    say no, and the diary knows them without asking anybody.
+    """
+    from app.services import understanding
+
+    async def rate_limited(prompt, timeout):
+        raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(understanding, "structured", rate_limited)
+    shop, contact = constrivo
+    chat = Conversation(db_session, shop, contact)
+
+    await chat.say("I want a bathroom remodel")
+    assert scope.accepted_job(contact), "the work they named was not written down"
+
+    turn = await chat.say("can you come at 3am tomorrow?")
+    assert turn.refusal is None or turn.refusal.reason != "needs_job", (
+        "a customer who had said what they wanted was asked again"
+    )
+    assert not turn.performed, "3am was acted on"
+    assert turn.appointment is None, "3am was booked"
+
+
+def test_a_taught_answer_is_read_out_without_its_framing():
+    """What the shop typed, not the shape it is stored in.
+
+    A taught answer is kept as "When a customer asks: <q>\nThe answer is:
+    <a>" so that retrieval finds it from a customer asking the same thing in
+    other words. In the evidence run of 7 October both halves of that framing
+    were read out: "so how much will the kitchen cost me?" was answered "When
+    a customer asks: How much will my project cost? ...".
+    """
+    from app.services import retrieval, sales_policy, taught
+
+    class Chunk:
+        title = "How much will my project cost?"
+        content = (
+            "When a customer asks: How much will my project cost?\n"
+            "The answer is: We don't publish fixed prices - every project is priced "
+            "individually after a free consultation."
+        )
+
+    said = sales_policy.relevant_sentences("how much will the kitchen cost me?", [Chunk()])
+    assert said, "the taught answer was not used at all"
+    assert "when a customer asks" not in said.lower()
+    assert "the answer is" not in said.lower()
+    assert "we don't publish fixed prices" in said.lower()
+
+    block = retrieval.as_prompt_block([Chunk()])
+    assert "when a customer asks" not in block.lower()
+    assert "we don't publish fixed prices" in block.lower()
+
+    # An ordinary passage is untouched.
+    assert taught.spoken("Our warranty is two to five years.") == (
+        "Our warranty is two to five years."
+    )

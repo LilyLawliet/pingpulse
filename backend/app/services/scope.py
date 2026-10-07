@@ -259,6 +259,51 @@ _ARRANGING = frozenset({
     "me", "us", "you", "please", "thanks", "confirm", "yes", "no", "ok",
 })
 
+#: Grammar. Words that carry a sentence rather than name anything, in any
+#: trade. They are not part of `_ARRANGING` because they have nothing to do
+#: with times; they are here because a leftover word was being read as the
+#: customer naming work, and the leftover was usually a modal verb.
+#:
+#: "can you come at 3am tomorrow?" stemmed to {can, come, you, tomorrow}.
+#: Three of those were already known to be about arranging a time and "can"
+#: was not, so one modal verb was read as a request for something the shop
+#: does not do - and a customer who had asked for a bathroom remodel one
+#: message earlier was asked again what work they needed. Seen in the
+#: evidence run of 7 October.
+#:
+#: Nothing here names work anywhere, so the list is the same for a builder, a
+#: shoemaker and a print shop. A word that could be a trade in some business
+#: ("will", "can" as in canning) is left in all the same: the cost of being
+#: wrong here is that the agent offers a time instead of asking a question,
+#: and whether the work is supported is settled elsewhere and not by this.
+_ORDINARY = frozenset({
+    "a", "an", "the", "and", "or", "but", "if", "so", "then", "that", "those",
+    "these", "there", "here", "it", "its", "is", "are", "was", "were", "be",
+    "been", "being", "do", "does", "did", "done", "doing", "can", "could",
+    "will", "would", "shall", "should", "might", "must", "have", "has", "had",
+    "get", "got", "getting", "need", "needs", "needed", "want", "wants",
+    "wanted", "like", "i", "my", "mine", "we", "our", "ours", "your",
+    "yours", "they", "them", "their", "he", "she", "him", "her", "his",
+    "what", "when", "where", "who", "whom", "how", "why", "which",
+    "some", "any", "all", "more", "much", "many", "very", "just", "also",
+    "too", "now", "about", "for", "with", "from", "to", "of", "on", "at",
+    "by", "as", "into", "up", "down", "again", "still", "back", "around",
+    "hi", "hello", "hey", "thank", "sorry", "sure", "maybe", "actually",
+    "possible", "possibly", "help", "helping", "work", "works", "job", "jobs",
+    "service", "services", "quote", "price", "prices", "cost", "costs",
+})
+
+#: Everything that is not the customer naming work, in both the form it is
+#: written here and the form `_stems` reduces it to. A message is stemmed
+#: before it is compared, so "morning" arrives as "morn" and matched nothing:
+#: "how about tomorrow morning?" was read as naming work, off a list that
+#: contained the word "morning". Stemming the list as well closes that for
+#: every word in it rather than for the one that was noticed.
+_NOT_WORK = frozenset(
+    {word for word in _ARRANGING | _ORDINARY}
+    | {_stem(word) for word in _ARRANGING | _ORDINARY}
+)
+
 
 def names_unmatched_work(organization, text: str) -> bool:
     """They have named something, and it is nothing this business wrote down.
@@ -276,8 +321,8 @@ def names_unmatched_work(organization, text: str) -> bool:
     services = offered_services(organization)
     if not services:
         return False
-    wanted = {word for word in _stems(text) if word not in _ARRANGING}
-    wanted = {word for word in wanted if _stem(word) not in _ARRANGING}
+    wanted = {word for word in _stems(text) if word not in _NOT_WORK}
+    wanted = {word for word in wanted if _stem(word) not in _NOT_WORK}
     if not wanted:
         return False  # nothing but arranging a time: not a new request
     if any(_stems(service) & wanted for service in services):
@@ -319,7 +364,7 @@ def matched_service(organization, text: str) -> str | None:
     record, so three turns later the agent asked a customer who had already
     said what they wanted what work they needed.
     """
-    wanted = {word for word in _stems(text) if word not in _ARRANGING}
+    wanted = {word for word in _stems(text) if word not in _NOT_WORK}
     if not wanted:
         return None
     services = offered_services(organization)

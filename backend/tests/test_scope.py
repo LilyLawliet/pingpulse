@@ -263,7 +263,15 @@ async def test_the_question_does_not_overwrite_a_booking_in_the_same_chat(
 
 async def test_the_webhook_answers_it_instead_of_offering_a_colleague(db_session, monkeypatch):
     """End to end: the reading says "they want a person", the scope says "we do not
-    do that", and the customer is told so rather than asked if they would like one."""
+    do that", and the customer is told so rather than asked if they would like one.
+
+    The telling is the backend's own, which is what this asserts. It used to
+    be the model's: the refusal was put in the prompt and a model was asked to
+    phrase it, and a model told to say no nicely has said "I've penciled you
+    in for a 3 pm consultation" on the turn after. A refusal is one of the six
+    hard stops, so no model is asked and the words are fixed - `provider:
+    booking`, `latency_ms: 0`, and nothing to go wrong.
+    """
     from app.api.webhook import process_inbound_message
     from app.models import CRMContact, Organization
     from app.schemas import GenerationResult, TwilioWebhookPayload
@@ -284,7 +292,10 @@ async def test_the_webhook_answers_it_instead_of_offering_a_colleague(db_session
     )
     await db_session.flush()
 
+    sent = []
+
     async def fake_send(self, to_number, body, media_urls=None, sender=None):
+        sent.append(body)
         return True, "SM_out"
 
     async def reads_it(history, message, stage):
@@ -296,7 +307,8 @@ async def test_the_webhook_answers_it_instead_of_offering_a_colleague(db_session
     async def generate(*args, **kwargs):
         prompts.append(kwargs.get("knowledge") or "")
         return GenerationResult(
-            provider="test", text="We don't do dog grooming.", prompt_used="", latency_ms=1
+            provider="test", text="Actually we'd love to groom your dog!",
+            prompt_used="", latency_ms=1,
         )
 
     monkeypatch.setattr(TwilioService, "send_whatsapp", fake_send)
@@ -309,5 +321,10 @@ async def test_the_webhook_answers_it_instead_of_offering_a_colleague(db_session
     )
     result = await process_inbound_message(db_session, payload)
     assert result.get("status") != "asked_about_handover", result
-    assert prompts, "no reply was generated"
-    assert any("NOT something this business does" in str(p) for p in prompts), prompts
+    assert sent, "nothing was sent to the customer"
+    assert "dog grooming is not something we do" in sent[0].lower(), sent
+    # No model was asked, so the one above - which would have agreed to it -
+    # never got the chance.
+    assert prompts == [], "a model was asked to phrase a refusal"
+    assert result.get("provider") == "booking", result
+    assert result.get("latency_ms") == 0, result

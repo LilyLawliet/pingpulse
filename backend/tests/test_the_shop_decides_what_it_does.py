@@ -246,3 +246,35 @@ def test_the_customers_own_sentence_decides_the_language():
 )
 def test_the_list_still_decides_in_its_own_language(job, said):
     assert scope.supports(constrivo(), job, said) is False
+
+
+# Grammar is not a trade. A message made only of modal verbs, pronouns and
+# words for arranging a time names no work in any industry, and reading one
+# as a request stops a booking: "can you come at 3am tomorrow?" left `can`
+# behind and the customer was asked what work they needed, one message after
+# they had said. Checked against every trade above, because a stopword list
+# that only suits a builder is the thing this file exists to prevent.
+ARRANGING_ONLY = [
+    "can you come at 3am tomorrow?",
+    "what times do you have?",
+    "could we do it next week?",
+    "would Tuesday at 2pm work for you?",
+    "how about tomorrow morning?",
+    "is that ok?",
+    "yes please, book me in",
+]
+
+
+@pytest.mark.parametrize("said", ARRANGING_ONLY, ids=[s[:22] for s in ARRANGING_ONLY])
+@pytest.mark.parametrize(
+    "trade,description",
+    [(row[0], row[1]) for row in OTHER_TRADES] + [("remodelling", None)],
+    ids=[row[0] for row in OTHER_TRADES] + ["remodelling"],
+)
+def test_arranging_a_time_is_never_read_as_naming_work(trade, description, said):
+    shop = constrivo() if description is None else Organization(
+        name=trade, sales_prompt=description, product_rules=""
+    )
+    assert scope.names_unmatched_work(shop, said) is False, (
+        f"{trade}: {said!r} was read as asking for work the shop does not do"
+    )

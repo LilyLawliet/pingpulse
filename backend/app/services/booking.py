@@ -3070,8 +3070,20 @@ async def _decide(
     # The first time somebody says what they are after, however they phrase it.
     # "dog grooming please" is not shaped like a request and still names one,
     # so the check is asked once per conversation on the first message with
-    # anything in it, and after that only when they are asking about times.
-    first_ask = scope.refused_job(contact) is None and scope.worth_checking(said) and (
+    # anything in it, and after that whenever they ask for work or ask about
+    # times.
+    #
+    # It used to be skipped entirely while a refusal stood, which made a
+    # refusal permanent: the one message that can lift one is the customer
+    # naming different work, and that was the one message that never reached
+    # the check. Found in the evidence run of 7 October - the dog refused on
+    # turn one, a kitchen remodel asked for on turn eleven, and "what times do
+    # you have?" still answered "dog grooming is not something we do" five
+    # turns after that. `for_contact` already answers once per message and
+    # will not let a turn that names no job clear anything, so asking it on
+    # every request costs nothing and is the only way back for a customer who
+    # asked wrongly once.
+    first_ask = scope.worth_checking(said) and (
         asks_for_work(said) or scope.remembered(contact) is None
     )
     if existing is None and (about_times or first_ask):
