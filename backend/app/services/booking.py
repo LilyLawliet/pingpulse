@@ -2344,6 +2344,23 @@ def unusable_details(contact) -> list[str]:
     return list(held.values()) if isinstance(held, dict) else list(held)
 
 
+def as_one_sentence(bad: list[str]) -> str:
+    """The unusable details as one sentence a customer can read.
+
+    Each item is already a whole sentence - 'the email address "ali@" is not
+    a valid email address' - so a caller that joins them with "; " and puts
+    the result behind "we need" writes 'Before this can be booked we need the
+    email address "ali@" is not a valid email address'. The October 7 capture
+    caught that going to the page twice, from the two places that build the
+    agent's instruction and the customer's sentence out of the same string.
+    The instruction may read as a list; this is the half somebody reads.
+    """
+    joined = " and ".join(part.strip().rstrip(".") for part in bad if part.strip())
+    if not joined:
+        return ""
+    return joined[:1].upper() + joined[1:]
+
+
 def _missing_for_booking(organization, contact) -> list:
     """Configured questions still unanswered, which hold a booking back.
 
@@ -2996,15 +3013,10 @@ async def _decide(
         and not wants_booking(text)
         and not named_time(text, zone).any
     ):
-        # Joined as a sentence. Run together they read as one broken line:
-        # 'the email address "ali@" is not a valid email address the phone
-        # number "123" is not a usable phone number'.
-        said_plainly = " and ".join(unusable_now)
-        said_plainly = said_plainly[:1].upper() + said_plainly[1:]
         return TurnResult(
             refusal=Refusal(
                 "contact_invalid",
-                f"{said_plainly.rstrip('.')}. Nothing is saved until I have one that works.",
+                f"{as_one_sentence(unusable_now)}. Nothing is saved until I have one that works.",
             ),
             prompt_block=(
                 "=== CONTACT DETAILS ===\n"
@@ -3436,11 +3448,18 @@ async def _decide(
             # Still missing. Said so, rather than leaving the reply to its own
             # devices: with nothing about the booking in front of it, the model
             # is what wrote "your visit is confirmed" for a visit with no address.
-            ask = (
-                "the street address of the property, with the unit or apartment number if there is one"
-                if waiting_on == "address"
-                else "; ".join(unusable_details(contact)) + " - a correct one"
-            )
+            if waiting_on == "address":
+                ask = (
+                    "the street address of the property, with the unit or "
+                    "apartment number if there is one"
+                )
+                says = f"Before this can be booked I need {ask}."
+            else:
+                ask = "; ".join(unusable_details(contact)) + " - a correct one"
+                says = (
+                    f"{as_one_sentence(unusable_details(contact))}. "
+                    "Nothing is booked until I have one that works."
+                )
             return TurnResult(
                 prompt_block=(
                     "=== APPOINTMENTS ===\n"
@@ -3450,7 +3469,7 @@ async def _decide(
                 ),
                 refusal=Refusal(
                     "needs_address" if waiting_on == "address" else "contact_invalid",
-                    f"Before this can be booked we need {ask}.",
+                    says,
                 ),
                 offered=[offered[0]],
             )
@@ -3577,15 +3596,23 @@ async def _propose_booking(
     if requires_address(organization, visit_kind) and not location:
         # Everything missing asked for at once: asking only for the address
         # let a phone of "123" and an email of "not-an-email" go unremarked.
-        problem = ("address", (
+        problem = (
+            "address",
             "the street address of the property, with the unit or apartment "
             "number if there is one"
-            + (f"; and also: {'; '.join(bad)} - ask for a correct one" if bad else "")
-        ))
+            + (f"; and also: {'; '.join(bad)} - ask for a correct one" if bad else ""),
+            "Before this can be booked I need the street address of the property, "
+            "with the unit or apartment number if there is one."
+            + (f" Also: {as_one_sentence(bad)}." if bad else ""),
+        )
     elif bad:
-        problem = ("details", "; ".join(bad) + " - ask for a correct one")
+        problem = (
+            "details",
+            "; ".join(bad) + " - ask for a correct one",
+            f"{as_one_sentence(bad)}. Nothing is booked until I have one that works.",
+        )
     if problem is not None and refusal is None:
-        needs, ask = problem
+        needs, ask, says = problem
         remember_offer(contact, [target], OFFER_BOOK, needs=needs, **keep)
         return TurnResult(
             prompt_block=(
@@ -3597,7 +3624,7 @@ async def _propose_booking(
             ),
             refusal=Refusal(
                 "needs_address" if needs == "address" else "contact_invalid",
-                f"Before this can be booked we need {ask}.",
+                says,
             ),
             offered=[target],
         )
