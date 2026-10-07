@@ -1956,7 +1956,14 @@ def heard_as_a_person(analysis: dict, text: str) -> bool:
     is loose in the same way the meeting flag was. The explicit words for a
     person ("a real person", "a human", "the manager") are checked before
     this and still hand over whatever else the message says.
+
+    Nor when they are handing over their own details. "My name is Ali, phone
+    +1 305 555 0144, email ali@example.com" was read as asking for a person -
+    a name and a number look like one - and the customer who had just given
+    the shop everything it needed was asked whether to fetch a colleague.
     """
+    if contact_details_in(text):
+        return False
     return bool(analysis.get("wants_person")) and not wants_booking(text)
 
 

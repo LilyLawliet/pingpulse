@@ -724,3 +724,17 @@ def test_giving_details_is_not_a_question_for_a_colleague():
         assert "Dania Beach" not in reply
         assert reply and "I've got that" in reply
         assert "passed it to the team" not in reply
+
+
+def test_giving_your_own_details_is_not_asking_for_a_person():
+    """A name and a number look like a person. They are the customer's own.
+
+    "My name is Ali, phone +1 305 555 0144, email ali@example.com" was read
+    as wanting a human, so the customer who had just handed the shop
+    everything it needed was asked whether to fetch a colleague.
+    """
+    wants = {"wants_person": True}
+    assert booking.heard_as_a_person(wants, "my name is Ali, phone +1 305 555 0144, email ali@example.com") is False
+    assert booking.heard_as_a_person(wants, "my phone is +1 305 555 0144") is False
+    # The explicit words for a person are checked before this and still work.
+    assert booking.heard_as_a_person(wants, "I want to speak to a manager") is True
