@@ -92,7 +92,10 @@ async def test_times_are_offered_one_is_booked_and_nothing_is_kept(org_a, monkey
     monkeypatch.setattr(llm_service, "_call_groq", with_the_time)
     again = await say("yes", picked["booking_state"])
     assert again["booking"]["performed"] == "booked", again
-    assert again["reply"].startswith("Done - your "), "a reply that states the booking is used as written"
+    # Even a model reply that states it correctly is not used: a booking is
+    # confirmed from its row, because a model asked to phrase "it is BOOKED"
+    # also answered with "shall I confirm that for you?".
+    assert again["reply"].startswith("You're booked:"), again["reply"]
 
     kept = await session.scalar(
         select(func.count(Appointment.id)).where(Appointment.organization_id == organization.id)

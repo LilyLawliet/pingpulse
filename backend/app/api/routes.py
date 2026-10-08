@@ -120,10 +120,14 @@ async def contact_messages(
             Message.contact_id == contact_id,
             CRMContact.organization_id == tenant.id,
         )
-        .order_by(Message.created_at)
+        # The newest `limit`, shown oldest first. Taking the first `limit` cut
+        # a long conversation off at its start, so the messages staff most
+        # needed - the latest, handover acknowledgements included - were the
+        # ones missing from the inbox.
+        .order_by(Message.created_at.desc())
         .limit(limit)
     )
-    return result.scalars().all()
+    return list(reversed(result.scalars().all()))
 
 
 @router.get("/messages", response_model=list[MessageOut])

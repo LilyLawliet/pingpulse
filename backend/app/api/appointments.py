@@ -388,6 +388,11 @@ async def cancel_appointment(
                 "to book another.",
             )
         await invites.send_for(db, tenant.organization, cancelled=existing)
+        back = await pipelines.stage_after_cancel(db, tenant.id, contact)
+        if back:
+            previous = contact.pipeline_stage
+            contact.pipeline_stage = back
+            await analytics.record_move(db, contact, back, from_stage=previous, source=STAGE_OPERATOR)
     await db.commit()
     cancelled = await _appointment(db, tenant, existing.id)
     await _changed(db, tenant, contact.id if contact is not None else None)

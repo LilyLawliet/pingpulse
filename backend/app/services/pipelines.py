@@ -27,7 +27,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 
-from app.models import DEFAULT_PIPELINE, CRMContact, TenantPipeline
+from app.models import DEFAULT_PIPELINE, CRMContact, StageEvent, TenantPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -192,3 +192,39 @@ async def stage_with_outcome(db, organization_id, outcome: str) -> str | None:
         if stage.outcome == outcome:
             return stage.key
     return None
+
+
+async def stage_after_cancel(db, organization_id, contact) -> str | None:
+    """Where a lead goes when the appointment that booked it is cancelled, or None.
+
+    The column meaning "booked" says an appointment exists. Cancelling one left
+    the lead there - the calendar said free, the board said "Estimate
+    scheduled" - because stages only ever moved forward and nothing undid the
+    move a booking made.
+
+    Only a lead still standing in that column, with no other live appointment,
+    is moved. It goes back to where it was before it was booked, as the stage
+    history recorded it; with no history, to the column before "booked" on this
+    board. A lead somebody has since moved elsewhere is not in the column, and
+    is left where they put it.
+    """
+    from app.services import booking
+
+    booked = await stage_with_outcome(db, organization_id, "booked")
+    if not booked or contact is None or contact.pipeline_stage != booked:
+        return None
+    if await booking.upcoming_for(db, contact.id) is not None:
+        return None
+    board = [stage.key for stage in await stages_for(db, organization_id)]
+    last = (
+        await db.execute(
+            select(StageEvent)
+            .where(StageEvent.contact_id == contact.id, StageEvent.to_stage == booked)
+            .order_by(StageEvent.at.desc())
+            .limit(1)
+        )
+    ).scalars().first()
+    if last is not None and last.from_stage in board and last.from_stage != booked:
+        return last.from_stage
+    index = board.index(booked) if booked in board else 0
+    return board[index - 1] if index > 0 else None

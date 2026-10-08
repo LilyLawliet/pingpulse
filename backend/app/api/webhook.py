@@ -8,6 +8,7 @@ retrieval, persistence — is filtered by that organization.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import hmac
 import logging
 import re
@@ -537,7 +538,76 @@ async def _hand_over(db, organization, contact, channel, phone_number, body, esc
     }
 
 
+# --------------------------------------------------------------------------
+# One delivery, one reply
+# --------------------------------------------------------------------------
+# The claim this turn holds on its message id, so a failure can let it go.
+_CLAIMED: contextvars.ContextVar[str | None] = contextvars.ContextVar("inbound_claim", default=None)
+CLAIM_SECONDS = 24 * 60 * 60
+
+
+def _claim_key(organization_id, message_sid: str) -> str:
+    return f"inbound:{organization_id}:{message_sid}"
+
+
+async def claim_delivery(organization_id, message_sid: str | None) -> bool | None:
+    """Is this the first time this exact delivery has been seen? Atomic.
+
+    True: it is ours to answer. False: another request already took it.
+    None: it cannot be told here (no id, no Redis), and `already_handled`
+    decides as before.
+
+    `already_handled` alone could not stop the duplicate it was written for.
+    It looks for the stored inbound row, and that row is not committed until
+    the reply has been sent - so Twilio redelivering a slow turn, which it
+    does as a matter of course, found nothing and answered the customer a
+    second time. A set-if-absent on the id is decided the moment the second
+    delivery arrives, whatever the first is still doing.
+    """
+    if not message_sid:
+        return None
+    try:
+        async with outbox._connection() as client:
+            claimed = await client.set(
+                _claim_key(organization_id, message_sid), "1", nx=True, ex=CLAIM_SECONDS
+            )
+    except Exception as exc:  # noqa: BLE001 - the stored-row check still runs
+        logger.info("could not claim %s: %s", message_sid, exc)
+        return None
+    if claimed:
+        _CLAIMED.set(_claim_key(organization_id, message_sid))
+    return bool(claimed)
+
+
+async def _release_claim() -> None:
+    """Let a delivery that failed part-way be answered when it is sent again."""
+    key = _CLAIMED.get()
+    if not key:
+        return
+    try:
+        async with outbox._connection() as client:
+            await client.delete(key)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("could not release %s: %s", key, exc)
+
+
 async def process_inbound_message(
+    db: AsyncSession,
+    payload: TwilioWebhookPayload,
+    channel: ChannelConfig | None = None,
+) -> dict:
+    """One inbound message, answered at most once however often it is delivered."""
+    token = _CLAIMED.set(None)
+    try:
+        return await _process_inbound_message(db, payload, channel)
+    except BaseException:
+        await _release_claim()
+        raise
+    finally:
+        _CLAIMED.reset(token)
+
+
+async def _process_inbound_message(
     db: AsyncSession,
     payload: TwilioWebhookPayload,
     channel: ChannelConfig | None = None,
@@ -563,6 +633,12 @@ async def process_inbound_message(
             {"stage": "routing", "detail": f"No organization owns {payload.clean_to}"},
         )
         return {"error": "unrouted", "to": payload.clean_to}
+
+    # Claimed before anything slow - the media download and the image reading
+    # below both widen the window a redelivery arrives in.
+    if await claim_delivery(organization.id, payload.message_sid) is False:
+        logger.info("ignoring a repeat delivery of %s from %s", payload.message_sid, phone_number)
+        return {"status": "duplicate", "twilio_sid": payload.message_sid}
 
     raw_payload = payload.raw or {}
     contact, created = await _resolve_contact(
@@ -832,6 +908,7 @@ async def process_inbound_message(
     # What is known about the job and the one gap worth closing. Empty until a
     # slot has been filled or a tenant has configured slots, so a shop that
     # never touches this sees no change in how its agent answers.
+    booking.fill_from_record(organization, contact, await booking.upcoming_for(db, contact.id))
     job = qualification.as_prompt_block(organization, contact.qualification)
     if job:
         knowledge = "\n\n".join(filter(None, [knowledge, job]))
@@ -1049,6 +1126,16 @@ async def process_inbound_message(
     if order_turn.prompt_block and not order_turn.reply:
         knowledge = "\n\n".join(filter(None, [knowledge, order_turn.prompt_block]))
 
+    if (
+        not appointment_turn.reply
+        and appointment_turn.refusal is not None
+        and appointment_turn.refusal.reason == "needs_person"
+    ):
+        # Described twice and still not one of the business's services: a
+        # person decides, and is actually told before the customer hears so.
+        appointment_turn.reply = await unanswered.handle(
+            db, organization, contact, "whether this is work the business takes on", body
+        )
     if outside_trade and not appointment_turn.reply:
         # The answer is "we do not do that", and the backend can say it.
         # Handed to a model, it is a sentence the model is free to soften.
@@ -1377,6 +1464,11 @@ async def process_inbound_message(
         booked_stage = await pipelines.stage_with_outcome(db, organization.id, "booked")
         if booked_stage:
             new_stage = booked_stage
+    # And the one thing that takes it back out: that row, cancelled.
+    if appointment_turn.cancelled:
+        back = await pipelines.stage_after_cancel(db, organization.id, contact)
+        if back:
+            new_stage = back
     # The model reading a conversation as NEGOTIATION or CLOSED is an opinion
     # about a conversation, not a quote that went out or money that changed
     # hands. It was allowed to move the board into both, which is the same
@@ -1646,6 +1738,40 @@ async def whatsapp_webhook_probe():
 # --------------------------------------------------------------------------
 # Inbound from the WhatsApp Web bridge
 # --------------------------------------------------------------------------
+#: A session on a handset another organization holds. Set when it pairs.
+DUPLICATE_SESSION = "DUPLICATE"
+
+
+async def handset_held_elsewhere(db, channel, number) -> uuid.UUID | None:
+    """The organization that holds the phone this session is on, if not this one.
+
+    The holder is whichever channel registered the number first. Two
+    organizations can both have it stored - spelled "+92..." on one and
+    "92..." on the other, which the unique constraint does not see - and
+    that was the production case.
+    """
+    reported = whatsapp.normalise_number(str(number or ""))
+    if not reported:
+        return None
+    rows = (
+        await db.execute(
+            select(ChannelConfig.organization_id, ChannelConfig.created_at, ChannelConfig.id).where(
+                ChannelConfig.channel == channel.channel,
+                ChannelConfig.phone_number.in_((reported, reported.lstrip("+"))),
+            )
+        )
+    ).all()
+    # Ties broken by id, so exactly one of them answers whatever the clock said.
+    holders = sorted(
+        (created, str(channel_id), organization_id)
+        for organization_id, created, channel_id in rows
+        if created is not None
+    )
+    if not holders:
+        return None
+    holder = holders[0][2]
+    return None if holder == channel.organization_id else holder
+
 @router.post("/qr-inbound")
 async def qr_session_inbound(request: Request, db: AsyncSession = Depends(get_db)):
     """A message that arrived over a paired WhatsApp Web session.
@@ -1720,6 +1846,22 @@ async def qr_session_inbound(request: Request, db: AsyncSession = Depends(get_db
         )
         return {"ok": False, "error": "unknown session"}
 
+    # One handset, one business. Every session linked to a phone receives
+    # every message to it, so a second organization paired to the same phone
+    # answered each customer a second time, from its own diary and its own
+    # memory: one confirmed an appointment the other said did not exist, one
+    # asked again for what the other already had, and each inbox held only
+    # its own half of the conversation. The business that holds the number
+    # answers; any other session on it is silent until it is unpaired.
+    if channel is not None:
+        holder = await handset_held_elsewhere(db, channel, body.get("to"))
+        if holder is not None:
+            logger.warning(
+                "session %s is on %s, which organization %s holds; not answering",
+                channel.id, body.get("to"), holder,
+            )
+            return {"ok": False, "error": "handset held by another organization"}
+
     try:
         result = await process_inbound_message(db, payload, channel=channel)
         return {"ok": True, "delivered": result.get("delivered")}
@@ -1783,15 +1925,7 @@ async def qr_session_status(request: Request, db: AsyncSession = Depends(get_db)
         # exactly the production case, where the channel already had the
         # number and the clash was invisible from this row alone.
         if reported:
-            owner = await db.scalar(
-                select(ChannelConfig.organization_id).where(
-                    ChannelConfig.channel == channel.channel,
-                    ChannelConfig.phone_number.in_(
-                        (reported, reported.lstrip("+"))
-                    ),
-                    ChannelConfig.id != channel.id,
-                )
-            )
+            owner = await handset_held_elsewhere(db, channel, reported)
             if owner is not None:
                 # Another organization holds this handset. The session is
                 # genuinely up and genuinely receiving, so the status stays
@@ -1804,11 +1938,15 @@ async def qr_session_status(request: Request, db: AsyncSession = Depends(get_db)
                 # that does not retry.
                 logger.warning(
                     "channel %s paired with %s, which organization %s already holds; "
-                    "leaving the number where it is",
+                    "leaving the number where it is and not answering on it",
                     channel.id,
                     reported,
                     owner,
                 )
+                # Not AUTHENTICATED: this session will not answer anybody (see
+                # qr_session_inbound), and the page has to say why.
+                channel.session_status = DUPLICATE_SESSION
+                await db.commit()
             else:
                 channel.phone_number = reported
                 try:

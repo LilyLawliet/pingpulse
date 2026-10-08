@@ -1748,7 +1748,10 @@ class TurnResult:
         if self.reply:
             return self.reply
         if self.booked and self.appointment is not None:
-            return f"You're booked: {describe(self.appointment)}."
+            said = f"You're booked: {describe(self.appointment)}."
+            if self.meeting:
+                said += f" Add it to your calendar: {add_to_calendar_link(organization, self.appointment)}"
+            return said
         if self.moved and self.appointment is not None:
             return f"Done - it's moved. Your booking is now: {describe(self.appointment)}."
         if self.cancelled and self.appointment is not None:
@@ -2361,6 +2364,57 @@ def as_one_sentence(bad: list[str]) -> str:
     return joined[:1].upper() + joined[1:]
 
 
+# What a qualification question is asking about, read off its own name and
+# wording - "job_type", "what they want done", "address of the property",
+# "when they need it" - whatever a shop called it.
+# Narrow on purpose: "how big the job is" is scope and "whether this person
+# can approve the work" is the decision maker, and neither is answered by the
+# name of the job.
+_ASKS_WHAT = re.compile(
+    r"\b(job[ _]?type|type of (job|work)|service( needed| wanted)?$|^service|what they want)",
+    re.IGNORECASE,
+)
+_ASKS_WHERE = re.compile(r"\b(location|address|where|town|city)\b", re.IGNORECASE)
+_ASKS_WHEN = re.compile(r"\b(timeline|when|date)\b", re.IGNORECASE)
+
+
+def fill_from_record(organization, contact, appointment=None) -> None:
+    """Answer the qualification questions the record already answers.
+
+    Those answers were only ever written by a model reading the conversation
+    after the reply had gone, and under a rate limit that reading never
+    happened: the job, the address and the booked time were all on record,
+    and the prompt still said "Still unknown: what they want done" - so the
+    agent asked a customer with a booked kitchen remodel what work they
+    needed. What the backend itself holds is written in first. Only adds.
+    """
+    from app.services import qualification
+
+    being_booked = scope.what_is_being_booked(organization, contact)
+    job = being_booked.service or scope.accepted_job(contact)
+    if not job and not being_booked.refused:
+        # Nothing matched, but they did describe it: their own words answer
+        # "what work do you need", and asking it again is what they reported.
+        described = [
+            said for said in (getattr(contact, "contact_metadata", None) or {}).get(scope.SAID_KEY) or []
+            if scope._work_words(organization, said)
+        ]
+        job = described[0][:200] if described else None
+    where = visit_address(contact) or job_place(contact)
+    when = describe(appointment) if appointment is not None else None
+    learned: dict[str, str] = {}
+    for name, asks in qualification.slots_for(organization):
+        said = f"{name.replace('_', ' ')} {asks}"
+        if job and _ASKS_WHAT.search(said):
+            learned[name] = job
+        elif where and _ASKS_WHERE.search(said):
+            learned[name] = where
+        elif when and _ASKS_WHEN.search(said):
+            learned[name] = when
+    if learned:
+        contact.qualification = qualification.merge(getattr(contact, "qualification", None), learned)
+
+
 def _missing_for_booking(organization, contact) -> list:
     """Configured questions still unanswered, which hold a booking back.
 
@@ -2384,6 +2438,7 @@ def _missing_for_booking(organization, contact) -> list:
     if not config["qualification_slots"]:
         return []
 
+    fill_from_record(organization, contact)
     return qualification.missing(organization, contact.qualification)
 
 
@@ -2406,6 +2461,12 @@ async def handle_turn(
     # weigh up, and asking it to phrase a no is how "I've penciled you in for a
     # 3 pm consultation" was said on a turn that had refused the job.
     if turn.reply is None and turn.refusal is not None and turn.refusal.reason in HARD_STOPS:
+        turn.reply = turn.plain_reply(organization)
+    # Done is said from the row, too. Handed "it is BOOKED" and asked to
+    # phrase it, the model answered a booking it had just made with "shall I
+    # confirm that for you?" - and a customer who says yes to that is saying
+    # yes to nothing, while being told something different from the record.
+    if turn.reply is None and turn.performed and turn.appointment is not None:
         turn.reply = turn.plain_reply(organization)
     return turn
 
@@ -2889,7 +2950,9 @@ def unsure_what_we_do_reply(organization) -> str | None:
     return f"That isn't on our list of services. We do {named}. Which of those do you need?"
 
 
-def _no_service(organization, contact, being_booked, reason: str = "outside_services") -> TurnResult:
+def _no_service(
+    organization, contact, being_booked, reason: str = "outside_services", text: str = ""
+) -> TurnResult:
     """No booking, because nothing it could be for is something this business does.
 
     `reason` is "outside_scope" when this is the answer to a yes, so the two
@@ -2908,16 +2971,68 @@ def _no_service(organization, contact, being_booked, reason: str = "outside_serv
             ),
             refusal=Refusal(reason, f"{job} is not something this business offers."),
         )
-    ask = unsure_what_we_do_reply(organization) or (
-        "Before I can offer you a time I need to know what work you need. "
-        "What can we help you with?"
+    return _ask_what_work(
+        organization, contact, text, named=bool(scope.accepted_job(contact))
     )
+
+
+#: How many times in a row they have been asked what work they need.
+ASKED_WORK_KEY = "asked_what_work"
+
+
+def _asked_what_work(contact, times: int | None) -> None:
+    metadata = dict(getattr(contact, "contact_metadata", None) or {})
+    if times:
+        metadata[ASKED_WORK_KEY] = times
+    else:
+        metadata.pop(ASKED_WORK_KEY, None)
+    contact.contact_metadata = metadata
+
+
+def _ask_what_work(organization, contact, text: str = "", *, named: bool) -> TurnResult:
+    """Ask which of the business's services they need - once.
+
+    A customer who describes real work in words the list does not carry -
+    "new cabinets and countertops" to a list saying "kitchen remodeling" -
+    was asked what work they needed, answered with the same words, and was
+    asked again, turn after turn, with their service, scope, address and time
+    all given. The second time they describe work we still cannot place, it
+    goes to a person: the list cannot settle it, and asking again will not.
+    """
+    asked = int((getattr(contact, "contact_metadata", None) or {}).get(ASKED_WORK_KEY) or 0)
+    if asked and scope._work_words(organization, text or ""):
+        _asked_what_work(contact, None)
+        return TurnResult(
+            refusal=Refusal("needs_person", "Whether this is work the business takes needs a person."),
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                "They have described the work twice and it is not one of the services this "
+                "business lists, so a person has to decide. Nothing is booked and no time "
+                "may be offered."
+            ),
+        )
+    _asked_what_work(contact, asked + 1)
+    unsure = unsure_what_we_do_reply(organization) if named else None
+    if unsure:
+        return TurnResult(
+            refusal=Refusal("needs_job", unsure),
+            prompt_block=(
+                "=== APPOINTMENTS ===\n"
+                "They have asked for something this business did not list. Say what it "
+                "does do and ask which one they need. Do NOT offer a time and do NOT say "
+                "anything is booked."
+            ),
+        )
     return TurnResult(
-        refusal=Refusal("needs_job", ask),
+        refusal=Refusal(
+            "needs_job",
+            "Before I can offer you a time I need to know what work you need. "
+            "What can we help you with?",
+        ),
         prompt_block=(
             "=== APPOINTMENTS ===\n"
-            "Nothing they have asked for is one of the services this business lists, so "
-            "nothing can be booked. Say what it does do and ask which one they need. Do "
+            "They are asking about a time, but nothing on record says what work they "
+            "want, and this business only books work it does. Ask what they need. Do "
             "NOT offer a time and do NOT say anything is booked."
         ),
     )
@@ -3281,30 +3396,9 @@ async def _decide(
         # business and "my countertops are cracked" is real work it does not
         # name - but it can say what is certain, which is what this business
         # does do. Nothing is refused and no time is offered either way.
-        if asks_for_work(text) and scope.names_unmatched_work(organization, text):
-            unsure = unsure_what_we_do_reply(organization)
-            if unsure:
-                return TurnResult(
-                    refusal=Refusal("needs_job", unsure),
-                    prompt_block=(
-                        "=== APPOINTMENTS ===\n"
-                        "They have asked for something this business did not list. Say "
-                        "what it does do and ask whether it is one of those. Do NOT "
-                        "offer a time and do NOT say anything is booked."
-                    ),
-                )
-        return TurnResult(
-            refusal=Refusal(
-                "needs_job",
-                "Before I can offer you a time I need to know what work you need. "
-                "What can we help you with?",
-            ),
-            prompt_block=(
-                "=== APPOINTMENTS ===\n"
-                "They are asking about a time, but nothing on record says what work "
-                "they want, and this business only books work it does. Ask what they "
-                "need. Do NOT offer a time and do NOT say anything is booked."
-            ),
+        return _ask_what_work(
+            organization, contact, text,
+            named=asks_for_work(text) and scope.names_unmatched_work(organization, text),
         )
 
     # ------------------------------------------------------------ the past
@@ -3561,6 +3655,7 @@ async def _propose_booking(
         being_booked.refused or (being_booked.needs_job and not meeting)
     ):
         return _no_service(organization, contact, being_booked)
+    _asked_what_work(contact, None)
 
     # Everything the shop said it needs before sending somebody out.
     # A meeting is a conversation, not a van: the questions a shop asks

@@ -289,6 +289,9 @@ QUIET = "quiet hours"
 # it?" on Wednesday. Worse than noise - it tells them the business has lost
 # track of them.
 ALREADY_BOOKED = "already booked"
+#: A person has the conversation. The automatic sequence is the agent talking,
+#: and the agent has been told to stop.
+HANDED_OVER = "handed to a person"
 
 
 def refuse_followup(
@@ -320,6 +323,12 @@ def refuse_followup(
     # stop.
     if not consent.may_send(contact):
         return OPTED_OUT
+
+    # Handed over: the agent stopped answering, and a nudge queued before that
+    # is the agent talking again. A customer waiting for a person was sent
+    # "just checking in" hours later. An operator's own follow-up still goes.
+    if not manual and getattr(contact, "ai_enabled", True) is False:
+        return HANDED_OVER
 
     # The stage gate belongs to the automatic sequence: it is what stops the
     # agent nudging a conversation that was never warm. An operator asking for

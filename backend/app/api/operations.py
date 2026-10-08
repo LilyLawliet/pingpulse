@@ -925,6 +925,18 @@ async def simulate(
         )
         booking_reply = turn.plain_reply(organization)
         turn_reply = turn.reply
+        if not turn_reply and turn.refusal is not None and turn.refusal.reason == "needs_person":
+            # As live: a person decides, so the customer is told what a real
+            # conversation would tell them, and nobody is actually alerted here.
+            turn_reply = (
+                unanswered.passed_on(organization)
+                if await notifications.can_reach(db, organization)
+                else unanswered.reach_us(await unanswered.contact_line(db, tenant.id))
+            )
+            booking_note = (
+                "The work was described twice and is not on your services list. On WhatsApp "
+                "you would get an alert to decide whether you take it on."
+            )
         performed = turn.performed
         held_for_an_answer = (
             turn.refusal is not None and turn.refusal.reason in booking.STILL_WAITING

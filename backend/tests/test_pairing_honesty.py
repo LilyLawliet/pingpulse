@@ -193,20 +193,22 @@ async def test_a_pairing_onto_somebody_elses_number_does_not_500(
 
 
 @pytest.mark.asyncio
-async def test_a_clashing_pairing_is_still_a_live_session(
+async def test_a_clashing_pairing_is_recorded_as_a_duplicate_session(
     client, db_session, monkeypatch
 ):
-    """A duplicate number is not a dead phone.
+    """A second business paired to a phone another holds does not answer on it.
 
-    An earlier version of this fix recorded the clash as the session status,
-    which made the header read "Not connected" - while that session was
-    authenticated and still answering customers, because inbound routes by
-    session id and does not consult the number at all. Two separate facts, and
-    squeezing them into one field made the interface lie in a new direction.
+    This used to keep the clashing session AUTHENTICATED, because it was still
+    answering customers - and that was the fault: both businesses answered
+    every message from one phone, each from its own diary and memory. The
+    holder answers now and this one is silent, so its status says so.
     """
     monkeypatch.setattr(settings, "wa_qr_shared_secret", "the-secret")
 
-    await _channel(db_session, "First Shop", "923097209908")
+    from datetime import datetime, timedelta, timezone
+
+    first = await _channel(db_session, "First Shop", "923097209908")
+    first.created_at = datetime.now(timezone.utc) - timedelta(days=1)
     second = await _channel(db_session, "Second Shop", "+923097209908")
     await db_session.commit()
 
@@ -221,7 +223,7 @@ async def test_a_clashing_pairing_is_still_a_live_session(
     )
 
     await db_session.refresh(second)
-    assert second.session_status == "AUTHENTICATED"
+    assert second.session_status == "DUPLICATE"
     assert second.session_connected_at is not None
     # And it did not take the number off the organization that holds it.
     assert second.phone_number == "+923097209908"

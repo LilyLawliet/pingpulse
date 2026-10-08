@@ -308,6 +308,10 @@ async def _flag_number_conflicts(db: AsyncSession, channels) -> None:
             ),
             None,
         )
+        # Paired onto a phone another business holds: this channel never got
+        # the number, so the comparison above cannot see the clash from here.
+        if channel.number_conflict is None and (channel.session_status or "") == "DUPLICATE":
+            channel.number_conflict = "another business"
 
 
 @router.get("/active/channels", response_model=list[ChannelConfigOut])

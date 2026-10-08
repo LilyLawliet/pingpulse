@@ -332,8 +332,9 @@ export default function WhatsAppSettings({ onChanged }) {
                   <TriangleAlert size={12} className="mt-0.5 shrink-0" />
                   <span>
                     This phone is also connected to {channel.number_conflict}. One
-                    handset cannot serve two businesses — whichever scanned it last
-                    receives the messages. Disconnect it from the other one.
+                    handset cannot serve two businesses — only the one that connected
+                    it first answers; this one stays silent. Disconnect it from the
+                    one that should not have it.
                   </span>
                 </p>
               )}
@@ -376,8 +377,8 @@ export default function WhatsAppSettings({ onChanged }) {
                   {channel.session_status === 'AUTHENTICATED' && channel.number_conflict ? (
                     <p className="flex items-start gap-2 text-xs text-crit">
                       <TriangleAlert size={14} className="mt-0.5 shrink-0" /> Scanned, but this
-                      phone is already connected to {channel.number_conflict}. Messages go to
-                      whichever business scanned it last. Disconnect it there, or use another
+                      phone is already connected to {channel.number_conflict}, which keeps
+                      answering it; this business will not. Disconnect it there, or use another
                       phone here.
                     </p>
                   ) : channel.session_status === 'AUTHENTICATED' ? (

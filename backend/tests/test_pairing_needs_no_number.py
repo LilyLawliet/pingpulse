@@ -158,8 +158,8 @@ async def test_a_pairing_cannot_take_a_number_another_shop_holds(
 
     stored = await db_session.get(ChannelConfig, uuid.UUID(channel_id))
     await db_session.refresh(stored)
-    assert stored.session_status == "AUTHENTICATED", (
-        "the session really is up and really is receiving; saying otherwise "
-        "tells the operator their phone is dead"
+    assert stored.session_status == "DUPLICATE", (
+        "the session is linked but will not answer on a phone another shop "
+        "holds; the status has to say so"
     )
     assert stored.phone_number is None, "the number was taken from the shop that holds it"

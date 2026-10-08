@@ -280,7 +280,7 @@ export default function NotificationSettings({ onChanged }) {
         />
         <span className="mt-1 block text-2xs leading-relaxed text-faint">
           {state.email_available
-            ? 'Leave it empty for no email. Email needs nothing installed and no ' +
+            ? 'Left empty, alerts go to the account owner\'s email. Email needs nothing installed and no ' +
               'permission — it is the one that reaches you on a machine you have ' +
               'never opened this on.'
             : 'Email is not set up on this server, so this does nothing yet.'}

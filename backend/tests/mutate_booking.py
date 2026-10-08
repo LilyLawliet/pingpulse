@@ -81,6 +81,8 @@ ORDERS = pathlib.Path("app/services/orders.py")
 SCOPE = pathlib.Path("app/services/scope.py")
 TAUGHT = pathlib.Path("app/services/taught.py")
 OPS = pathlib.Path("app/api/operations.py")
+WEBHOOK = pathlib.Path("app/api/webhook.py")
+ROUTES = pathlib.Path("app/api/routes.py")
 
 
 # Read and write the bytes ourselves. read_text() decodes with the platform's
@@ -98,7 +100,7 @@ def _read(path: pathlib.Path) -> tuple[str, str]:
 
 SOURCES: dict[pathlib.Path, str] = {}
 ENDINGS: dict[pathlib.Path, str] = {}
-for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS, SCOPE, TAUGHT, OPS):
+for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS, SCOPE, TAUGHT, OPS, WEBHOOK, ROUTES):
     SOURCES[_path], ENDINGS[_path] = _read(_path)
 
 
@@ -305,10 +307,12 @@ MUTATIONS = {
         '    hits = sum(1 for marker in _ROMAN_URDU_WORDS if marker.search(lowered))',
         '    hits = sum(1 for marker in ROMAN_URDU_MARKERS if marker in f" {lowered} ")',
     ),
-    "a booking need not be confirmed": (LLM,
-        "    done = \"booked\" if did_book else \"moved\" if did_move else \"cancelled\" if did_cancel else None",
-        "    done = None",
-    ),
+    # "a booking need not be confirmed" lived here: it weakened the check that
+    # the model's confirmation states the booked time. A booking's
+    # confirmation is no longer written by the model at all - it is rendered
+    # from the row (booking.handle_turn) - so no test can reach that check on
+    # a booking any more, and the fault it stood for is covered by "a booking
+    # that succeeded is left to the model to phrase".
     # The three the evidence run of 7 October found. Each one reproduces with
     # the model answering normally, so each one is here rather than in a note.
     "a refusal can never be lifted": (
@@ -386,6 +390,41 @@ MUTATIONS = {
     ),
     "a reply may say yes to unlisted work while the model is busy": (
         "    if scope.agrees_to(reply, unlisted):\n",
+        "    if False:\n",
+    ),
+    # The live WhatsApp test of 8 October.
+    "a redelivered message is answered again": (WEBHOOK,
+        "    if await claim_delivery(organization.id, payload.message_sid) is False:\n",
+        "    if False:\n",
+    ),
+    "a second business on one handset answers too": (WEBHOOK,
+        "        holder = await handset_held_elsewhere(db, channel, body.get(\"to\"))\n",
+        "        holder = None\n",
+    ),
+    "a booking that succeeded is left to the model to phrase": (
+        "    if turn.reply is None and turn.performed and turn.appointment is not None:\n",
+        "    if False:\n",
+    ),
+    "a cancelled booking leaves the lead booked": (WEBHOOK,
+        "    if appointment_turn.cancelled:\n"
+        "        back = await pipelines.stage_after_cancel(db, organization.id, contact)\n",
+        "    if False:\n"
+        "        back = None\n",
+    ),
+    "the inbox shows the oldest messages, not the newest": (ROUTES,
+        "    return list(reversed(result.scalars().all()))\n",
+        "    return list(result.scalars().all())\n",
+    ),
+    "what work they need is asked forever": (
+        "    if asked and scope._work_words(organization, text or \"\"):\n",
+        "    if False:\n",
+    ),
+    "what the record holds is still asked for": (
+        "    if learned:\n        contact.qualification = qualification.merge(",
+        "    if False:\n        contact.qualification = qualification.merge(",
+    ),
+    "automatic nudges continue after a handover": (TASKS,
+        "    if not manual and getattr(contact, \"ai_enabled\", True) is False:\n",
         "    if False:\n",
     ),
     "the simulator checks scope on a contact with no memory": (OPS,
