@@ -70,6 +70,14 @@ DOCUMENTS = {
             "Read alongside the Client Overview"
         ),
     },
+    "PingPulse_Features_And_Setup": {
+        "title": "Everything It Does,<br>and What You Do",
+        "lede": "Every feature in plain language, and the twenty minutes of setup it needs from you.",
+        "meta": (
+            "Release 1.5.1 &nbsp;·&nbsp; 9 October 2026 &nbsp;·&nbsp; "
+            "For a new client, before the first customer message"
+        ),
+    },
 }
 DEFAULT_DOC = "PingPulse_Client_Overview"
 

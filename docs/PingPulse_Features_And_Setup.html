@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PingPulse — Client Overview and Upgrade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+@page {
+  size: A4;
+  margin: 18mm 16mm 16mm 16mm;
+  @bottom-center { content: counter(page); }
+}
+
+:root {
+  --ink: #16202b;
+  --muted: #5b6b7a;
+  --line: #dde5ea;
+  --accent: #0f9c78;
+  --accent-soft: #eefaf5;
+  --navy: #0b1118;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  color: var(--ink);
+  font-size: 10.5pt;
+  line-height: 1.62;
+  margin: 0;
+}
+
+/* ---- cover ------------------------------------------------------------ */
+.cover {
+  background: var(--navy);
+  color: #eef4f8;
+  padding: 26mm 18mm 20mm 18mm;
+  margin: -18mm -16mm 12mm -16mm;
+}
+.cover .mark {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 8.5pt;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: #2fd8a8;
+  margin-bottom: 10mm;
+}
+.cover h1 {
+  font-size: 30pt;
+  line-height: 1.12;
+  margin: 0 0 5mm 0;
+  color: #ffffff;
+  border: 0;
+  padding: 0;
+}
+.cover .lede { font-size: 12pt; color: #b9c8d4; margin: 0 0 8mm 0; }
+.cover .meta {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 8.5pt;
+  color: #7f93a3;
+  border-top: 1px solid #24313d;
+  padding-top: 4mm;
+}
+
+/* ---- headings --------------------------------------------------------- */
+h1, h2, h3 { font-weight: 600; color: var(--navy); }
+h2 {
+  font-size: 15.5pt;
+  margin: 10mm 0 3mm 0;
+  padding-bottom: 2mm;
+  border-bottom: 2px solid var(--accent);
+  break-after: avoid;
+}
+h3 {
+  font-size: 11.5pt;
+  margin: 6mm 0 1.5mm 0;
+  color: var(--accent);
+  break-after: avoid;
+}
+p { margin: 0 0 3mm 0; }
+strong { color: var(--navy); }
+
+ul, ol { margin: 0 0 3mm 0; padding-left: 5mm; }
+li { margin-bottom: 1.4mm; }
+
+/* ---- tables ----------------------------------------------------------- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 3mm 0 5mm 0;
+  font-size: 9.5pt;
+  break-inside: avoid;
+}
+th {
+  text-align: left;
+  background: var(--accent-soft);
+  color: var(--navy);
+  font-weight: 600;
+  padding: 2.2mm 3mm;
+  border-bottom: 1.5px solid var(--accent);
+}
+td { padding: 2.2mm 3mm; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+
+/* ---- callouts --------------------------------------------------------- */
+blockquote {
+  margin: 4mm 0;
+  padding: 3.5mm 5mm;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 3px 3px 0;
+  color: var(--ink);
+  break-inside: avoid;
+}
+blockquote p:last-child { margin-bottom: 0; }
+
+/* ---- screenshots ------------------------------------------------------ */
+figure {
+  margin: 4mm 0 6mm 0;
+  break-inside: avoid;
+}
+figure img {
+  width: 100%;
+  display: block;
+  border: 1px solid #c9d6df;
+  border-radius: 4px;
+}
+figcaption {
+  font-size: 8.5pt;
+  color: var(--muted);
+  margin-top: 1.8mm;
+  padding-left: 2mm;
+  border-left: 2px solid var(--accent);
+  line-height: 1.45;
+}
+
+/* Fallback frame, only used if an image file is missing. */
+.shot {
+  border: 1.5px dashed #b7c6d2;
+  border-radius: 5px;
+  background: repeating-linear-gradient(45deg, #f7fafb 0 8px, #f1f6f8 8px 16px);
+  padding: 16mm 8mm;
+  margin: 4mm 0;
+  text-align: center;
+  break-inside: avoid;
+}
+.shot .tag {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 7.5pt;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  display: block;
+  margin-bottom: 2.5mm;
+}
+.shot .caption { font-size: 10pt; color: var(--muted); font-weight: 500; }
+
+hr { border: 0; border-top: 1px solid var(--line); margin: 7mm 0; }
+
+/* Keep a heading with the text under it. */
+h2, h3 { page-break-after: avoid; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="mark">PingPulse · WhatsApp AI Sales Agent</div>
+  <h1>Everything It Does,<br>and What You Do</h1>
+  <p class="lede">Every feature in plain language, and the twenty minutes of setup it needs from you.</p>
+  <div class="meta">Release 1.5.1 &nbsp;·&nbsp; 9 October 2026 &nbsp;·&nbsp; For a new client, before the first customer message</div>
+</div>
+
+
+<p>PingPulse answers your customers on WhatsApp, around the clock, using your own
+prices and your own rules. It books appointments into your calendar, takes
+orders from your price list, and hands the conversation to you the moment it
+should.</p>
+<p>It is not a chatbot with a script. It reads the documents you upload and
+answers from those — and where it has nothing to go on, it says so and fetches
+you, rather than inventing an answer.</p>
+<hr />
+<h2>1. Answering customers</h2>
+<ul>
+<li><strong>Day and night, in their language.</strong> Customers write in whatever language
+  they use; the agent replies in the same one.</li>
+<li><strong>Prices come from your documents only.</strong> Upload a price list, catalogue or
+  brochure — PDF, Word, Excel or photographs — and it quotes from that. It is
+  forbidden from inventing a figure. If something is not in there, it says it
+  will check.</li>
+<li><strong>It answers each message once</strong>, however many times WhatsApp delivers it.</li>
+<li><strong>It sounds like you, if you want it to.</strong> Give it past replies you have
+  written and it drafts a description of your voice — and shows you that
+  description before anything changes.</li>
+<li><strong>One follow-up, once</strong>, if somebody goes quiet. You choose whether it is
+  sent at all, and nobody is messaged at three in the morning.</li>
+</ul>
+<h2>2. Saying yes, no, or "I'll get someone"</h2>
+<p>Asked whether you do something, there are three answers and no fourth:</p>
+<ul>
+<li><strong>Yes</strong> — it is on your list, and the conversation moves toward booking it.</li>
+<li><strong>No</strong> — it is not something you do. It says so plainly and names what you
+  <em>do</em> do, so the customer is not left guessing.</li>
+<li><strong>A person</strong> — asked for a human, it stops and tells you.</li>
+</ul>
+<p>It will not say "I'm not sure", "I think so", or "that might be possible".
+Those are not answers, and the software does not allow them.</p>
+<p>A "no" is remembered. If a customer asks for work you do not do, gives their
+details and then says <em>yes</em>, nothing is booked — because nothing was ever
+offered. The refusal lifts only when they ask for work you actually do.</p>
+<h2>3. Booking appointments</h2>
+<ul>
+<li><strong>Only times you can honour.</strong> Inside your opening hours, in your timezone,
+  and free in your calendar. A time the customer suggests is checked the same
+  way.</li>
+<li><strong>It reads the booking back before writing it</strong> — the job, the date, the
+  time and the address — and books only after the customer confirms.</li>
+<li><strong>It names the work.</strong> "Site visit for kitchen remodeling", not just
+  "appointment", so nobody turns up to the wrong job.</li>
+<li><strong>A question about a time is never taken as a booking.</strong></li>
+<li><strong>Nothing is called booked unless it is.</strong> The confirmation is written from
+  the calendar entry itself, never from what the agent intended to do.</li>
+</ul>
+<h2>4. Checking contact details</h2>
+<p>Before anything is booked, the phone number and email address are checked.</p>
+<p>An unusable number or a malformed email is refused in plain words — <em>"the
+email address "ali@" is not a valid email address… nothing is booked until I
+have one that works"</em> — and nothing is recorded. A correct one is kept and
+used.</p>
+<p>This happens in the software, not in the AI, so it holds even when the AI is
+slow or unavailable.</p>
+<h2>5. Taking orders</h2>
+<p>A customer orders in the chat and the agent does the rest:</p>
+<ol>
+<li><strong>What they want</strong> — matched to your price list only. A choice like "pink
+   dotted or mint lined" is asked, never guessed.</li>
+<li><strong>Where it goes</strong> — if delivery cost depends on the city, it asks the city,
+   then the full address.</li>
+<li><strong>How they pay</strong> — only the methods your documents name (cash on delivery,
+   bank transfer, JazzCash, Easypaisa…), in your own wording.</li>
+<li><strong>The summary</strong> — items, delivery, total, address and payment, worked out
+   from your price list.</li>
+<li><strong>The yes</strong> — only the customer's confirmation places it. They get an order
+   number and your delivery wording; you get a notification.</li>
+</ol>
+<h2>6. Where you watch it</h2>
+<table>
+<thead>
+<tr>
+<th>Screen</th>
+<th>What it is for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Inbox</strong></td>
+<td>Every conversation live. The agent's replies are marked as the agent's, yours as yours. Take over any conversation at any time — it stops replying to that person immediately and keeps everyone else running.</td>
+</tr>
+<tr>
+<td><strong>Board</strong></td>
+<td>Every customer, at the stage they have reached, in your own words.</td>
+</tr>
+<tr>
+<td><strong>Orders</strong></td>
+<td>What was ordered, by whom, and what it is worth.</td>
+</tr>
+<tr>
+<td><strong>Calendar</strong></td>
+<td>Everything booked, and your availability. Appointments also reach your phone's calendar.</td>
+</tr>
+<tr>
+<td><strong>Analytics</strong></td>
+<td>How it is going: how many got as far as qualified, where people stop replying, how fast they are answered and by whom. Only leads with a real figure against them are counted in the money, and the screen says how many that is.</td>
+</tr>
+<tr>
+<td><strong>Test agent</strong></td>
+<td>Type any message and see exactly what the agent would say — the real agent, your real prices, with nothing sent to anyone.</td>
+</tr>
+</tbody>
+</table>
+<h2>7. Being told when you are needed</h2>
+<p>Alerts reach you by email or on your phone when somebody asks for a person,
+when a lead is worth your attention, or when something breaks. If your
+WhatsApp phone goes offline, a red warning appears until it reconnects —
+nothing locks, and nothing is silently dropped.</p>
+<h2>8. Where it runs</h2>
+<p>One product, three ways in, all showing the same thing:</p>
+<ul>
+<li><strong>The desktop app</strong>, which updates itself when you open it.</li>
+<li><strong>Any web browser</strong>, at your dashboard address.</li>
+<li><strong>Your phone's browser</strong>, for checking in.</li>
+</ul>
+<hr />
+<h1>What you need to do</h1>
+<p>Setting up takes about twenty minutes, and most of it is finding files you
+already have. The <strong>Setup</strong> screen lists ten steps in three groups and ticks
+them off as you go — and the ticks are read from the real system, so a step
+cannot be marked done just by visiting it.</p>
+<p>The steps can be done in any order. Start with whatever you have to hand.</p>
+<h2>Required — it cannot start without these</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Step</th>
+<th>What to have ready</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Your business</strong></td>
+<td>Your business name, what you sell, and your currency.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Prices and knowledge</strong></td>
+<td>Your price list, catalogue or brochure. PDF, Word, Excel or photographs all work. This is what stops it inventing a price.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Where you are</strong></td>
+<td>Your timezone, and the areas you cover. Every hour you state and every appointment offered is read in your zone.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Connect WhatsApp</strong></td>
+<td>The phone that owns the number. You scan a QR code with it, or connect your own Twilio account.</td>
+</tr>
+</tbody>
+</table>
+<p>Until all four are done, the inbox, board and analytics stay locked and
+PingPulse tells you which steps are still open. <strong>Test agent</strong> opens as soon
+as your business and prices are in, so you can try it before any customer can
+reach it.</p>
+<p>WhatsApp is deliberately last: the moment it connects, real customers start
+getting answers.</p>
+<h2>Recommended — it runs without these, but something is missing</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Step</th>
+<th>Why it matters</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5</td>
+<td><strong>Hours and booking</strong></td>
+<td>Without your opening hours the agent cannot book anything — every booking request is handed to a person instead.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Alerts</strong></td>
+<td>An email address or phone number, so being needed reaches a person instead of going nowhere.</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>Calendar</strong></td>
+<td>So appointments appear on the calendar you already use.</td>
+</tr>
+</tbody>
+</table>
+<h2>Optional — fine to leave as they are</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Step</th>
+<th>What it adds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>8</td>
+<td><strong>Your board</strong></td>
+<td>Rename the stages to the words your team actually uses.</td>
+</tr>
+<tr>
+<td>9</td>
+<td><strong>Learning</strong></td>
+<td>Past replies you have written, so it sounds like you.</td>
+</tr>
+<tr>
+<td>10</td>
+<td><strong>Problems</strong></td>
+<td>Things you want flagged to a person rather than answered.</td>
+</tr>
+</tbody>
+</table>
+<h2>Then: try it before anyone else does</h2>
+<p>Open <strong>Test agent</strong> and ask it what your most awkward customer would ask. It
+is the real agent with your real prices; nothing is sent to anyone. If an
+answer is wrong, the fix is almost always a document — add it under <em>Prices
+and knowledge</em> and ask again.</p>
+<hr />
+<h1>The rules it will not break</h1>
+<p>These are enforced in the software. They are not instructions the agent can be
+talked out of.</p>
+<ul>
+<li><strong>It never says something happened unless it did.</strong> No confirmed booking, no
+  promised callback, unless the system actually recorded it.</li>
+<li><strong>It never invents a price.</strong> If it is not in what you uploaded, it says it
+  will check.</li>
+<li><strong>It never promises what only you can do.</strong> It will not say it has lowered a
+  price, changed a quotation, or will send an invoice. Asked for one, it
+  quotes your terms.</li>
+<li><strong>It only offers pictures you have.</strong></li>
+<li><strong>It never claims to be a person.</strong> Asked directly, it says what it is.</li>
+<li><strong>It only offers times it can actually honour.</strong></li>
+<li><strong>It never says an appointment was booked, moved or cancelled</strong> unless the
+  calendar changed on that message.</li>
+<li><strong>It answers each message once</strong>, and sends one follow-up once.</li>
+<li><strong>It stops when somebody asks for a person</strong>, and tells you.</li>
+<li><strong>It never messages anyone at three in the morning.</strong></li>
+<li><strong>It never learns from its own replies</strong> — only from yours.</li>
+</ul>
+<hr />
+<h1>What it does not do</h1>
+<p>Said plainly, so there are no surprises:</p>
+<ul>
+<li>It does not take payments. It tells customers how you take payment, in your
+  wording, but no money moves through PingPulse.</li>
+<li>It does not issue invoices, quotations or proformas.</li>
+<li>It does not change your prices. It reads what you upload.</li>
+<li>It does not message anyone first. It answers people who write to you.</li>
+<li>It does not learn from its own replies, so a mistake does not compound.</li>
+</ul>
+<hr />
+<h1>If something goes wrong</h1>
+<ul>
+<li><strong>A wrong answer</strong> is nearly always a missing or unclear document. Add it
+  under <em>Prices and knowledge</em> and check in <strong>Test agent</strong>.</li>
+<li><strong>WhatsApp offline</strong> shows as a red warning. Reconnect the phone; nothing is
+  lost in the meantime.</li>
+<li><strong>Anything else</strong> — take over the conversation from the inbox. The agent
+  stops replying to that person immediately and everyone else keeps running.</li>
+</ul>
+</body>
+</html>
