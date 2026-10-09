@@ -566,41 +566,6 @@ Customer: "Ye mehnga hai"
 You: "Samajh sakti hoon. Is range mein Basic Shirt Rs. 1,596 ka hai, wo dekhna chahenge?\""""
 
 
-def _what_was_done(appointment) -> str:
-    """The appointment's own sentence: a row's description, or what the sandbox passes."""
-    if appointment is None:
-        return ""
-    when = getattr(appointment, "when", None)
-    if when:
-        return str(when)
-    try:
-        return booking.describe(appointment)
-    except Exception:  # noqa: BLE001 - a confirmation check never breaks a reply
-        return ""
-
-
-_CLOCK = re.compile(r"\b(\d{1,2}):(\d{2})\s*(am|pm)\b", re.IGNORECASE)
-
-
-def confirms(reply: str, done_what: str) -> bool:
-    """Whether the reply states the time of the appointment the record describes.
-
-    The time, not the wording: "9:30", "9:30 AM", "9.30am", and for a time on
-    the hour "10 AM" or "10am" all count.
-    """
-    found = _CLOCK.search(done_what or "")
-    if not found:
-        return True
-    hour, minute, half = int(found.group(1)), found.group(2), found.group(3).lower()
-    text = (reply or "").lower().replace("\u202f", " ").replace(".", ":")
-    if re.search(rf"(?<!\d){hour}:{minute}(?!\d)", text):
-        return True
-    if minute == "00" and re.search(rf"(?<!\d){hour}\s*(am|pm|a:m|p:m)", text):
-        return True
-    twenty_four = hour % 12 + (12 if half == "pm" else 0)
-    return bool(re.search(rf"(?<!\d)0?{twenty_four}:{minute}(?!\d)", text))
-
-
 def is_roman_urdu(text: str) -> bool:
     """Roughly: does this read as Urdu typed in Latin script?
 
@@ -1018,9 +983,6 @@ async def generate_reply(
     policy_block: str = "",
     last_resort: str = "",
     appointment=None,
-    did_cancel: bool = False,
-    did_move: bool = False,
-    did_book: bool = False,
     order_placed: bool = False,
     handoff_allowed: bool = False,
     known_prices: Iterable[Any] = (),
@@ -1112,22 +1074,14 @@ async def generate_reply(
         and not is_roman_urdu(customer_said)
     )
 
-    # What this turn did to the diary, in the words of the record. A booking
-    # made and not mentioned is the mirror of a booking claimed and not made:
-    # the backend booked 9:30 and the reply asked "which two slots work best?",
-    # so the customer was left believing nothing was booked.
-    done = "booked" if did_book else "moved" if did_move else "cancelled" if did_cancel else None
-    done_what = _what_was_done(appointment) if done else ""
+    # A booking, move or cancellation that happened never reaches this point:
+    # its confirmation is rendered from the row (booking.handle_turn), so the
+    # model is not asked to phrase one, and nothing here has to check that it
+    # did. Every reply that does come here is checked for claiming one.
 
     def problems_in(text: str) -> list[str]:
         """Everything in this reply the record does not support, said as a correction."""
         problems: list[str] = []
-
-        if done and done_what and not confirms(text, done_what):
-            problems.append(
-                f"the appointment was just {done}: {done_what}. Your reply must say so "
-                "plainly, with that day and time"
-            )
 
         # Only the price check is behind the price-guard flag. The handoff and
         # language checks are about what the agent is allowed to say at all,
@@ -1160,12 +1114,7 @@ async def generate_reply(
         # leaving the building: there was no appointment, and no amount of
         # instruction in the prompt had prevented the sentence.
         problems.extend(
-            booking.unverified_claims(
-                text,
-                appointment=appointment,
-                cancelled=did_cancel,
-                moved=did_move,
-            )
+            booking.unverified_claims(text, appointment=appointment)
         )
         # The same for orders: "Great! I've noted the notebook" was said
         # about an order nothing had recorded.
@@ -1332,11 +1281,7 @@ async def generate_reply(
             # have the answer. Handing to another provider for twenty more
             # seconds gets the same sentence; a person is what is needed.
             raise _Unanswerable(latest_message)
-        if done and done_what and not confirms(corrected, done_what):
-            raise RuntimeError(f"reply did not confirm what was {done}")
-        if booking.unverified_claims(
-            corrected, appointment=appointment, cancelled=did_cancel, moved=did_move
-        ):
+        if booking.unverified_claims(corrected, appointment=appointment):
             raise RuntimeError("reply still claimed an appointment that does not exist")
         if orders.claims_order(corrected, order_placed):
             raise RuntimeError("reply still claimed an order that was not placed")

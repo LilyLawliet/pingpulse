@@ -111,7 +111,7 @@ WIDENED = [
 @pytest.mark.parametrize("said", WIDENED)
 def test_the_widened_claim_phrasings_are_caught(said):
     """Each of these says a booking exists. None of them may pass unbooked."""
-    problems = unverified_claims(said, appointment=None, cancelled=False, moved=False)
+    problems = unverified_claims(said, appointment=None)
     assert problems, f"nothing objected to {said!r} with no appointment"
 
 
@@ -119,4 +119,4 @@ def test_the_widened_claim_phrasings_are_caught(said):
 def test_the_same_phrasings_are_fine_once_it_is_real(said):
     """The guard is about the record, not about the words."""
     booked = type("Appointment", (), {"starts_at": None})()
-    assert not unverified_claims(said, appointment=booked, cancelled=False, moved=False)
+    assert not unverified_claims(said, appointment=booked)

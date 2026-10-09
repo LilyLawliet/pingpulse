@@ -273,7 +273,7 @@ async def test_a_reply_claiming_a_booking_that_does_not_exist_is_caught():
 @pytest.mark.asyncio
 async def test_a_reply_claiming_a_cancellation_that_did_not_happen_is_caught():
     problems = booking.unverified_claims(
-        "That's cancelled for you.", appointment=None, cancelled=False
+        "That's cancelled for you.", appointment=None
     )
     assert problems
 
@@ -539,7 +539,7 @@ def test_a_sentence_asserting_a_booking_is_caught(text):
 @pytest.mark.parametrize("text", CLAIMS_A_CANCELLATION)
 def test_a_sentence_asserting_a_cancellation_is_caught(text):
     assert booking.claims_cancellation(text), text
-    assert booking.unverified_claims(text, appointment=None, cancelled=False), text
+    assert booking.unverified_claims(text, appointment=None), text
 
 
 @pytest.mark.parametrize("text", CLAIMS_A_MOVE)

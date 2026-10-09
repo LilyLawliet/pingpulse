@@ -781,15 +781,10 @@ def what_is_being_booked(organization, contact) -> Bookable:
 
 
 def remember_refusal(contact, job: str, place: str | None = None) -> None:
-    """Keep a refusal that was decided somewhere other than a booking turn.
+    """Put a refusal on record directly, as `for_contact` does when it decides one.
 
-    Most refusals come from `for_contact`, which stores its own. This one is
-    for the path that actually answers the customer first: "can you groom my
-    dog?" is read as wanting a person, is refused by `booking.not_our_trade`
-    before any booking code runs, and used to leave nothing behind. Four
-    turns later "can you book me in?" names no job at all, so there was
-    nothing left to refuse and the agent offered times for work it had
-    already said it does not do.
+    Every refusal in the live path is decided and stored by `for_contact`;
+    this is the same write for callers that already know the answer.
     """
     _remember_refusal(contact, Verdict(job=job, service_fits=False, place=place, area_fits=None))
 

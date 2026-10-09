@@ -136,7 +136,7 @@ async def test_asking_to_cancel_nothing_is_told_the_truth(remodeller, db_session
     assert "NO appointment" in turn.prompt_block
 
     was_sent = "I am sorry for the confusion; I have cancelled the September 19 appointment."
-    assert booking.unverified_claims(was_sent, cancelled=turn.cancelled)
+    assert booking.unverified_claims(was_sent)
 
 
 # --------------------------------------------------- the conversation that works
@@ -210,10 +210,8 @@ async def test_cancelling_a_real_appointment_updates_the_record(remodeller, db_s
     assert cancelled.performed == "cancelled"
     assert await booking.upcoming_for(db_session, contact.id) is None
     assert booked.appointment.status == APPOINTMENT_CANCELLED
-    # Only now may the sentence be said.
-    assert booking.unverified_claims(
-        "I have cancelled that for you.", cancelled=cancelled.cancelled
-    ) == []
+    # And it is said from the row, not by a model.
+    assert cancelled.reply and "has been cancelled" in cancelled.reply, cancelled.reply
 
 
 @pytest.mark.asyncio

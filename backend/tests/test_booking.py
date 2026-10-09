@@ -680,7 +680,7 @@ def test_the_two_sentences_from_the_incident_are_both_caught():
     )
 
     assert booking.unverified_claims(confirmed, appointment=None)
-    assert booking.unverified_claims(cancelled, cancelled=False)
+    assert booking.unverified_claims(cancelled)
 
 
 def test_a_claim_backed_by_the_record_is_allowed():
@@ -694,9 +694,9 @@ def test_a_claim_backed_by_the_record_is_allowed():
     assert booking.unverified_claims(
         "Your appointment is confirmed for Tuesday at 2pm.", appointment=appointment
     ) == []
-    assert booking.unverified_claims(
-        "I have cancelled that for you.", cancelled=True
-    ) == []
+    # A cancellation that happened is confirmed from its row, never by the
+    # model - so the model saying one happened is always unsupported.
+    assert booking.unverified_claims("I have cancelled that for you.")
 
 
 def test_ordinary_sentences_are_not_mistaken_for_claims():

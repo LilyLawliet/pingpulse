@@ -587,5 +587,7 @@ async def test_the_simulator_keeps_what_it_knew_on_a_turn_read_as_wanting_a_pers
         )
     ).json()
     kept = second.get("booking_state") or {}
+    # Answered as live: the backend's own refusal, not a model's phrasing of it.
+    assert "dog grooming is not something we do" in (second.get("reply") or ""), second.get("reply")
     assert (kept.get(scope.ACCEPTED_KEY) or {}).get("job") == "kitchen remodel", kept
     assert (kept.get(scope.REFUSED_KEY) or {}).get("job") == "dog grooming", kept

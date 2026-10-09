@@ -308,12 +308,11 @@ MUTATIONS = {
         '    hits = sum(1 for marker in _ROMAN_URDU_WORDS if marker.search(lowered))',
         '    hits = sum(1 for marker in ROMAN_URDU_MARKERS if marker in f" {lowered} ")',
     ),
-    # "a booking need not be confirmed" lived here: it weakened the check that
-    # the model's confirmation states the booked time. A booking's
-    # confirmation is no longer written by the model at all - it is rendered
-    # from the row (booking.handle_turn) - so no test can reach that check on
-    # a booking any more, and the fault it stood for is covered by "a booking
-    # that succeeded is left to the model to phrase".
+    # "a booking need not be confirmed" lived here, for the check that the
+    # model's confirmation stated the booked time. A booking's confirmation is
+    # no longer written by the model - it is rendered from the row
+    # (booking.handle_turn) - so the check was removed, and the fault it stood
+    # for is "a booking that succeeded is left to the model to phrase".
     # The three the evidence run of 7 October found. Each one reproduces with
     # the model answering normally, so each one is here rather than in a note.
     "a refusal can never be lifted": (

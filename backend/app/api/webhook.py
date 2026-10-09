@@ -1056,24 +1056,11 @@ async def _process_inbound_message(
         )
 
     extra_blocks = [vision.as_prompt_block(image_analysis, bool(stored_media))]
-    # A turn that says no does not also hold times open. The scope check runs
-    # twice on some turns, and a model asked the same question twice can
-    # answer differently: the reply refused pet grooming while the block
-    # underneath it still listed six consultation slots. Where either call
-    # said no, the times do not go in front of the model at all.
-    if appointment_turn.prompt_block and not outside_trade:
+    # Work this business does not do is answered with the backend's own
+    # sentence further down, and the model is not asked to write that turn,
+    # so nothing about it is put in front of the model here.
+    if appointment_turn.prompt_block:
         extra_blocks.append(appointment_turn.prompt_block)
-    if outside_trade:
-        # Said here rather than left to the model to work out from the
-        # documents, so the answer is the same every time it is asked.
-        extra_blocks.append(
-            "=== NOT SOMETHING THIS BUSINESS DOES ===\n"
-            f"{outside_trade} is NOT something this business does, going by its own "
-            "description and its own documents. Say so plainly and briefly. Do NOT "
-            "offer to pass them to a colleague, do NOT promise to check, and do NOT "
-            "offer a time. Ask whether there is something this business does that "
-            "they need."
-        )
     if handed_to_a_person:
         # Said plainly, and only here. The guard lets a handoff phrase through
         # for this turn because the alert behind it has already been raised.
@@ -1186,9 +1173,6 @@ async def _process_inbound_message(
             # a cancellation or a move survives only if one actually happened on
             # this turn - checked against these rather than against the prompt.
             appointment=appointment_turn.appointment,
-            did_cancel=appointment_turn.cancelled,
-            did_move=appointment_turn.moved,
-            did_book=appointment_turn.booked,
             handoff_allowed=handed_to_a_person,
             # A reply may only mention pictures it is actually sending.
             photos_attached=bool(outbound_media),

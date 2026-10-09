@@ -494,7 +494,9 @@ def test_the_incident_sentence_is_refused_even_after_a_real_cancellation():
         "appointment. I am a live team member here."
     )
 
-    assert booking.unverified_claims(sent, cancelled=True) == []
+    # Both halves are caught: a cancellation that really happened is confirmed
+    # from its row, so the model announcing one is never the record speaking.
+    assert booking.unverified_claims(sent)
     assert claims_to_be_human(sent) == "I am a live team member"
 
 

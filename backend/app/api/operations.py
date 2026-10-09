@@ -846,15 +846,6 @@ async def simulate(
     # remembers it, so "the 3pm one" can be picked in the next turn.
     booking_note = None
     booking_block = ""
-    if outside_trade:
-        booking_block = (
-            "=== NOT SOMETHING THIS BUSINESS DOES ===\n"
-            f"{outside_trade} is NOT something this business does, going by its own "
-            "description and its own documents. Say so plainly and briefly. Do NOT "
-            "offer to pass them to a colleague, do NOT promise to check, and do NOT "
-            "offer a time. Ask whether there is something this business does that "
-            "they need."
-        )
     appointment = None
     performed = None
     held_for_an_answer = False
@@ -975,8 +966,10 @@ async def simulate(
         # turn no check claimed is answered as it was the first time.
         if not outside_trade and not performed:
             outside_trade = booking.refused_and_asked_about(probe, message)
-            if outside_trade and not turn_reply:
-                turn_reply = booking.not_our_trade_reply(outside_trade)
+        # As live: work the business does not do is answered with the
+        # backend's own sentence, whichever check found it, never by the model.
+        if outside_trade and not turn_reply:
+            turn_reply = booking.not_our_trade_reply(outside_trade)
         kept = await booking.upcoming_for(db, probe.id)
         if kept is not None:
             state[SANDBOX_APPOINTMENT_KEY] = {
@@ -1032,9 +1025,6 @@ async def simulate(
             message,
             knowledge=knowledge,
             appointment=appointment,
-            did_cancel=performed == "cancelled",
-            did_move=performed == "moved",
-            did_book=performed == "booked",
             handoff_allowed=bool(booking_block and "colleague has just been alerted" in booking_block),
             known_prices=offer.prices,
             known_quantities=offer.quote.quantities(),

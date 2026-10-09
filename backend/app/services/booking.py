@@ -962,14 +962,13 @@ def claims_reschedule(text: str) -> str | None:
     return _asserted(_MOVE_CLAIMS, text)
 
 
-def unverified_claims(
-    text: str, *, appointment=None, cancelled: bool = False, moved: bool = False
-) -> list[str]:
-    """Every claim in this reply that the record does not support.
+def unverified_claims(text: str, *, appointment=None) -> list[str]:
+    """Every claim in this model-written reply that the record does not support.
 
-    `appointment` is the contact's live appointment, freshly read. `cancelled`
-    and `moved` say whether this turn actually performed one of those
-    operations - a reply may only announce an action the backend just took.
+    `appointment` is the contact's live appointment, freshly read. A model
+    reply never announces a cancellation or a move truthfully: one that
+    happened is confirmed from its row (handle_turn), and the model is not
+    asked to write that turn at all. So any it does announce did not happen.
     """
     problems: list[str] = []
 
@@ -985,14 +984,14 @@ def unverified_claims(
         )
 
     said_cancelled = claims_cancellation(text)
-    if said_cancelled and not cancelled:
+    if said_cancelled:
         problems.append(
             f'you wrote "{said_cancelled}", but nothing was cancelled; never say an '
             "appointment has been cancelled unless it has"
         )
 
     said_moved = claims_reschedule(text)
-    if said_moved and not moved:
+    if said_moved:
         problems.append(
             f'you wrote "{said_moved}", but nothing was rescheduled; never say an '
             "appointment has been moved unless it has"

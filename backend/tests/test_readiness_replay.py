@@ -168,7 +168,7 @@ async def invariants(db, shop, contact, message: str, turn, evidence: dict | Non
         )
         if claims:
             assert booking.unverified_claims(
-                said, appointment=live, cancelled=turn.cancelled, moved=turn.moved
+                said, appointment=live
             ), f"the guard lets through: {said!r}"
 
 
@@ -300,7 +300,7 @@ def _guard_blocks_reply_then(seen, wanted):
     said = (seen.evidence or {}).get("reply_then")
     assert said, f"{seen.where}: no reply_then in the evidence to check"
     assert booking.unverified_claims(
-        said, appointment=seen.live, cancelled=seen.turn.cancelled, moved=seen.turn.moved
+        said, appointment=seen.live
     ), f"{seen.where}: the guard lets through {said!r}"
 
 

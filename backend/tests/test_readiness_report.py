@@ -376,7 +376,7 @@ def test_a_stale_offer_drops_times_that_have_passed():
     ],
 )
 def test_removed_is_a_cancellation_claim(text):
-    assert booking.unverified_claims(text, cancelled=False)
+    assert booking.unverified_claims(text)
 
 
 # --------------------------------------------------------------- the board
@@ -510,21 +510,23 @@ def test_roman_urdu_is_still_read(reply):
     assert llm_service.is_roman_urdu(reply)
 
 
-@pytest.mark.parametrize(
-    "reply, expected",
-    [
-        ("You're booked for Monday 5 October at 9:30 AM.", True),
-        ("All set - Monday at 9.30am.", True),
-        ("Which two Monday slots work best for you?", False),
-        ("You're booked in.", False),
-    ],
-)
-def test_a_booking_reply_states_the_time(reply, expected):
-    assert llm_service.confirms(reply, "site visit on Monday 5 October at 9:30 am") is expected
+def test_a_booking_is_confirmed_with_its_day_and_time():
+    """"You're booked in." says nothing about when. The confirmation is the row's."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
 
+    from app.services import booking
 
-def test_a_time_on_the_hour_may_be_said_short():
-    assert llm_service.confirms("See you Monday at 10 AM", "site visit on Monday 5 October at 10:00 am")
+    appointment = SimpleNamespace(
+        timezone_name="UTC", starts_at=datetime(2026, 10, 5, 9, 30, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 10, 5, 10, 30, tzinfo=timezone.utc), kind="onsite",
+        location="1200 Brickell Ave", notes="Job: bathroom remodeling", is_blocked=False,
+    )
+    said = booking.TurnResult(performed="booked", appointment=appointment).plain_reply(
+        SimpleNamespace(agent_config={}, timezone="UTC")
+    )
+    assert said.startswith("You're booked: site visit for bathroom remodeling")
+    assert "Monday 5 October at 9:30 am" in said
 
 
 # --------------------------------------------------------------- October 6
