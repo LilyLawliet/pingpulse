@@ -58,7 +58,8 @@ steps:
           tests/test_good_contact_details_are_kept.py \
           tests/test_a_booked_kind_is_one_the_shop_has.py \
           tests/test_the_requested_service_holds.py \
-          tests/test_the_tester_report_of_8_october.py
+          tests/test_the_tester_report_of_8_october.py \
+          tests/test_the_retest_of_9_october.py
 
   # ---------------------------------------------------------------- frontend
   # A build, not a lint. The dashboard has no test suite, so this catches what

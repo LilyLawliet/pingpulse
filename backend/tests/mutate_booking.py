@@ -83,6 +83,7 @@ TAUGHT = pathlib.Path("app/services/taught.py")
 OPS = pathlib.Path("app/api/operations.py")
 WEBHOOK = pathlib.Path("app/api/webhook.py")
 ROUTES = pathlib.Path("app/api/routes.py")
+LANGS = pathlib.Path("app/services/languages.py")
 
 
 # Read and write the bytes ourselves. read_text() decodes with the platform's
@@ -100,7 +101,7 @@ def _read(path: pathlib.Path) -> tuple[str, str]:
 
 SOURCES: dict[pathlib.Path, str] = {}
 ENDINGS: dict[pathlib.Path, str] = {}
-for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS, SCOPE, TAUGHT, OPS, WEBHOOK, ROUTES):
+for _path in (SRC, LLM, HANDOVER, ANALYZER, TASKS, ORDERS, SCOPE, TAUGHT, OPS, WEBHOOK, ROUTES, LANGS):
     SOURCES[_path], ENDINGS[_path] = _read(_path)
 
 
@@ -137,10 +138,10 @@ MUTATIONS = {
         "def _without_refusals(text: str) -> str:\n    return _NOT_DOING.sub(\" \", text or \"\")",
         "def _without_refusals(text: str) -> str:\n    return text or \"\"",
     ),
-    "cancel naming its own time is a move": (
-        "        or (wants_cancel(text) and names_other_time)\n",
-        "        or (wants_cancel(text) and (moment is not None or bool(named.days)))\n",
-    ),
+    # "cancel naming its own time is a move" lived here. Its guard is still in
+    # place, but "a cancellation naming its own time is a move to it" now
+    # covers everything it did and more (the 9 October retest), so no test can
+    # tell it apart any longer.
     "past date rolls to next year": (
         "        if (ahead - today).days <= MAX_DAYS_AHEAD:\n            return ahead",
         "        return ahead",
@@ -426,6 +427,35 @@ MUTATIONS = {
     "automatic nudges continue after a handover": (TASKS,
         "    if not manual and getattr(contact, \"ai_enabled\", True) is False:\n",
         "    if False:\n",
+    ),
+    # The Constrivo retest of 9 October.
+    "a refusal covers only the first action in its list": (
+        "    + r\"(?:\\s*(?:,|\\bor\\b|\\band\\b|\\bnor\\b)+\\s*(?:to\\s+)?\" + _REFUSED_ACTION + r\")*\",\n",
+        "    ,\n",
+    ),
+    "a cancellation naming its own time is a move to it": (
+        "    identifies_it = wants_cancel(text) and not names_other_time\n",
+        "    identifies_it = False\n",
+    ),
+    "refusing a move holds a cancellation": (
+        "    if stopping and wants_cancel(text) and not holding_off(_without_refusals(text)):\n",
+        "    if False:\n",
+    ),
+    "a message in another language is read only as written": (
+        "    return meaning\n\n\nasync def handle_turn(",
+        "    return text\n\n\nasync def handle_turn(",
+    ),
+    "a yes after a refusal is left to the model": (
+        "        if being_booked.service is None and being_booked.refused:\n            return TurnResult(\n                reply=(\n                    f\"There's nothing to confirm",
+        "        if False:\n            return TurnResult(\n                reply=(\n                    f\"There's nothing to confirm",
+    ),
+    "unlisted work is asked what work it is": (
+        "            named=scope.names_unmatched_work(organization, text),\n",
+        "            named=asks_for_work(text) and scope.names_unmatched_work(organization, text),\n",
+    ),
+    "a translated fixed reply is not kept": (LANGS,
+        "    kept = await _remembered(language, text)\n",
+        "    kept = None\n",
     ),
     "the simulator checks scope on a contact with no memory": (OPS,
         "    # memory - so the sandbox forgot the conversation where WhatsApp would not.\n"

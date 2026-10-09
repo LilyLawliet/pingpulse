@@ -279,11 +279,15 @@ export default function NotificationSettings({ onChanged }) {
           className="w-full rounded-lg border border-edge bg-bg px-3 py-2 text-2xs text-ink placeholder:text-faint focus:border-accent/60 disabled:opacity-40"
         />
         <span className="mt-1 block text-2xs leading-relaxed text-faint">
-          {state.email_available
-            ? 'Left empty, alerts go to the account owner\'s email. Email needs nothing installed and no ' +
-              'permission — it is the one that reaches you on a machine you have ' +
-              'never opened this on.'
-            : 'Email is not set up on this server, so this does nothing yet.'}
+          {!state.email_available
+            ? 'Email is not set up on this server, so this does nothing yet.'
+            : (state.email
+                ? ''
+                : state.email_goes_to
+                  ? `Left empty, alerts go to ${state.email_goes_to}. `
+                  : 'Left empty, no email alerts are sent: the account has no address that can receive them. ') +
+              'Email needs nothing installed and no permission — it is the one that ' +
+              'reaches you on a machine you have never opened this on.'}
         </span>
         {state.email_available && !state.email && state.suggested_email && (
           <button

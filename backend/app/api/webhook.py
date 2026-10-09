@@ -1024,7 +1024,8 @@ async def _process_inbound_message(
         )
 
     appointment_turn = await booking.handle_turn(
-        db, organization, contact, body, wants_meeting=bool(analysis.get("wants_meeting"))
+        db, organization, contact, booking.readable(body, meaning),
+        wants_meeting=bool(analysis.get("wants_meeting")),
     )
     # Work the business already said no to, asked about again on a turn no
     # check claimed: answered the same way as on the turn it was refused.

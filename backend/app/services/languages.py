@@ -110,28 +110,23 @@ def wrong_script(customer_message: str, reply: str) -> str | None:
 # for positive evidence that a message is not English. English is the default:
 # a short or unclear message is left as it is, and a wrong "not English" only
 # costs a rewrite into English, never a wrong figure.
-_OTHER_LATIN = {
-    # Spanish
-    "el", "los", "las", "que", "y", "por", "para", "una", "uno", "quiero", "cuanto",
-    "cuesta", "tienen", "hay", "hola", "gracias", "necesito", "puedo", "envio", "envios",
-    # French
-    "le", "les", "des", "une", "je", "vous", "est", "et", "pour", "avec", "combien",
-    "bonjour", "merci", "voudrais", "coute", "livraison", "avez",
-    # German
-    "der", "das", "ich", "und", "ist", "nicht", "mochte", "haben", "wie", "viel", "zwei",
-    "ein", "eine", "kostet", "danke", "bitte",
-    # Italian
-    "il", "gli", "di", "che", "voglio", "quanto", "costa", "ciao", "grazie", "vorrei",
-    # Portuguese
-    "eu", "quero", "custa", "obrigado", "voce", "uma", "tem", "preco",
-    # Indonesian / Malay
-    "saya", "mau", "berapa", "harga", "ada", "dan", "yang", "tidak", "bisa", "beli",
-    "terima", "kasih",
-    # Turkish
-    "kadar", "bir", "istiyorum", "fiyat", "merhaba", "tesekkurler",
-    # Dutch
-    "ik", "wil", "hoeveel", "kost", "het", "een", "graag",
+#: The same words, by language, so a message can be told apart by which
+#: language it is - with no model - as well as by whether it is English.
+_LATIN_WORDS = {
+    "es": {"el", "los", "las", "que", "y", "por", "para", "una", "uno", "quiero", "cuanto",
+           "cuesta", "tienen", "hay", "hola", "gracias", "necesito", "puedo", "envio", "envios"},
+    "fr": {"le", "les", "des", "une", "je", "vous", "est", "et", "pour", "avec", "combien",
+           "bonjour", "merci", "voudrais", "coute", "livraison", "avez"},
+    "de": {"der", "das", "ich", "und", "ist", "nicht", "mochte", "haben", "wie", "viel", "zwei",
+           "ein", "eine", "kostet", "danke", "bitte"},
+    "it": {"il", "gli", "di", "che", "voglio", "quanto", "costa", "ciao", "grazie", "vorrei"},
+    "pt": {"eu", "quero", "custa", "obrigado", "voce", "uma", "tem", "preco"},
+    "id": {"saya", "mau", "berapa", "harga", "ada", "dan", "yang", "tidak", "bisa", "beli",
+           "terima", "kasih"},
+    "tr": {"kadar", "bir", "istiyorum", "fiyat", "merhaba", "tesekkurler"},
+    "nl": {"ik", "wil", "hoeveel", "kost", "het", "een", "graag"},
 }
+_OTHER_LATIN = set().union(*_LATIN_WORDS.values())
 _ENGLISH = {
     "the", "an", "is", "are", "do", "does", "you", "your", "my", "we", "have", "i",
     "what", "how", "much", "can", "price", "and", "for", "to", "of", "it", "this", "that",
@@ -189,6 +184,64 @@ def _links(text: str) -> list[str]:
     return sorted(link.rstrip(".,;:!?)") for link in re.findall(r"https?://\S+", text or ""))
 
 
+def language_key(message: str) -> str | None:
+    """Which language a non-English message is in, read off its words. No model.
+
+    Good enough to file a translation under, which is all it is used for: a
+    script for anything not in Latin letters, Roman Urdu as its own, and the
+    Latin-script language whose everyday words it uses most.
+    """
+    if looks_english(message):
+        return None
+    script = script_of(message)
+    if script not in (None, "Latin"):
+        return script.lower()
+    from app.services.llm_service import is_roman_urdu
+
+    if is_roman_urdu(message):
+        return "roman-urdu"
+    tokens = re.findall(r"[a-z']+", offers._plain(message).lower())
+    counts = {code: sum(1 for t in tokens if t in words) for code, words in _LATIN_WORDS.items()}
+    code, hits = max(counts.items(), key=lambda item: item[1])
+    return code if hits else None
+
+
+#: A fixed sentence, once translated, is kept: the same handover question or
+#: refusal then reaches the next Spanish speaker in Spanish whether or not a
+#: model is answering, and without spending a call on it.
+TRANSLATION_SECONDS = 30 * 24 * 60 * 60
+
+
+def _translation_key(language: str, text: str) -> str:
+    import hashlib
+
+    return f"translation:{language}:{hashlib.sha1(text.encode('utf-8')).hexdigest()}"
+
+
+async def _remembered(language: str | None, text: str) -> str | None:
+    if not language:
+        return None
+    from app.services import outbox
+
+    try:
+        async with outbox._connection() as client:
+            return await client.get(_translation_key(language, text))
+    except Exception:  # noqa: BLE001 - a cache, never a reason to fail
+        return None
+
+
+async def _remember(language: str | None, text: str, rewritten: str) -> None:
+    if not language:
+        return
+    from app.services import outbox
+
+    try:
+        async with outbox._connection() as client:
+            await client.set(_translation_key(language, text), rewritten, ex=TRANSLATION_SECONDS)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def in_customer_language(text: str, customer_message: str, timeout: float = 4) -> str:
     """`text` in the customer's language, or `text` unchanged.
 
@@ -199,6 +252,10 @@ async def in_customer_language(text: str, customer_message: str, timeout: float 
     """
     if not text or looks_english(customer_message):
         return text
+    language = language_key(customer_message)
+    kept = await _remembered(language, text)
+    if kept:
+        return kept
     from app.services import understanding
 
     with understanding.output_budget(understanding.MESSAGE_OUTPUT_TOKENS):
@@ -218,4 +275,5 @@ async def in_customer_language(text: str, customer_message: str, timeout: float 
     if wrong_script(customer_message, rewritten):
         logger.warning("translation came back in the wrong script; replying in English")
         return text
+    await _remember(language, text, rewritten)
     return rewritten

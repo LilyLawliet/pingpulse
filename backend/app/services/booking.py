@@ -1898,14 +1898,22 @@ def add_to_calendar_link(organization, appointment) -> str:
 # contains "reschedule", and it turned a cancellation into a move; "DO NOT
 # book it yet" contains "book", and it was booked. The refusal is cut out
 # before intent is read, so what is left is only what they asked for.
+_REFUSED_ACTION = (
+    r"(?:book\w*|schedul\w*|reschedul\w*|re-?book\w*|reserv\w*|confirm\w*|lock\w*|"
+    r"mov\w*|chang\w*|shift\w*|postpon\w*|cancel\w*|call it off)"
+    r"(?:\s+(?:it|that|this|anything(?:\s+else)?|something(?:\s+else)?|my|the|an?)\b)?"
+)
 _NOT_DOING = re.compile(
     r"\b(?:do not|don'?t|dont|does not|doesn'?t|did not|didn'?t|not|never|no need to|"
     r"without|rather not|would rather not)\s+"
     r"(?:want to\s+|wanna\s+|need to\s+|wish to\s+|plan to\s+|going to\s+|have to\s+|"
     r"like to\s+|mean to\s+|try to\s+|be\s+)?(?:you\s+)?"
-    r"(?:book\w*|schedul\w*|reschedul\w*|re-?book\w*|reserv\w*|confirm\w*|lock\w*|"
-    r"mov\w*|chang\w*|shift\w*|postpon\w*|cancel\w*|call it off)"
-    r"(?:\s+(?:it|that|this|anything|my|the|an?)\b)?",
+    + _REFUSED_ACTION
+    # The rest of the list the "not" governs. "I do not want to reschedule,
+    # move it, or book anything else" refuses all three; reading only the
+    # first left "move it" and "book" standing, and a cancellation was
+    # answered with six new times.
+    + r"(?:\s*(?:,|\bor\b|\band\b|\bnor\b)+\s*(?:to\s+)?" + _REFUSED_ACTION + r")*",
     re.IGNORECASE,
 )
 
@@ -2442,6 +2450,29 @@ def _missing_for_booking(organization, contact) -> list:
     return qualification.missing(organization, contact.qualification)
 
 
+def readable(text: str, meaning: str | None) -> str:
+    """The message as the booking rules can read it.
+
+    They are written in English: "Cancela mi cita del lunes. No quiero
+    reprogramarla" matched nothing, and a Spanish cancellation fell through to
+    a model. A message in another language is read through the analyzer's
+    English rendering of it, which it writes for every message anyway. Nothing
+    is done on that reading alone - every booking, move and cancellation is
+    still read back and needs their yes - and what they are told goes out in
+    their language.
+    """
+    from app.services import languages
+
+    if not meaning or not (text or "").strip():
+        return text
+    try:
+        if languages.looks_english(text):
+            return text
+    except Exception:  # noqa: BLE001 - unreadable means as written
+        return text
+    return meaning
+
+
 async def handle_turn(
     db, organization, contact, text: str, *, wants_meeting: bool = False
 ) -> TurnResult:
@@ -2812,6 +2843,27 @@ async def _handle_turn(
         return await _carry_out(db, organization, contact, held)
     forget_pending(contact)
 
+    # A yes to nothing, after a no. The pending booking went when the work was
+    # refused, so this yes answers the refusal - and handed to a model, it was
+    # answered with instructions to email plans and photos for a job the
+    # business had just said it does not do.
+    if held is None and agreed_to_it(text):
+        being_booked = scope.what_is_being_booked(organization, contact)
+        if being_booked.service is None and being_booked.refused:
+            return TurnResult(
+                reply=(
+                    f"There's nothing to confirm - {being_booked.refused} is not something we do, "
+                    "so nothing has been booked. If there is something else you need, tell me "
+                    "and I will help."
+                ),
+                prompt_block=(
+                    "=== APPOINTMENTS ===\n"
+                    f"They said yes, but nothing is waiting on a yes: {being_booked.refused} is "
+                    "not something this business does and nothing was booked."
+                ),
+                refusal=Refusal("outside_services", f"{being_booked.refused} is not something this business offers."),
+            )
+
     if held is not None and _NO.match(text or ""):
         return TurnResult(
             prompt_block=(
@@ -3164,6 +3216,13 @@ async def _decide(
     # "The 7pm Pacific one" is matched in the zone it was said in.
     picked = chosen_slot(text, offered, named.zone or zone) or agreed(text, offered)
     stopping = holding_off(text)
+    # "Cancel it - I don't want to reschedule" refuses the other change, not
+    # the cancellation. Read as holding off, it left the appointment standing
+    # and told them nothing had been changed. Only a hold that is still there
+    # once the refused actions are set aside - "not yet", "let me ask my
+    # wife" - holds a cancellation.
+    if stopping and wants_cancel(text) and not holding_off(_without_refusals(text)):
+        stopping = False
     # "Move it to 4 October at 1pm" names its own day. A 1pm on another day in
     # the standing offer is not what they asked for, however well the clock
     # matches.
@@ -3231,7 +3290,12 @@ async def _decide(
         )
     )
     refuses_move = bool(_NOT_DOING.search(text or "")) and not wants_move(text)
-    moving = existing is not None and not (wants_cancel(text) and refuses_move) and (
+    # A cancellation that names only the appointment's own time is saying
+    # which one to cancel. Read as a move, "cancel that Monday 11 AM
+    # appointment" was a move to Monday 11 AM: "that is the time it is
+    # already booked for", and six other times offered instead.
+    identifies_it = wants_cancel(text) and not names_other_time
+    moving = existing is not None and not (wants_cancel(text) and refuses_move) and not identifies_it and (
         wants_move(text)
         or (purpose == OFFER_MOVE and not wants_cancel(text))
         or (bool(_INSTEAD.search(text)) and names_other_time)
@@ -3396,9 +3460,12 @@ async def _decide(
         # business and "my countertops are cracked" is real work it does not
         # name - but it can say what is certain, which is what this business
         # does do. Nothing is refused and no time is offered either way.
+        # Named, however it was phrased: "dog grooming tomorrow at 10" is not
+        # shaped like a request and still says what they want, and asking it
+        # "what work do you need?" reads as not having listened.
         return _ask_what_work(
             organization, contact, text,
-            named=asks_for_work(text) and scope.names_unmatched_work(organization, text),
+            named=scope.names_unmatched_work(organization, text),
         )
 
     # ------------------------------------------------------------ the past

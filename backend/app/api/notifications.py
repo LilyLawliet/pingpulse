@@ -101,6 +101,18 @@ async def get_settings(
         # keep, so the browser is told which switches mean anything.
         "push_available": notifications.push_available(),
         "email_available": notifications.email_available(),
+        # The answer the agent itself acts on - whether it may tell a customer
+        # the team will reply - so the dashboard's "Alerts are off" and the
+        # agent never disagree. They did: the banner counted only a typed
+        # address or a device, while the agent also counts the owner's email.
+        "reachable": await notifications.can_reach(db, organization),
+        # Where email actually goes when the field is left empty: the owner's
+        # usable address, or nowhere. Said exactly, not promised in general.
+        "email_goes_to": (
+            await notifications.address_for(db, organization)
+            if notifications.email_available()
+            else ""
+        ),
         "vapid_public_key": settings.vapid_public_key or None,
         # Which business this answer is about, so a device's "turned off"
         # choice is remembered for this business and not for every one.

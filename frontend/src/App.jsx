@@ -536,7 +536,13 @@ function Dashboard({ onSignedOut }) {
       await subscribeQuietly(settings)
       const after = await api.notificationSettings()
       if (mine !== alertsSeq.current) return
-      setAlertsReach(after.devices > 0 || Boolean(after.email))
+      // The server's own answer where it gives one: the same check the agent
+      // makes before it tells a customer the team will reply.
+      setAlertsReach(
+        typeof after.reachable === 'boolean'
+          ? after.reachable
+          : after.devices > 0 || Boolean(after.email),
+      )
       setAlertsLost(after.undelivered || 0)
     } catch {
       if (mine !== alertsSeq.current) return

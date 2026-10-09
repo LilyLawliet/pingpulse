@@ -921,7 +921,8 @@ async def simulate(
         # The same arguments the live webhook passes, so the Test agent
         # exercises the decision a real customer's message would get.
         turn = await booking.handle_turn(
-            db, organization, probe, message, wants_meeting=bool(analysis.get("wants_meeting"))
+            db, organization, probe, booking.readable(message, meaning),
+            wants_meeting=bool(analysis.get("wants_meeting")),
         )
         booking_reply = turn.plain_reply(organization)
         turn_reply = turn.reply
