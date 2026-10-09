@@ -761,6 +761,9 @@ async def simulate(
     # and all, searched alongside their own words.
     analysis = await analyzer.analyse(history, message, pretend.sales_stage)
     meaning = analysis.get("meaning")
+    # As live: the model's reading of what they want done about an
+    # appointment, for this message, under both spellings the rules see.
+    booking.use_reading(analysis.get("appointment"), message, booking.readable(message, meaning))
     chunks = await retrieval.search_readings(
         db, tenant.id, [message, meaning], limit=3, doc_type="policy"
     )

@@ -110,8 +110,8 @@ def _write(path: pathlib.Path, text: str, base: pathlib.Path = pathlib.Path(".")
 
 MUTATIONS = {
     "holding_off ignored": (
-        'def holding_off(text: str) -> bool:\n    """They named something and said not to do it yet."""\n    return bool(_HOLDING_OFF.search(text or ""))',
-        'def holding_off(text: str) -> bool:\n    """They named something and said not to do it yet."""\n    return False',
+        '        return reading["not_yet"]\n    return bool(_HOLDING_OFF.search(text or ""))',
+        '        return reading["not_yet"]\n    return False',
     ),
     "bare digit picks a slot anywhere": (
         "        if word.isdigit():\n",
@@ -456,6 +456,31 @@ MUTATIONS = {
     "a translated fixed reply is not kept": (LANGS,
         "    kept = await _remembered(language, text)\n",
         "    kept = None\n",
+    ),
+    # Booking intent read by the model where it answered (after 9 October).
+    "a cancellation the model read is left to the word list": (
+        "    if reading is not None:\n        return reading[\"action\"] == \"cancel\"\n",
+        "",
+    ),
+    "a move the model read is left to the word list": (
+        "    if reading is not None:\n        return reading[\"action\"] == \"move\"\n",
+        "",
+    ),
+    "a hold-off the model read is left to the word list": (
+        "    if reading is not None:\n        return reading[\"not_yet\"]\n",
+        "",
+    ),
+    "a reading of one message decides another": (
+        "    if held is not None and text in held[0]:\n",
+        "    if held is not None:\n",
+    ),
+    "the analyzer's reading of the appointment is dropped": (ANALYZER,
+        "        \"appointment\": _appointment(raw.get(\"appointment\")),\n",
+        "        \"appointment\": None,\n",
+    ),
+    "the simulator does not use the model's reading": (OPS,
+        "    booking.use_reading(analysis.get(\"appointment\"), message, booking.readable(message, meaning))\n",
+        "",
     ),
     "the simulator checks scope on a contact with no memory": (OPS,
         "    # memory - so the sandbox forgot the conversation where WhatsApp would not.\n"

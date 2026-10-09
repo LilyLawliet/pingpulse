@@ -605,6 +605,7 @@ async def process_inbound_message(
         raise
     finally:
         _CLAIMED.reset(token)
+        booking.forget_reading()
 
 
 async def _process_inbound_message(
@@ -815,6 +816,13 @@ async def _process_inbound_message(
         orders.read_order(prepared, history, body)
         if orders.may_read(contact, body)
         else _no_order(),
+    )
+
+    # What they want done about an appointment, as the model read it. Held
+    # for this message only, under both the words they typed and the English
+    # reading the booking rules are given for another language.
+    booking.use_reading(
+        analysis.get("appointment"), body, booking.readable(body, analysis.get("meaning"))
     )
 
     # Asking for a person in words the keyword list did not know. The model

@@ -30,6 +30,7 @@ somebody has to be able to answer afterwards.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import re
 import uuid
@@ -1922,11 +1923,56 @@ def _without_refusals(text: str) -> str:
     return _NOT_DOING.sub(" ", text or "")
 
 
+# ----------------------------------------------------- what they want done
+# Read by the model when it answered, by the rules when it did not.
+#
+# The rules below are English patterns, and patterns cover the phrasings
+# somebody thought of. Every retest found the next one: "I do not want to
+# reschedule, move it, or book anything else" left "move it" standing and a
+# cancellation became a move; "Cancela mi cita" matched nothing at all. The
+# analyzer already reads every message with a model - negation, lists, any
+# language - so where it gave a clean answer about the appointment, that is
+# what the customer asked. The rules answer when it did not (no model, a
+# rate limit, an answer that was not one of the four).
+#
+# Nothing is done on either reading alone. Every booking, move and
+# cancellation is read back and needs their yes, and the yes itself is still
+# read by the rules, so a misreading costs a question, never an appointment.
+_READING: contextvars.ContextVar[tuple[frozenset, dict] | None] = contextvars.ContextVar(
+    "appointment_reading", default=None
+)
+
+
+def use_reading(appointment: dict | None, *texts: str) -> None:
+    """The model's reading of this turn, for these spellings of its message."""
+    if appointment is None:
+        _READING.set(None)
+        return
+    _READING.set((frozenset(t for t in texts if t), appointment))
+
+
+def forget_reading() -> None:
+    _READING.set(None)
+
+
+def _model_reading(text: str) -> dict | None:
+    held = _READING.get()
+    if held is not None and text in held[0]:
+        return held[1]
+    return None
+
+
 def wants_cancel(text: str) -> bool:
+    reading = _model_reading(text)
+    if reading is not None:
+        return reading["action"] == "cancel"
     return bool(_WANTS_CANCEL.search(_without_refusals(text)))
 
 
 def wants_move(text: str) -> bool:
+    reading = _model_reading(text)
+    if reading is not None:
+        return reading["action"] == "move"
     return bool(_WANTS_MOVE.search(_without_refusals(text)))
 
 
@@ -1968,10 +2014,21 @@ _HOLDING_OFF = re.compile(
 
 def holding_off(text: str) -> bool:
     """They named something and said not to do it yet."""
+    reading = _model_reading(text)
+    if reading is not None:
+        return reading["not_yet"]
     return bool(_HOLDING_OFF.search(text or ""))
 
 
 def wants_booking(text: str) -> bool:
+    reading = _model_reading(text)
+    if reading is not None and reading["action"] == "book":
+        return True
+    if reading is not None and reading["action"] in ("cancel", "move"):
+        # Changing one they have, not asking for another.
+        return False
+    # "none" falls through: "what times do you have on Tuesday?" asks about
+    # times without asking for anything to be done, and is still about booking.
     return bool(_WANTS_BOOKING.search(_without_refusals(text)))
 
 
@@ -2529,6 +2586,9 @@ _ASKS_ABOUT_THEIR_BOOKING = re.compile(
 
 def asks_about_their_booking(text: str) -> bool:
     """They have written about an appointment of theirs as a thing that exists."""
+    reading = _model_reading(text)
+    if reading is not None and reading["action"] == "none":
+        return reading["asks_about_existing"]
     return bool(_ASKS_ABOUT_THEIR_BOOKING.search(text or ""))
 
 

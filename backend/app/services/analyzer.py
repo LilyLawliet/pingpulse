@@ -146,6 +146,17 @@ Return exactly these keys:
                   the team, staff, the owner, a human - in any language or spelling
                   ("put me with team", "insaan se baat karao", "can i talk 2 sm1 real"),
                   else false. Booking a demo or a call is NOT this.
+  "appointment": what their latest message asks to do about an appointment:
+     {{"action": one of ["book","move","cancel","none"],
+       "not_yet": true if they say not to do it yet - to wait, or that they must ask
+                  someone first - else false,
+       "asks_about_existing": true if they ask about an appointment they say they
+                  already have ("is my visit still on?"), else false}}
+     Read every "not": "Cancel it, I don't want to reschedule or book anything else"
+     -> cancel. "I don't want to cancel, just move it to Friday" -> move. "Don't book
+     anything" -> none. Any language: "Cancela mi cita" -> cancel. "book" is a new
+     appointment; "move" changes the time of one they have; "none" when they ask for
+     neither. Picking a time from ones just offered is "book".
   "next_action": one of ["answer_question","show_products","handle_objection",
                          "qualify","confirm_order","book_call","greet"],
   "meaning": their latest message as one clear, complete question or sentence in
@@ -409,10 +420,32 @@ def _coerce(raw: dict[str, Any], message: str, current_stage: str) -> dict[str, 
         ),
         "next_action": next_action,
         "wants_person": raw.get("wants_person") is True,
+        "appointment": _appointment(raw.get("appointment")),
         # A reading used to search the business's documents and to help the
         # reply make sense of a garbled message. Never quoted, never a fact.
         "meaning": _meaning(raw.get("meaning"), message),
         "source": "llm",
+    }
+
+
+APPOINTMENT_ACTIONS = ("book", "move", "cancel", "none")
+
+
+def _appointment(raw) -> dict | None:
+    """The model's reading of what they want done about an appointment, or None.
+
+    None whenever it is not a clean answer, so the booking rules decide
+    instead - never a guess filled in here.
+    """
+    if not isinstance(raw, dict):
+        return None
+    action = str(raw.get("action") or "").strip().lower()
+    if action not in APPOINTMENT_ACTIONS:
+        return None
+    return {
+        "action": action,
+        "not_yet": raw.get("not_yet") is True,
+        "asks_about_existing": raw.get("asks_about_existing") is True,
     }
 
 
